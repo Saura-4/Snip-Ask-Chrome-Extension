@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 280px; background-color: #1e1e1e; color: #cccccc; font-family: 'Segoe UI', sans-serif; padding: 15px; margin: 0; text-align: center; }
+    h3 { margin: 0 0 15px 0; color: #ffffff; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    input, select, textarea { width: 100%; padding: 10px; background: #252526; border: 1px solid #3c3c3c; color: white; border-radius: 4px; outline: none; margin-bottom: 10px; font-family: 'Segoe UI', sans-serif; box-sizing: border-box; }
+    input:focus, select:focus, textarea:focus { border-color: #f55036; }
+    #customPromptContainer { display: none; }
+    textarea { resize: vertical; min-height: 60px; font-size: 12px; }
+    button { width: 100%; padding: 10px; background: #f55036; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    button:hover { background: #ff6b52; }
+    label { font-size: 11px; color: #888; display: block; text-align: left; margin-bottom: 4px; }
+    /* NEW STYLE for confirmation message */
+    #messageContainer { background: #185a18; color: #fff; padding: 10px; border-radius: 4px; margin-bottom: 15px; display: none; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h3>⚡ Groq Snip Tool</h3>
+  
+  <div id="messageContainer">Key and Settings Purged Successfully!</div>
+
+  <input type="password" id="apiKey" placeholder="Paste Groq API Key (gsk_...)...">
+  
+  <label>AI Model:</label>
+  <select id="modelSelect">
+    <option value="meta-llama/llama-4-scout-17b-16e-instruct" selected>🦅 Llama 4 Scout (1k req/day)</option>
+  </select>
+
+  <label>Interaction Mode:</label>
+  <select id="modeSelect">
+    <option value="short">⚡ Short Answer</option>
+    <option value="detailed">📚 Detailed Explanation</option>
+    <option value="code">💻 Code Debugger</option>
+    <option value="custom">✍️ Custom Prompt...</option>
+  </select>
+
+  <div id="customPromptContainer">
+    <textarea id="customPromptText" placeholder="E.g., Translate this to Spanish..."></textarea>
+  </div>
+  
+  <button id="snipBtn">✂️ Snip Screen</button>
+
+  <div style="margin-top: 15px; border-top: 1px solid #333; padding-top: 10px; display: flex; justify-content: space-between; align-items: center;">
+    <span style="font-size: 10px; color: #666;">🔒 Images processed locally</span>
+    <button id="resetBtn" style="width: auto; padding: 4px 8px; background: #333; font-size: 10px; color: #aaa;">Reset Keys</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
