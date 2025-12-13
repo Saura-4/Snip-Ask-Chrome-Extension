@@ -2,29 +2,42 @@
   "manifest_version": 3,
   "name": "Groq Snip & Ask",
   "version": "3.1",
-  "description": "Snip any part of your screen and ask AI (Llama 3) to explain, solve, or debug it.",
-  "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["https://api.groq.com/*"],
+  "description": "Snip any part of your screen and ask AI (Llama 4 Scout) to explain, solve, or debug it.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://api.groq.com/*"
+  ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background/background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
-    "matches": ["<all_urls>"],
-    "js": ["utils.js", "content.js"] 
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "lib/tesseract.min.js",
+        "src/content/utils.js",
+        "src/content/content.js"
+      ]
     }
   ],
   "action": {
-    "default_popup": "popup.html",
+    "default_popup": "src/popup/popup.html",
     "default_icon": {
-      "16": "icon.png",
-      "48": "icon.png",
-      "128": "icon.png"
+      "16": "assets/icons/icon.png",
+      "48": "assets/icons/icon.png",
+      "128": "assets/icons/icon.png"
     }
   },
   "icons": {
-    "16": "icon.png",
-    "48": "icon.png",
-    "128": "icon.png"
+    "16": "assets/icons/icon.png",
+    "48": "assets/icons/icon.png",
+    "128": "assets/icons/icon.png"
   }
 }
