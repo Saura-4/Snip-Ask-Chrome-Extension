@@ -6,12 +6,12 @@ let isSelecting = false;
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "START_SNIP") {
     document.removeEventListener("mousedown", onMouseDown); // Cleanup first
-    
+
     document.body.style.cursor = "crosshair";
     isSelecting = true;
     createSelectionBox();
     document.addEventListener("mousedown", onMouseDown);
-    
+
     sendResponse({ status: "Snip started" });
   }
   return true; 
@@ -34,7 +34,7 @@ function onMouseDown(e) {
   e.preventDefault();
   startX = e.clientX;
   startY = e.clientY;
-  
+
   selectionBox.style.left = startX + "px";
   selectionBox.style.top = startY + "px";
   selectionBox.style.width = "0px";
@@ -48,7 +48,7 @@ function onMouseDown(e) {
 function onMouseMove(e) {
   const currentX = e.clientX;
   const currentY = e.clientY;
-  
+
   const width = Math.abs(currentX - startX);
   const height = Math.abs(currentY - startY);
   const left = Math.min(currentX, startX);
@@ -63,17 +63,16 @@ function onMouseMove(e) {
 async function onMouseUp(e) {
   isSelecting = false;
   document.body.style.cursor = "default";
-  
+
   document.removeEventListener("mousemove", onMouseMove);
   document.removeEventListener("mouseup", onMouseUp);
   document.removeEventListener("mousedown", onMouseDown);
 
   const rect = selectionBox.getBoundingClientRect();
   selectionBox.remove();
-  
+
   if (rect.width < 10 || rect.height < 10) return;
 
-  showLoadingCursor();
 
   chrome.runtime.sendMessage({ action: "CAPTURE_VISIBLE_TAB" }, (response) => {
     if (!response || !response.dataUrl) {
@@ -81,35 +80,103 @@ async function onMouseUp(e) {
       hideLoadingCursor();
       return;
     }
+    showLoadingCursor();
 
-    cropImage(response.dataUrl, rect, (croppedBase64) => {
+    // New hybrid pipeline: OCR first, fallback to image
+    cropImage(response.dataUrl, rect, async (croppedBase64) => {
       // Get GROQ Key
-      chrome.storage.local.get(['groqKey'], (result) => {
+      chrome.storage.local.get(['groqKey'], async (result) => {
         if (!result.groqKey) {
           alert("Please set Groq API Key in extension popup!");
           hideLoadingCursor();
           return;
         }
+        try {
+          // Run Tesseract OCR on the cropped image
+          const ocrRes = await runTesseractOCR(croppedBase64);
+          console.log('OCR result:', ocrRes);
 
-        // Send ASK_GROQ message
-        chrome.runtime.sendMessage({
-          action: "ASK_GROQ",
-          apiKey: result.groqKey,
-          base64Image: croppedBase64
-        }, (apiResponse) => {
-          hideLoadingCursor();
-          if (apiResponse && apiResponse.success) {
-            createFloatingWindow(apiResponse.answer);
+          // threshold for confidence (tweakable)
+          const CONF_THRESHOLD = 50;
+
+          if (ocrRes.text && (ocrRes.confidence >= CONF_THRESHOLD|| ocrRes.text.length > 12)) {
+            // send the OCR text to the model (better token efficiency)
+            chrome.runtime.sendMessage({
+              action: "ASK_GROQ_TEXT",
+              apiKey: result.groqKey,
+              text: ocrRes.text,
+              ocrConfidence: ocrRes.confidence
+            }, (apiResponse) => {
+              hideLoadingCursor();
+              if (apiResponse && apiResponse.success) {
+                createFloatingWindow(apiResponse.answer);
+              } else {
+                alert("Error: " + (apiResponse ? apiResponse.error : "Unknown error"));
+              }
+            });
           } else {
-            alert("Error: " + (apiResponse ? apiResponse.error : "Unknown error"));
+            // OCR not confident enough — fallback to original image send
+            chrome.runtime.sendMessage({
+              action: "ASK_GROQ",
+              apiKey: result.groqKey,
+              base64Image: croppedBase64
+            }, (apiResponse) => {
+              hideLoadingCursor();
+              if (apiResponse && apiResponse.success) {
+                createFloatingWindow(apiResponse.answer);
+              } else {
+                alert("Error: " + (apiResponse ? apiResponse.error : "Unknown error"));
+              }
+            });
           }
-        });
+
+        } catch (err) {
+          console.error('Error in OCR pipeline:', err);
+          hideLoadingCursor();
+          alert('OCR failed; sending image to model as fallback.');
+          chrome.runtime.sendMessage({
+            action: "ASK_GROQ",
+            apiKey: result.groqKey,
+            base64Image: croppedBase64
+          }, (apiResponse) => {
+            if (apiResponse && apiResponse.success) {
+              createFloatingWindow(apiResponse.answer);
+            } else {
+              alert("Error: " + (apiResponse ? apiResponse.error : "Unknown error"));
+            }
+          });
+        }
       });
     });
   });
 }
+// Remove unnecessary "Corrected text:" line when it is trivial
+function sanitizeModelText(rawText) {
+  if (!rawText) return rawText;
+
+  const lines = rawText.split('\n');
+
+  // If the response starts with "Corrected text: ..."
+  if (lines[0].match(/^\s*Corrected text\s*:/i)) {
+
+    // Extract what follows after "Corrected text:"
+    const corrected = lines[0].replace(/^\s*Corrected text\s*:\s*/i, '').trim();
+
+    // If the corrected line is short, it’s trivial — hide it entirely
+    if (corrected.length < 60) {
+      return lines.slice(1).join('\n').trim();
+    }
+
+    // If meaningful, keep it but limit overly long text
+    const trimmed = corrected.length > 200 ? corrected.slice(0, 200) + '…' : corrected;
+    return ("Corrected text: " + trimmed + "\n" + lines.slice(1).join('\n')).trim();
+  }
+
+  return rawText;
+}
 
 function createFloatingWindow(text) {
+  
   chrome.storage.local.get(['winState'], (res) => {
     const state = res.winState || { top: 50, left: 50, width: 500, height: 400 };
 
@@ -141,14 +208,16 @@ function createFloatingWindow(text) {
     const body = document.createElement("div");
     body.id = "groqContentBody";
     body.style.cssText = `padding: 15px; overflow-y: auto; flex-grow: 1; line-height: 1.6;`;
-    body.innerHTML = parseMarkdown(text);
+    const cleaned = sanitizeModelText(text);
+    body.innerHTML = parseMarkdown(cleaned);
+    
     container.appendChild(body);
 
     // --- NEW: Add Copy Buttons to Code Blocks ---
     const codeBlocks = body.querySelectorAll("pre");
     codeBlocks.forEach(pre => {
       pre.style.position = "relative"; // Needed to position the button
-      
+
       const btn = document.createElement("button");
       btn.innerText = "Copy";
       btn.style.cssText = `
@@ -157,7 +226,7 @@ function createFloatingWindow(text) {
         border-radius: 3px; font-size: 10px; padding: 3px 8px;
         cursor: pointer; opacity: 0.9;
       `;
-      
+
       btn.onclick = () => {
         const codeText = pre.querySelector("code").innerText;
         navigator.clipboard.writeText(codeText).then(() => {
@@ -165,7 +234,7 @@ function createFloatingWindow(text) {
           setTimeout(() => btn.innerText = "Copy", 2000);
         });
       };
-      
+
       pre.appendChild(btn);
     });
 
