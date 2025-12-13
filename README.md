@@ -1,60 +1,119 @@
-# ⚡ Groq Snip & Ask: Multimodal AI Browser Tool
+# ⚡ Snip & Ask (v3.1)
 
-Groq Snip & Ask is a powerful Chrome Extension that allows you to instantly snip any area of your screen and get an AI response using the high-speed Groq API. It is designed for maximum speed and contextual solving of code, diagrams, and quizzes.
+> **A high-performance, modular Chrome Extension that brings multimodal AI analysis to any webpage.**
+> *Now featuring a scalable Service-Oriented Architecture.*
 
+**Snip & Ask** allows users to instantly capture any region of their screen and receive an AI-powered analysis using the Groq API. It supports standard Llama models as well as the new **Reasoning Models** (OpenAI GPT-OSS).
 
+---
 
-## 🎯 The Origin Story: Why Groq Snip & Ask?
+## 🎯 The Origin Story: Why Snip & Ask?
 
 As a developer and student, I was frustrated by the slow, constant workflow interruption required to get AI feedback: capturing a screenshot, switching tabs, uploading the image to Gemini or ChatGPT, and then asking the question.
 
-I built **Groq Snip & Ask** to eliminate this friction. The core idea was to enable instant, contextual analysis directly on the screen, without saving files or switching apps. Furthermore, since existing extensions offering this crucial productivity gain were paid, I decided to create a **superior, free, and open-source solution** for the community.
+I built **Snip & Ask** to eliminate this friction. The core idea was to enable instant, contextual analysis directly on the screen, without saving files or switching apps. Furthermore, since existing extensions offering this crucial productivity gain were paid, I decided to create a **superior, free, and open-source solution** for the community.
 
-## 💡 Features
+---
 
-* **Instant Visual Snips:** Select a specific region of your browser window for fast analysis.
-* **Groq API Integration (BYOK):** Uses your own Groq API Key for fast, secure processing with multimodal models.
-* **Multiple Modes:** Choose between **Short Answer** (for quizzes), **Detailed Explanation**, **Code Debugger**, or a **Custom Prompt**.
-* **Enhanced UX:** One-click copy buttons for easy transfer of code and text.
-* **Privacy-Focused:** The "Reset Keys" function allows you to instantly purge your stored API key and settings.
+## 🚀 Key Features
+
+* **Instant Visual Snips:** Draw a box anywhere on your screen for immediate analysis.
+* **Hybrid OCR Engine:** Automatically detects text density. Uses **Tesseract.js (v6)** for text-heavy snips and **Multimodal Vision** for diagrams/images.
+* **Multiple Intelligence Modes:**
+    * **⚡ Short Answer:** Instant, direct answers (great for quizzes).
+    * **🧠 Detailed Explanation:** Use complex logic and step-by-step thinking.
+    * **💻 Code Debugger:** Specialized prompts to fix code and explain bugs.
+    * **✍️ Custom:** Define your own prompt behavior.
+* **Privacy First:** Your API Key is stored locally (`chrome.storage`). No intermediate servers.
+* **Zero-Cost:** Designed to work with the free tier of the Groq API.
+
+---
 
 ## 🛠️ Installation
 
-### 1. Get Your Groq API Key
-1.  Sign up or log in to the [Groq Console](https://console.groq.com/).
-2.  Generate a new API Key (it will start with `gsk_...`).
+### 1. Get Your API Key
+1.  Sign up at [Groq Console](https://console.groq.com/).
+2.  Generate a new API Key (starts with `gsk_...`).
 
-### 2. Install the Extension
-1.  Download or clone this repository to your local machine.
+### 2. Load the Extension
+1.  Clone this repository:
+    ```bash
+    git clone [https://github.com/Saura-4/Snip-Ask-Chrome-Extension.git](https://github.com/Saura-4/Snip-Ask-Chrome-Extension.git)
+    ```
 2.  Open Chrome and navigate to `chrome://extensions`.
-3.  Enable **Developer Mode** using the toggle in the top right corner.
+3.  Enable **Developer Mode** (top right).
 4.  Click **Load unpacked**.
-5.  Select the entire folder containing your `manifest.json` file.
+5.  Select the **root folder** of this project (the folder containing `manifest.json`).
 
 ### 3. Setup
-1.  Click the extension icon.
-2.  Paste your `gsk_...` API Key into the input field.
+1.  Pin the extension icon to your toolbar.
+2.  Click the icon and paste your API Key.
+3.  Select your preferred model (e.g., **OpenAI GPT-OSS 120B**).
 
-## 💻 Development & Structure
+---
 
-This project follows Manifest V3 standards and uses a modular file structure:
+## 🏗️ Architecture & Engineering
 
-* `content.js`: Manages the core snipping UI logic and answer display.
-* `utils.js`: Contains reusable helper functions like `cropImage` and `parseMarkdown`.
-* `background.js`: Handles API calls, prompt formatting, and communication with Groq.
+Unlike typical "script-kiddie" extensions, **Snip & Ask v3.1** is built on a scalable **Service-Oriented Architecture** using the **Factory Design Pattern**. This ensures the codebase is decoupled, testable, and future-proof.
 
-## 🔒 Privacy and Security
+### The "Service" Design
+Instead of hardcoding API calls into the background script, the logic is encapsulated in an abstract service layer.
 
-* Your **Groq API Key** is stored locally (`chrome.storage.local`) and is never transmitted to any third-party server besides the official Groq API endpoint.
-* **Image Data** is captured, cropped client-side, and sent directly to Groq. No intermediate server stores your screen captures.
+* **`AbstractAIService`**: Defines the contract (`askImage`, `askText`) that all AI providers must adhere to.
+* **`GroqService`**: Concrete implementation that handles Groq's specific headers, JSON structure, and "Thinking" tag parsing.
+* **`Factory` (`getAIService`)**: A central switchboard that instantiates the correct service class based on the user's selected model.
+
+### Scalability
+This architecture allows for:
+* **Hot-Swapping APIs:** Adding `GeminiService` or `OpenAIService` requires **zero changes** to the core application logic.
+* **Unified Error Handling:** All API errors are caught and normalized before reaching the UI.
+* **Clean Code:** Follows **Allman Style** formatting for maximum readability.
+
+---
+
+## 📂 Project Structure
+
+    snip-and-ask-extension/
+    │
+    ├── manifest.json              # Extension Configuration (Manifest V3)
+    ├── lib/                       # Third-party dependencies (Tesseract.js)
+    ├── assets/                    # Static assets (Icons)
+    │
+    └── src/
+        ├── background/
+        │   ├── background.js      # The "Traffic Controller" (Event Bus)
+        │   └── ai-service.js      # The "Brain" (Factory & Service Classes)
+        │
+        ├── content/
+        │   ├── content.js         # Snipping UI & DOM Overlay logic
+        │   └── utils.js           # Image processing & Math helpers
+        │
+        └── popup/
+            ├── popup.html         # Settings UI
+            └── popup.js           # Popup Logic
+
+---
+
+## 🗺️ Roadmap
+
+* **v3.1 (Current):** Modular Refactor, Support for OpenAI OSS Reasoning models.
+* **v3.2 (Planned):**
+    * **Contextual Chat:** Ability to reply to the AI's answer within the popup.
+    * **History Sync:** Local storage of past snips and solutions.
+* **v4.0 (Future):**
+    * **Electron Port:** Converting the modular `ai-service.js` core into a native Desktop Application for Windows/Mac.
+
+---
+
+## 🧩 Credits & Acknowledgments
+
+* **OCR Engine:** Powered by [Tesseract.js](https://github.com/naptha/tesseract.js) (Apache 2.0 License).
+* **LLM Provider:** Powered by [Groq Cloud](https://groq.com/).
+
+---
 
 ## 📜 License
 
-This project is released under the **MIT License**.
+This project is open-source and available under the **MIT License**.
 
-**Developed and Maintained by Saurav Chourasia**
-
-
-
-
-
+**Developed by Saurav Chourasia**
