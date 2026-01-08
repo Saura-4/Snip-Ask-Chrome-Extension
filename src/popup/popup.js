@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', () =>
     const customPromptContainer = document.getElementById('customPromptContainer');
     const customPromptText = document.getElementById('customPromptText');
     const snipBtn = document.getElementById('snipBtn');
-    const resetBtn = document.getElementById('resetBtn'); // Select the new reset button
+    const resetBtn = document.getElementById('resetBtn'); 
 
     // 1. Load Saved Settings
     chrome.storage.local.get(['groqKey', 'interactionMode', 'customPrompt', 'selectedModel'], (result) => 
@@ -19,11 +19,22 @@ document.addEventListener('DOMContentLoaded', () =>
         toggleCustomBox(result.interactionMode);
       }
       if (result.customPrompt) customPromptText.value = result.customPrompt;
-      if (result.selectedModel) modelSelect.value = result.selectedModel;
+
+      // --- UPDATED LOGIC HERE ---
+      if (result.selectedModel) {
+          modelSelect.value = result.selectedModel;
+      } else {
+          // Critical: If no model is saved (first run), save the default one immediately.
+          // This ensures content.js always knows what model is selected.
+          chrome.storage.local.set({ selectedModel: modelSelect.value });
+      }
+      // --------------------------
     });
       
     // 2. Save Settings
     apiKeyInput.addEventListener('change', () => chrome.storage.local.set({ groqKey: apiKeyInput.value.trim() }));
+    
+    // This line you already had is correct:
     modelSelect.addEventListener('change', () => chrome.storage.local.set({ selectedModel: modelSelect.value }));
     
     modeSelect.addEventListener('change', () => 
@@ -56,37 +67,29 @@ document.addEventListener('DOMContentLoaded', () =>
       });
     });
 
-  // 4. Reset / Logout (Cleaned up to prevent dialog conflicts)
+  // 4. Reset / Logout
     const messageContainer = document.getElementById('messageContainer');
     if (resetBtn) {
       resetBtn.addEventListener('click', () =>
       {
-        // 1. Ask User (Confirm is the only dialog we will use)
         if (confirm("Are you sure? This will remove your API Key and all settings."))
         {
-          
-          // Disable buttons and change text
           resetBtn.disabled = true; 
           resetBtn.innerText = "Purging...";
           snipBtn.disabled = true;
-          // 2. Clear Storage
+          
           chrome.storage.local.clear(() => 
           {
-            
-            // 3. Update UI
             apiKeyInput.value = "";
             customPromptText.value = "";
-            messageContainer.style.display = 'block';
+            if(messageContainer) messageContainer.style.display = 'block'; // Added safety check
             
-            // 4. Close the popup after a short delay for user confirmation
             setTimeout(() => 
             {
               window.close(); 
-            }, 1500); // 1.5 seconds delay
+            }, 1500); 
           });
         }
-        // If the user clicks 'No', the function simply returns, leaving the popup open 
-        // and the key intact, fulfilling your requirement.
       });
     }
 });

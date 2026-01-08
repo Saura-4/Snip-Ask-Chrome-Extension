@@ -3,31 +3,49 @@
   "name": "Groq Snip & Ask",
   "version": "3.1",
   "description": "Snip any part of your screen and ask AI (Llama 4 Scout) to explain, solve, or debug it.",
-  "permissions": [
+  "permissions": 
+  [
     "activeTab",
     "scripting",
     "storage"
   ],
-  "host_permissions": [
+  "host_permissions": 
+  [
     "https://api.groq.com/*"
   ],
-  "background": {
+  "background": 
+  {
     "service_worker": "src/background/background.js",
     "type": "module"
   },
-  "content_scripts": [
+  "content_scripts": 
+  [
     {
       "matches": [
         "<all_urls>"
       ],
       "js": [
-        "lib/tesseract.min.js",
         "src/content/utils.js",
         "src/content/content.js"
       ]
     }
   ],
-  "action": {
+
+  "web_accessible_resources": [
+    {
+      "resources": [
+      "lib/tesseract.min.js",
+      "lib/worker.min.js",
+      "lib/tesseract-core.wasm.js",
+      "lib/tesseract-core.wasm",
+      "lib/eng.traineddata.gz"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
+
+  "action":
+  {
     "default_popup": "src/popup/popup.html",
     "default_icon": {
       "16": "assets/icons/icon.png",
@@ -35,7 +53,8 @@
       "128": "assets/icons/icon.png"
     }
   },
-  "icons": {
+  "icons":
+  {
     "16": "assets/icons/icon.png",
     "48": "assets/icons/icon.png",
     "128": "assets/icons/icon.png"

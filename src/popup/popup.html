@@ -1,58 +1,154 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Groq Snip & Ask</title>
   <style>
-    body { width: 280px; background-color: #1e1e1e; color: #cccccc; font-family: 'Segoe UI', sans-serif; padding: 15px; margin: 0; text-align: center; }
-    h3 { margin: 0 0 15px 0; color: #ffffff; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; }
-    input, select, textarea { width: 100%; padding: 10px; background: #252526; border: 1px solid #3c3c3c; color: white; border-radius: 4px; outline: none; margin-bottom: 10px; font-family: 'Segoe UI', sans-serif; box-sizing: border-box; }
-    input:focus, select:focus, textarea:focus { border-color: #f55036; }
-    #customPromptContainer { display: none; }
-    textarea { resize: vertical; min-height: 60px; font-size: 12px; }
-    button { width: 100%; padding: 10px; background: #f55036; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px; }
-    button:hover { background: #ff6b52; }
-    label { font-size: 11px; color: #888; display: block; text-align: left; margin-bottom: 4px; }
-    /* NEW STYLE for confirmation message */
-    #messageContainer { background: #185a18; color: #fff; padding: 10px; border-radius: 4px; margin-bottom: 15px; display: none; font-weight: bold; }
+    body {
+      width: 320px;
+      padding: 15px;
+      background-color: #1e1e1e;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      font-size: 14px;
+    }
+
+    h2 {
+      margin-top: 0;
+      color: #f55036; /* Groq Orange */
+      font-size: 18px;
+      text-align: center;
+      margin-bottom: 15px;
+      border-bottom: 1px solid #333;
+      padding-bottom: 10px;
+    }
+
+    label {
+      display: block;
+      margin-top: 10px;
+      margin-bottom: 5px;
+      font-weight: 600;
+      color: #ccc;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 5px;
+      background-color: #2d2d2d;
+      border: 1px solid #454545;
+      color: #fff;
+      border-radius: 4px;
+      box-sizing: border-box; /* Fixes padding issues */
+    }
+
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: #f55036;
+    }
+
+    /* Model Group Headers */
+    optgroup {
+      background-color: #1e1e1e;
+      color: #f55036;
+      font-style: normal;
+      font-weight: bold;
+    }
+    option {
+      background-color: #2d2d2d;
+      color: #fff;
+      padding: 5px;
+    }
+
+    button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 15px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: background 0.2s;
+    }
+
+    #snipBtn {
+      background-color: #f55036;
+      color: white;
+    }
+    #snipBtn:hover {
+      background-color: #d43d25;
+    }
+
+    #resetBtn {
+      background-color: transparent;
+      border: 1px solid #454545;
+      color: #888;
+      margin-top: 10px;
+      font-size: 11px;
+      padding: 6px;
+    }
+    #resetBtn:hover {
+      background-color: #2d2d2d;
+      color: #bbb;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    /* Small footer text */
+    .footer {
+      text-align: center;
+      margin-top: 15px;
+      font-size: 10px;
+      color: #666;
+    }
   </style>
 </head>
 <body>
-  <h3>⚡ Groq Snip Tool</h3>
-  
-  <div id="messageContainer">Key and Settings Purged Successfully!</div>
 
-  <input type="password" id="apiKey" placeholder="Paste Groq API Key (gsk_...)...">
-  
-  <label>AI Model:</label>
+  <h2>⚡ Snip & Ask</h2>
+
+  <div id="messageContainer" class="hidden" style="color: #4caf50; text-align: center; margin-bottom: 10px;">
+    Settings cleared!
+  </div>
+
+  <label for="apiKey">Groq API Key</label>
+  <input type="password" id="apiKey" placeholder="gsk_..." />
+
+  <label for="modelSelect">AI Model</label>
   <select id="modelSelect">
     
-    <option value="openai/gpt-oss-120b" selected>🧠 OpenAI GPT-OSS 120B (Smartest)</option>
-    <option value="openai/gpt-oss-20b">⚡ OpenAI GPT-OSS 20B (Fast & Smart)</option>
-  
-    <option value="meta-llama/llama-3.3-70b-versatile">🦙 Llama 3.3 70B (Balanced)</option>
-    <option value="meta-llama/llama-3.1-8b-instant">🏎️ Llama 3.1 8B (Super Fast)</option>
-    <option value="meta-llama/llama-4-scout-17b-16e-instruct" selected>🦅 Llama 4 Scout (1k req/day)</option>
-    <option value="meta-llama/llama-3.2-11b-vision-preview">👁️ Llama 3.2 11B Vision</option>
+    <optgroup label="👁️ Vision (Llama 4)">
+      <option value="meta-llama/llama-4-maverick-17b-128e-instruct">Llama 4 Maverick (Reasoning)</option>
+      <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout (Context)</option>
+    </optgroup>
+
+    <optgroup label="📄 Text & Logic">
+      <option value="llama-3.3-70b-versatile">Llama 3.3 (70B Versatile)</option>
+      <option value="openai/gpt-oss-120b">GPT-OSS (120B Reasoning)</option>
+      <option value="llama-3.1-8b-instant">Llama 3.1 (8B Instant)</option>
+    </optgroup>
   </select>
 
-  <label>Interaction Mode:</label>
+  <label for="modeSelect">Interaction Mode</label>
   <select id="modeSelect">
-    <option value="short">⚡ Short Answer</option>
-    <option value="detailed">📚 Detailed Explanation</option>
+    <option value="short">⚡ Short Answer (Quiz Mode)</option>
+    <option value="detailed">🧠 Detailed Explanation</option>
     <option value="code">💻 Code Debugger</option>
-    <option value="custom">✍️ Custom Prompt...</option>
+    <option value="custom">✍️ Custom Prompt</option>
   </select>
 
-  <div id="customPromptContainer">
-    <textarea id="customPromptText" placeholder="E.g., Translate this to Spanish..."></textarea>
+  <div id="customPromptContainer" class="hidden">
+    <label for="customPromptText">Your System Instruction:</label>
+    <textarea id="customPromptText" rows="3" placeholder="Ex: You are a cynical pirate..."></textarea>
   </div>
-  
-  <button id="snipBtn">✂️ Snip Screen</button>
 
-  <div style="margin-top: 15px; border-top: 1px solid #333; padding-top: 10px; display: flex; justify-content: space-between; align-items: center;">
-    <span style="font-size: 10px; color: #666;">🔒 Images processed locally</span>
-    <button id="resetBtn" style="width: auto; padding: 4px 8px; background: #333; font-size: 10px; color: #aaa;">Reset Keys</button>
-  </div>
+  <button id="snipBtn">Snip Screen</button>
+  <button id="resetBtn">Reset / Logout</button>
+
+  <div class="footer">v3.1 • Powered by Groq</div>
 
   <script src="popup.js"></script>
 </body>
