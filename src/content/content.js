@@ -1,6 +1,6 @@
 // src/content/content.js
 
-let startX, startY, selectionBox;
+let startX, startY, selectionBox, glassPane;
 let isSelecting = false;
 
 // Helper to identify Vision Models
@@ -12,64 +12,117 @@ function isVisionModel(modelName) {
 // 1. Message Listener
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "START_SNIP") {
-        document.removeEventListener("mousedown", onMouseDown);
-        document.body.style.cursor = "crosshair";
+        // Prevent multiple start clicks
+        if (isSelecting) return true;
+        
         isSelecting = true;
+        
+        // A. Create the "Glass Pane" (Crucial for PDFs)
+        createGlassPane();
+        
+        // B. Create the Selection Box (Hidden initially)
         createSelectionBox();
-        document.addEventListener("mousedown", onMouseDown);
-        sendResponse({
-            status: "Snip started"
-        });
+        
+        sendResponse({ status: "Snip started" });
     }
     return true;
 });
 
 // 2. Selection UI Logic
+function createGlassPane() {
+    // This invisible layer sits ON TOP of the PDF to capture mouse clicks
+    glassPane = document.createElement("div");
+    
+    // 1. Make it focusable so we can steal keyboard/mouse focus from the PDF
+    glassPane.setAttribute("tabindex", "-1"); 
+    
+    glassPane.style.cssText = `
+        position: fixed; 
+        top: 0; left: 0; 
+        width: 100vw; height: 100vh; 
+        z-index: 2147483647; 
+        cursor: crosshair; 
+        
+        /* 2. Force a tiny background color. "Transparent" sometimes lets clicks fall through to PDFs. */
+        background: rgba(0,0,0,0.01); 
+        
+        /* 3. Force the browser to put this on a new GPU layer (fixes the "tab switch" lag) */
+        transform: translateZ(100px);
+        outline: none;
+    `;
+    
+    document.documentElement.appendChild(glassPane); // Append to root, not body, for better PDF compatibility
+    
+    // 4. Force Focus Immediately
+    glassPane.focus();
+    
+    // Attach events to the GLASS PANE
+    glassPane.addEventListener("mousedown", onMouseDown);
+}
+
 function createSelectionBox() {
     if (selectionBox) selectionBox.remove();
     selectionBox = document.createElement("div");
-    selectionBox.style.position = "fixed";
-    selectionBox.style.border = "2px dashed #f55036";
-    selectionBox.style.backgroundColor = "rgba(245, 80, 54, 0.2)";
-    selectionBox.style.zIndex = "2147483647";
-    selectionBox.style.pointerEvents = "none";
-    selectionBox.style.display = "none";
+    selectionBox.style.cssText = `
+        position: fixed; 
+        border: 2px dashed #f55036; 
+        background-color: rgba(245, 80, 54, 0.2); 
+        z-index: 2147483647; 
+        pointer-events: none; 
+        display: none;
+    `;
     document.body.appendChild(selectionBox);
 }
 
 function onMouseDown(e) {
     if (!isSelecting) return;
     e.preventDefault();
+    e.stopPropagation(); // Stop PDF viewer from reacting
+
     startX = e.clientX;
     startY = e.clientY;
+    
     selectionBox.style.left = startX + "px";
     selectionBox.style.top = startY + "px";
     selectionBox.style.width = "0px";
     selectionBox.style.height = "0px";
     selectionBox.style.display = "block";
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
+    
+    // Add move/up listeners to the glass pane to ensure we catch them
+    glassPane.addEventListener("mousemove", onMouseMove);
+    glassPane.addEventListener("mouseup", onMouseUp);
 }
 
 function onMouseMove(e) {
     const currentX = e.clientX;
     const currentY = e.clientY;
-    selectionBox.style.width = Math.abs(currentX - startX) + "px";
-    selectionBox.style.height = Math.abs(currentY - startY) + "px";
-    selectionBox.style.left = Math.min(currentX, startX) + "px";
-    selectionBox.style.top = Math.min(currentY, startY) + "px";
+    
+    const width = Math.abs(currentX - startX);
+    const height = Math.abs(currentY - startY);
+    const left = Math.min(currentX, startX);
+    const top = Math.min(currentY, startY);
+
+    selectionBox.style.width = width + "px";
+    selectionBox.style.height = height + "px";
+    selectionBox.style.left = left + "px";
+    selectionBox.style.top = top + "px";
 }
 
 // 3. The Core Logic (Snip Complete)
 async function onMouseUp(e) {
-    isSelecting = false;
-    document.body.style.cursor = "default";
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
-    document.removeEventListener("mousedown", onMouseDown);
-
+    // Cleanup Listeners
+    glassPane.removeEventListener("mousemove", onMouseMove);
+    glassPane.removeEventListener("mouseup", onMouseUp);
+    glassPane.removeEventListener("mousedown", onMouseDown);
+    
     const rect = selectionBox.getBoundingClientRect();
+    
+    // Cleanup DOM
     selectionBox.remove();
+    glassPane.remove(); // Remove the glass pane so you can click the PDF again
+    selectionBox = null;
+    glassPane = null;
+    isSelecting = false;
 
     if (rect.width < 10 || rect.height < 10) return;
 
@@ -85,7 +138,7 @@ async function onMouseUp(e) {
 
         if (typeof showLoadingCursor === 'function') showLoadingCursor();
 
-        // Crop the image (using utils.js helper if available, or we could move it here too)
+        // Crop the image
         cropImage(response.dataUrl, rect, async (croppedBase64) => {
 
             chrome.storage.local.get(['groqKey', 'selectedModel'], async (result) => {
@@ -108,6 +161,7 @@ async function onMouseUp(e) {
                     }, handleResponse);
                     return;
                 }
+
                 // === PATH B: TEXT MODEL (Engage OCR via Background) ===
                 console.log(`Text Model detected (${currentModel}). Engaging OCR via Background.`);
 
@@ -124,7 +178,6 @@ async function onMouseUp(e) {
 
                     if (ocrResponse.success && ocrResponse.text && ocrResponse.text.length > 3) {
                         console.log("OCR Success:", ocrResponse.text);
-                        // Success! Send text
                         chrome.runtime.sendMessage({
                             action: "ASK_GROQ_TEXT",
                             apiKey: result.groqKey,
@@ -133,11 +186,7 @@ async function onMouseUp(e) {
                             ocrConfidence: ocrResponse.confidence
                         }, handleResponse);
                     } else {
-                        // OCR Failed/Empty
                         console.warn("OCR Empty or Failed.");
-                        
-                        // CRITICAL FIX: Only fallback to image if the model SUPPORTS images.
-                        // Llama 3.3 (Text Model) CANNOT handle images, so we must stop here.
                         if (isVisionModel(currentModel)) {
                             chrome.runtime.sendMessage({
                                 action: "ASK_GROQ",
@@ -146,9 +195,8 @@ async function onMouseUp(e) {
                                 base64Image: croppedBase64
                             }, handleResponse);
                         } else {
-                             // It's a Text Model, and OCR failed. We cannot proceed.
-                            alert("⚠️ No text found in snippet.\n\nSince 'Llama 3' cannot see images, please try snipping clearer text or switch to 'Llama 4 (Vision)'.");
-                            if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
+                             alert("⚠️ No text found in snippet.\n\nSince 'Llama 3' cannot see images, please try snipping clearer text or switch to 'Llama 4 (Vision)'.");
+                             if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
                         }
                     }
                 });
@@ -257,10 +305,8 @@ function createFloatingWindow(text) {
         const cleaned = sanitizeModelText(finalAnswer);
 
         if (typeof parseMarkdown === 'function') {
-            // Create a temporary div to sanitize HTML if parseMarkdown returns raw HTML
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = parseMarkdown(cleaned);
-            // Then move children to body. (Ideally use a sanitizer library here)
             while (tempDiv.firstChild) body.appendChild(tempDiv.firstChild);
         } else {
             const p = document.createElement('p');
