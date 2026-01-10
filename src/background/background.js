@@ -13,36 +13,38 @@ function getStorage(keys) {
     });
 }
 
-// 2. Main Message Listener
+// --- OFFSCREEN DOCUMENT MANAGER (Robust Version) ---
+let creating; // A promise to prevent race conditions
 
+async function setupOffscreenDocument(path) {
+    // Check if ANY offscreen doc already exists (not just by specific URL)
+    const existingContexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT']
+    });
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    
-    // --- NEW: Tesseract Injector ---
-    if (request.action === "INJECT_TESSERACT") {
-        if (!sender.tab) {
-            sendResponse({ success: false, error: "No tab found" });
-            return;
-        }
+    if (existingContexts.length > 0) {
+        return; // Already exists, do nothing
+    }
 
-        chrome.scripting.executeScript({
-            target: { tabId: sender.tab.id },
-            files: ["lib/tesseract.min.js"] // Injects into Isolated World
-        })
-        .then(() => {
-            console.log("Tesseract injected into tab " + sender.tab.id);
-            sendResponse({ success: true });
-        })
-        .catch((err) => {
-            console.error("Injection failed:", err);
-            sendResponse({ success: false, error: err.message });
+    // Create it if not
+    if (creating) {
+        await creating;
+    } else {
+        creating = chrome.offscreen.createDocument({
+            url: path,
+            reasons: ['BLOBS'], 
+            justification: 'OCR processing for image to text conversion',
         });
         
-        return true; // Keep channel open
+        await creating;
+        creating = null;
     }
-    // -------------------------------
+}
 
-    // Screenshot Handler
+// 2. Main Message Listener
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+
+    // --- A. SCREENSHOT HANDLER ---
     if (request.action === "CAPTURE_VISIBLE_TAB") {
         chrome.tabs.captureVisibleTab(null, {
             format: "jpeg",
@@ -52,49 +54,65 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 dataUrl: dataUrl
             });
         });
-        return true; // Keep channel open for async response
+        return true; 
     }
 
-    // AI Request Handler (Delegates to AI Service)
+    // --- B. OCR HANDLER ---
+    if (request.action === "PERFORM_OCR") {
+        (async () => {
+            try {
+                // Robust setup
+                await setupOffscreenDocument('src/offscreen/offscreen.html');
+
+                // Send image to Offscreen
+                const response = await chrome.runtime.sendMessage({
+                    action: 'OCR_Request',
+                    base64Image: request.base64Image
+                });
+
+                sendResponse(response);
+            } catch (err) {
+                console.error("Offscreen OCR Error:", err);
+                sendResponse({
+                    success: false,
+                    error: err.message
+                });
+            }
+        })();
+        return true; 
+    }
+
+    // --- C. AI REQUEST HANDLER ---
     if (request.action === "ASK_GROQ" || request.action === "ASK_GROQ_TEXT") {
-        // Determine if this is a Text (OCR) request or an Image request
         const type = request.action === "ASK_GROQ_TEXT" ? 'text' : 'image';
         const content = type === 'text' ? request.text : request.base64Image;
         const ocrConfidence = request.ocrConfidence || null;
 
-        // Pass the explicit model (request.model) to the handler
         handleAIRequest(request.apiKey, content, type, request.model, sendResponse, ocrConfidence);
-        return true; // Keep channel open
+        return true; 
     }
 });
 
-// 3. The Core Logic (Delegation)
+
+// 3. The Core Logic
 async function handleAIRequest(apiKey, inputContent, type, explicitModel, sendResponse, ocrConfidence) {
     try {
-        // Fetch User Settings
         const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel']);
         const mode = storage.interactionMode || 'short';
-
-        // PRIORITIZE the model sent by content.js (explicitModel). 
-        // Fallback to storage, then to default.
+        
         const modelName = explicitModel || storage.selectedModel || "meta-llama/llama-4-scout-17b-16e-instruct";
 
-        // Factory call: Get the correct service for this model
         const aiService = getAIService(apiKey, modelName, mode, storage.customPrompt);
 
-        console.log(`[Background] Handling Request: Model=${modelName}, Mode=${mode}, Type=${type}`);
+        console.log(`[Background] Asking AI: Model=${modelName}, Mode=${mode}, Type=${type}`);
 
         let answer;
-
         if (type === 'image') {
-            // Ask the service to handle an image
             answer = await aiService.askImage(inputContent);
         } else {
-            // Ask the service to handle text
             answer = await aiService.askText(inputContent);
         }
 
-        // Send success back to content.js
         sendResponse({
             success: true,
             answer: answer,
@@ -104,8 +122,6 @@ async function handleAIRequest(apiKey, inputContent, type, explicitModel, sendRe
 
     } catch (error) {
         console.error("AI Service Error:", error);
-
-        // Send error back to content.js so it can alert the user
         sendResponse({
             success: false,
             error: error.message || String(error)
