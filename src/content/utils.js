@@ -75,7 +75,7 @@ function showLoadingCursor() {
   const el = document.createElement("div");
   el.id = "groq-loader";
   el.style.cssText = "position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); padding:15px 25px; background:rgba(0,0,0,0.8); color:white; border-radius:8px; z-index:2147483647; font-family:sans-serif; pointer-events: none;";
-  el.innerHTML = "<span>⚡ Groq is thinking...</span>";
+  el.innerHTML = "<span>⚡  thinking...</span>";
   document.body.appendChild(el);
 }
 

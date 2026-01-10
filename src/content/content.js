@@ -3,24 +3,26 @@
 let startX, startY, selectionBox, glassPane;
 let isSelecting = false;
 
-// Helper to identify Vision Models
+// Helper to identify Vision Models (Updated for Gemini/Gemma)
 function isVisionModel(modelName) {
     if (!modelName) return false;
-    return modelName.includes("llama-4") || modelName.includes("vision");
+    const lower = modelName.toLowerCase();
+    return lower.includes("llama-4") || 
+           lower.includes("vision") || 
+           lower.includes("gemini") || 
+           lower.includes("gemma");
 }
 
 // 1. Message Listener
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "START_SNIP") {
-        // Prevent multiple start clicks
         if (isSelecting) return true;
-        
         isSelecting = true;
         
-        // A. Create the "Glass Pane" (Crucial for PDFs)
+        // A. Create the "Glass Pane"
         createGlassPane();
         
-        // B. Create the Selection Box (Hidden initially)
+        // B. Create the Selection Box
         createSelectionBox();
         
         sendResponse({ status: "Snip started" });
@@ -30,10 +32,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // 2. Selection UI Logic
 function createGlassPane() {
-    // This invisible layer sits ON TOP of the PDF to capture mouse clicks
     glassPane = document.createElement("div");
-    
-    // 1. Make it focusable so we can steal keyboard/mouse focus from the PDF
     glassPane.setAttribute("tabindex", "-1"); 
     
     glassPane.style.cssText = `
@@ -42,21 +41,13 @@ function createGlassPane() {
         width: 100vw; height: 100vh; 
         z-index: 2147483647; 
         cursor: crosshair; 
-        
-        /* 2. Force a tiny background color. "Transparent" sometimes lets clicks fall through to PDFs. */
         background: rgba(0,0,0,0.01); 
-        
-        /* 3. Force the browser to put this on a new GPU layer (fixes the "tab switch" lag) */
         transform: translateZ(100px);
         outline: none;
     `;
     
-    document.documentElement.appendChild(glassPane); // Append to root, not body, for better PDF compatibility
-    
-    // 4. Force Focus Immediately
+    document.documentElement.appendChild(glassPane);
     glassPane.focus();
-    
-    // Attach events to the GLASS PANE
     glassPane.addEventListener("mousedown", onMouseDown);
 }
 
@@ -77,7 +68,7 @@ function createSelectionBox() {
 function onMouseDown(e) {
     if (!isSelecting) return;
     e.preventDefault();
-    e.stopPropagation(); // Stop PDF viewer from reacting
+    e.stopPropagation(); 
 
     startX = e.clientX;
     startY = e.clientY;
@@ -88,7 +79,6 @@ function onMouseDown(e) {
     selectionBox.style.height = "0px";
     selectionBox.style.display = "block";
     
-    // Add move/up listeners to the glass pane to ensure we catch them
     glassPane.addEventListener("mousemove", onMouseMove);
     glassPane.addEventListener("mouseup", onMouseUp);
 }
@@ -110,16 +100,14 @@ function onMouseMove(e) {
 
 // 3. The Core Logic (Snip Complete)
 async function onMouseUp(e) {
-    // Cleanup Listeners
     glassPane.removeEventListener("mousemove", onMouseMove);
     glassPane.removeEventListener("mouseup", onMouseUp);
     glassPane.removeEventListener("mousedown", onMouseDown);
     
     const rect = selectionBox.getBoundingClientRect();
     
-    // Cleanup DOM
     selectionBox.remove();
-    glassPane.remove(); // Remove the glass pane so you can click the PDF again
+    glassPane.remove(); 
     selectionBox = null;
     glassPane = null;
     isSelecting = false;
@@ -141,21 +129,27 @@ async function onMouseUp(e) {
         // Crop the image
         cropImage(response.dataUrl, rect, async (croppedBase64) => {
 
-            chrome.storage.local.get(['groqKey', 'selectedModel'], async (result) => {
-                if (!result.groqKey) {
-                    alert("Please set Groq API Key in extension popup!");
+            // === UPDATE: GET BOTH KEYS ===
+            chrome.storage.local.get(['groqKey', 'geminiKey', 'selectedModel'], async (result) => {
+                
+                const currentModel = result.selectedModel || "llama-3.3-70b-versatile";
+
+                // === UPDATE: DETERMINE ACTIVE KEY ===
+                const isGoogle = currentModel.includes('gemini') || currentModel.includes('gemma');
+                const activeKey = isGoogle ? result.geminiKey : result.groqKey;
+
+                if (!activeKey) {
+                    alert(`Please set your ${isGoogle ? 'Google' : 'Groq'} API Key in the extension popup!`);
                     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
                     return;
                 }
-
-                const currentModel = result.selectedModel || "llama-3.3-70b-versatile";
 
                 // === PATH A: VISION MODEL (Direct Image) ===
                 if (isVisionModel(currentModel)) {
                     console.log(`Vision Model detected (${currentModel}). Sending Image directly.`);
                     chrome.runtime.sendMessage({
                         action: "ASK_GROQ",
-                        apiKey: result.groqKey,
+                        apiKey: activeKey, // Pass correct key
                         model: currentModel,
                         base64Image: croppedBase64
                     }, handleResponse);
@@ -180,7 +174,7 @@ async function onMouseUp(e) {
                         console.log("OCR Success:", ocrResponse.text);
                         chrome.runtime.sendMessage({
                             action: "ASK_GROQ_TEXT",
-                            apiKey: result.groqKey,
+                            apiKey: activeKey, // Pass correct key
                             model: currentModel,
                             text: ocrResponse.text,
                             ocrConfidence: ocrResponse.confidence
@@ -190,12 +184,12 @@ async function onMouseUp(e) {
                         if (isVisionModel(currentModel)) {
                             chrome.runtime.sendMessage({
                                 action: "ASK_GROQ",
-                                apiKey: result.groqKey,
+                                apiKey: activeKey, // Pass correct key
                                 model: currentModel,
                                 base64Image: croppedBase64
                             }, handleResponse);
                         } else {
-                            alert("⚠️ No text found in snippet.\n\nSince 'Llama 3' cannot see images, please try snipping clearer text or switch to 'Llama 4 (Vision)'.");
+                            alert(`⚠️ No text found in snippet.\n\nSince '${currentModel}' cannot see images, please try snipping clearer text or switch to a Vision model (Llama 4, Gemini, or Gemma).`);
                             if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
                         }
                     }
@@ -205,35 +199,23 @@ async function onMouseUp(e) {
     });
 }
 
-// ... (Existing snip/OCR logic remains above) ...
-
-// ============================================================================
-// 4. RESPONSE HANDLER (Updated)
-// ============================================================================
+// 4. Response Handler
 function handleResponse(apiResponse) {
     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
     
     if (apiResponse && apiResponse.success) {
-        // Instantiate the new Chat UI
         const ui = new FloatingChatUI();
-        
-        // Add the Initial User Context (Image or Text)
         ui.addMessage('user', apiResponse.initialUserMessage); 
-        
-        // Add the AI Response
         ui.addMessage('assistant', apiResponse.answer);
     } else {
         alert("Error: " + (apiResponse ? apiResponse.error : "Unknown error"));
     }
 }
 
-// ============================================================================
-// 5. HELPER: Text Sanitizer (KEEP THIS!)
-// ============================================================================
+// 5. HELPER: Text Sanitizer
 function sanitizeModelText(rawText) {
     if (!rawText) return rawText;
     const lines = rawText.split('\n');
-    // Removes "Corrected text: ..." prefix common in some Llama models
     if (lines[0].match(/^\s*Corrected text\s*:/i)) {
         const corrected = lines[0].replace(/^\s*Corrected text\s*:\s*/i, '').trim();
         if (corrected.length < 60) {
@@ -244,14 +226,13 @@ function sanitizeModelText(rawText) {
     }
     return rawText;
 }
-// ============================================================================
+
 // 6. UI CLASS (Robust State Management)
-// ============================================================================
 class FloatingChatUI {
     constructor() {
         this.chatHistory = []; 
         this.createWindow();
-        this.loadState(); // This will now handle Position AND Size
+        this.loadState(); 
     }
 
     createWindow() {
@@ -262,7 +243,6 @@ class FloatingChatUI {
         this.shadow = this.host.attachShadow({ mode: 'closed' });
 
         this.container = document.createElement("div");
-        // Default styles (will be overridden by loadState)
         this.container.style.cssText = `
             position: fixed; 
             width: 450px; height: 500px;
@@ -276,10 +256,10 @@ class FloatingChatUI {
             max-width: 90vw; max-height: 90vh;
         `;
 
-        // 1. Header
+        // Header
         const header = document.createElement("div");
         header.innerHTML = `
-            <strong style="color: #f55036;">⚡ Groq Chat</strong>
+            <strong style="color: #f55036;">⚡ Groq/Gemini Chat</strong>
             <span id="closeBtn" style="cursor: pointer; color: #888; font-weight: bold; font-size:16px;">✖</span>
         `;
         header.style.cssText = `
@@ -289,7 +269,7 @@ class FloatingChatUI {
         `;
         this.container.appendChild(header);
 
-        // 2. Chat Body
+        // Chat Body
         this.chatBody = document.createElement("div");
         this.chatBody.style.cssText = `
             flex-grow: 1; overflow-y: auto; padding: 15px; 
@@ -298,7 +278,7 @@ class FloatingChatUI {
         `;
         this.container.appendChild(this.chatBody);
 
-        // 3. Input Area
+        // Input Area
         const inputArea = document.createElement("div");
         inputArea.style.cssText = `
             padding: 10px; border-top: 1px solid #454545; background: #252526;
@@ -343,16 +323,12 @@ class FloatingChatUI {
         // --- Event Listeners ---
         header.querySelector("#closeBtn").onclick = () => this.host.remove();
         
-        // Draggable Logic
         this.makeDraggable(header);
         
-        // Listener for RESIZING (Save state when mouse releases on container)
         this.container.addEventListener('mouseup', () => this.saveState());
     }
 
     addMessage(role, content) {
-        // ... (Keep your exact existing addMessage logic here) ...
-        // COPY PASTE THE addMessage FUNCTION FROM PREVIOUS STEPS HERE
         if (typeof content === 'string') {
              this.chatHistory.push({ role: role, content: content });
         } else {
@@ -374,7 +350,6 @@ class FloatingChatUI {
             if (typeof parseMarkdown === 'function') msgDiv.innerHTML = parseMarkdown(cleanText);
             else msgDiv.innerText = cleanText;
             
-            // Re-add copy buttons
             const codeBlocks = msgDiv.querySelectorAll("pre");
             codeBlocks.forEach(pre => {
                 pre.style.position = "relative";
@@ -393,8 +368,6 @@ class FloatingChatUI {
     }
 
     async handleSend() {
-        // ... (Keep your exact existing handleSend logic here) ...
-        // COPY PASTE THE handleSend FUNCTION FROM PREVIOUS STEPS HERE
         const text = this.input.value.trim();
         if (!text) return;
 
@@ -407,11 +380,20 @@ class FloatingChatUI {
         this.chatBody.appendChild(loadingDiv);
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
 
-        chrome.storage.local.get(['groqKey', 'selectedModel'], async (res) => {
+        // === UPDATE: GET BOTH KEYS FOR CHAT ===
+        chrome.storage.local.get(['groqKey', 'geminiKey', 'selectedModel'], async (res) => {
             try {
+                // Determine Active Key
+                const isGoogle = (res.selectedModel || '').includes('gemini') || (res.selectedModel || '').includes('gemma');
+                const activeKey = isGoogle ? res.geminiKey : res.groqKey;
+
                 const response = await chrome.runtime.sendMessage({
-                    action: "CONTINUE_CHAT", apiKey: res.groqKey, model: res.selectedModel, history: this.chatHistory
+                    action: "CONTINUE_CHAT", 
+                    apiKey: activeKey, // Pass correct key
+                    model: res.selectedModel, 
+                    history: this.chatHistory
                 });
+                
                 loadingDiv.remove();
                 if (response && response.success) { this.addMessage('assistant', response.answer); } 
                 else { this.addMessage('assistant', "⚠️ Error: " + (response.error || "Unknown error")); }
@@ -426,7 +408,6 @@ class FloatingChatUI {
         header.addEventListener('mousedown', (e) => {
             if (e.target.id === 'closeBtn') return; 
             isDragging = true;
-            // Calculate offset relative to the CONTAINER, not the screen
             const rect = this.container.getBoundingClientRect();
             offsetX = e.clientX - rect.left;
             offsetY = e.clientY - rect.top;
@@ -448,12 +429,8 @@ class FloatingChatUI {
         });
     }
 
-    // --- UPDATED SAVE/LOAD LOGIC ---
-
     saveState() {
-        // Get absolute position and size
         const rect = this.container.getBoundingClientRect();
-        
         chrome.storage.local.set({
             chatWinState: {
                 top: rect.top,
@@ -468,19 +445,15 @@ class FloatingChatUI {
         chrome.storage.local.get(['chatWinState'], (res) => {
             if (res.chatWinState) {
                 const s = res.chatWinState;
-                
-                // Bounds check (prevent window from being lost off-screen)
                 const top = Math.max(0, Math.min(s.top, window.innerHeight - 50));
                 const left = Math.max(0, Math.min(s.left, window.innerWidth - 50));
                 
                 this.container.style.top = top + "px";
                 this.container.style.left = left + "px";
                 
-                // Restore dimensions if they exist
                 if (s.width) this.container.style.width = s.width + "px";
                 if (s.height) this.container.style.height = s.height + "px";
             } else {
-                // Default center-ish
                 this.container.style.top = "50px";
                 this.container.style.left = "50px";
             }

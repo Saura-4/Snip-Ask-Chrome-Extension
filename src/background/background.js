@@ -13,20 +13,16 @@ function getStorage(keys) {
     });
 }
 
-// --- OFFSCREEN DOCUMENT MANAGER (Robust Version) ---
-let creating; // A promise to prevent race conditions
+// --- OFFSCREEN DOCUMENT MANAGER ---
+let creating; 
 
 async function setupOffscreenDocument(path) {
-    // Check if ANY offscreen doc already exists (not just by specific URL)
     const existingContexts = await chrome.runtime.getContexts({
         contextTypes: ['OFFSCREEN_DOCUMENT']
     });
 
-    if (existingContexts.length > 0) {
-        return; // Already exists, do nothing
-    }
+    if (existingContexts.length > 0) return;
 
-    // Create it if not
     if (creating) {
         await creating;
     } else {
@@ -35,7 +31,6 @@ async function setupOffscreenDocument(path) {
             reasons: ['BLOBS'], 
             justification: 'OCR processing for image to text conversion',
         });
-        
         await creating;
         creating = null;
     }
@@ -50,9 +45,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             format: "jpeg",
             quality: 80
         }, (dataUrl) => {
-            sendResponse({
-                dataUrl: dataUrl
-            });
+            sendResponse({ dataUrl: dataUrl });
         });
         return true; 
     }
@@ -61,50 +54,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "PERFORM_OCR") {
         (async () => {
             try {
-                // Robust setup
                 await setupOffscreenDocument('src/offscreen/offscreen.html');
-
-                // Send image to Offscreen
                 const response = await chrome.runtime.sendMessage({
                     action: 'OCR_Request',
                     base64Image: request.base64Image
                 });
-
                 sendResponse(response);
             } catch (err) {
                 console.error("Offscreen OCR Error:", err);
-                sendResponse({
-                    success: false,
-                    error: err.message
-                });
+                sendResponse({ success: false, error: err.message });
             }
         })();
         return true; 
     }
 
-    // --- C. AI REQUEST HANDLER ---
+    // --- C. AI REQUEST HANDLER (Initial Snip) ---
     if (request.action === "ASK_GROQ" || request.action === "ASK_GROQ_TEXT") {
         const type = request.action === "ASK_GROQ_TEXT" ? 'text' : 'image';
         const content = type === 'text' ? request.text : request.base64Image;
         const ocrConfidence = request.ocrConfidence || null;
 
+        // Note: content.js sends 'apiKey', but we double-check in handleAIRequest to ensure we use the right one
         handleAIRequest(request.apiKey, content, type, request.model, sendResponse, ocrConfidence);
         return true; 
     }
+
     // --- D. CHAT CONTINUATION (REPLY) ---
     if (request.action === "CONTINUE_CHAT") {
         (async () => {
             try {
-                const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel']);
-                const aiService = getAIService(request.apiKey, request.model, storage.interactionMode, storage.customPrompt);
+                // Load keys and settings to ensure we have the latest
+                const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey']);
                 
-                // request.history contains the full conversation so far
+                // Determine Key
+                const modelName = request.model || storage.selectedModel;
+                const isGoogle = modelName.includes('gemini') || modelName.includes('gemma');
+                const activeKey = isGoogle ? storage.geminiKey : storage.groqKey;
+
+                if (!activeKey) throw new Error(`Missing API Key for ${isGoogle ? 'Google' : 'Groq'}`);
+
+                const aiService = getAIService(activeKey, modelName, storage.interactionMode, storage.customPrompt);
+                
                 const answer = await aiService.chat(request.history);
-                
                 sendResponse({ success: true, answer: answer });
-                
-                // OPTIONAL: Save to history here
-                // saveConversationToStorage(request.history, answer); 
                 
             } catch (err) {
                 sendResponse({ success: false, error: err.message });
@@ -116,32 +108,46 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 
 // 3. The Core Logic
-async function handleAIRequest(apiKey, inputContent, type, explicitModel, sendResponse, ocrConfidence) {
+async function handleAIRequest(passedApiKey, inputContent, type, explicitModel, sendResponse, ocrConfidence) {
     try {
-        const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel']);
+        const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey']);
         const mode = storage.interactionMode || 'short';
         
         const modelName = explicitModel || storage.selectedModel || "meta-llama/llama-4-scout-17b-16e-instruct";
 
-        const aiService = getAIService(apiKey, modelName, mode, storage.customPrompt);
+        // === KEY SELECTION LOGIC ===
+        // We ignore the 'passedApiKey' if it doesn't match the model provider requirements, 
+        // prioritizing the secure storage keys.
+        const isGoogle = modelName.includes('gemini') || modelName.includes('gemma');
+        let activeKey = isGoogle ? storage.geminiKey : storage.groqKey;
+
+        // Fallback: if storage was empty but content.js passed one (rare), use it
+        if (!activeKey && passedApiKey) activeKey = passedApiKey;
+
+        if (!activeKey) {
+            throw new Error(`Missing API Key. Please add your ${isGoogle ? 'Google' : 'Groq'} Key in the extension popup.`);
+        }
+
+        const aiService = getAIService(activeKey, modelName, mode, storage.customPrompt);
 
         console.log(`[Background] Asking AI: Model=${modelName}, Mode=${mode}, Type=${type}`);
 
-// Inside handleAIRequest function in background.js
+        // Route to unified chat method or specific handlers
         let result;
         if (type === 'image') {
             result = await aiService.askImage(inputContent);
         } else {
             result = await aiService.askText(inputContent);
         }
-        // Standardize response for content.js
+
         sendResponse({
             success: true,
             answer: result.answer,
-            initialUserMessage: result.initialUserMessage, // IMPORTANT: Send this back
+            initialUserMessage: result.initialUserMessage,
             usedOCR: type === 'text',
             ocrConfidence
         });
+
     } catch (error) {
         console.error("AI Service Error:", error);
         sendResponse({
@@ -149,5 +155,4 @@ async function handleAIRequest(apiKey, inputContent, type, explicitModel, sendRe
             error: error.message || String(error)
         });
     }
-    
 }

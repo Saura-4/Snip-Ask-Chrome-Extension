@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => 
 {
     const apiKeyInput = document.getElementById('apiKey');
+    const geminiKeyInput = document.getElementById('geminiKey'); // NEW
     const modelSelect = document.getElementById('modelSelect');
     const modeSelect = document.getElementById('modeSelect');
     const customPromptContainer = document.getElementById('customPromptContainer');
@@ -9,9 +10,10 @@ document.addEventListener('DOMContentLoaded', () =>
     const resetBtn = document.getElementById('resetBtn'); 
 
     // 1. Load Saved Settings
-    chrome.storage.local.get(['groqKey', 'interactionMode', 'customPrompt', 'selectedModel'], (result) => 
+    chrome.storage.local.get(['groqKey', 'geminiKey', 'interactionMode', 'customPrompt', 'selectedModel'], (result) => 
     {
       if (result.groqKey) apiKeyInput.value = result.groqKey;
+      if (result.geminiKey) geminiKeyInput.value = result.geminiKey; // NEW
       
       if (result.interactionMode) 
       {
@@ -20,21 +22,18 @@ document.addEventListener('DOMContentLoaded', () =>
       }
       if (result.customPrompt) customPromptText.value = result.customPrompt;
 
-      // --- UPDATED LOGIC HERE ---
       if (result.selectedModel) {
           modelSelect.value = result.selectedModel;
       } else {
-          // Critical: If no model is saved (first run), save the default one immediately.
-          // This ensures content.js always knows what model is selected.
+          // Default save on first run
           chrome.storage.local.set({ selectedModel: modelSelect.value });
       }
-      // --------------------------
     });
       
-    // 2. Save Settings
+    // 2. Save Settings (Auto-save on change)
     apiKeyInput.addEventListener('change', () => chrome.storage.local.set({ groqKey: apiKeyInput.value.trim() }));
+    geminiKeyInput.addEventListener('change', () => chrome.storage.local.set({ geminiKey: geminiKeyInput.value.trim() })); // NEW
     
-    // This line you already had is correct:
     modelSelect.addEventListener('change', () => chrome.storage.local.set({ selectedModel: modelSelect.value }));
     
     modeSelect.addEventListener('change', () => 
@@ -45,20 +44,36 @@ document.addEventListener('DOMContentLoaded', () =>
     });
     
     customPromptText.addEventListener('change', () => chrome.storage.local.set({ customPrompt: customPromptText.value }));
+    
     function toggleCustomBox(mode) {
       customPromptContainer.style.display = (mode === 'custom') ? 'block' : 'none';
     }
 
-    // 3. Start Snipping
+    // 3. Start Snipping (Updated Validation)
     snipBtn.addEventListener('click', () => 
     {
-      const apiKey = apiKeyInput.value.trim();
-      if (!apiKey) { alert("Please enter your Groq API Key!"); return; }
+      const currentModel = modelSelect.value;
       
-      if (!apiKey.startsWith("gsk_")) 
-      { 
+      // Determine which key is required based on the model name
+      // (Gemini and Gemma both use the Google API Key)
+      const isGoogleModel = currentModel.includes('gemini') || currentModel.includes('gemma');
+      
+      const requiredKey = isGoogleModel ? geminiKeyInput.value.trim() : apiKeyInput.value.trim();
+      
+      if (!requiredKey) {
+          const providerName = isGoogleModel ? "Google (Gemini)" : "Groq";
+          alert(`Please enter your ${providerName} API Key to use this model!`); 
+          return; 
+      }
+      
+      // Basic format check
+      if (!isGoogleModel && !requiredKey.startsWith("gsk_")) { 
           alert("⚠️ Warning: That doesn't look like a Groq key (it should start with 'gsk_')."); 
       }
+      if (isGoogleModel && !requiredKey.startsWith("AIza")) {
+          alert("⚠️ Warning: That doesn't look like a Google API key (it should start with 'AIza').");
+      }
+
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) =>
       {
         chrome.tabs.sendMessage(tabs[0].id, { action: "START_SNIP" })
@@ -72,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () =>
     if (resetBtn) {
       resetBtn.addEventListener('click', () =>
       {
-        if (confirm("Are you sure? This will remove your API Key and all settings."))
+        if (confirm("Are you sure? This will remove ALL your API Keys and settings."))
         {
           resetBtn.disabled = true; 
           resetBtn.innerText = "Purging...";
@@ -81,8 +96,9 @@ document.addEventListener('DOMContentLoaded', () =>
           chrome.storage.local.clear(() => 
           {
             apiKeyInput.value = "";
+            geminiKeyInput.value = ""; // Clear UI
             customPromptText.value = "";
-            if(messageContainer) messageContainer.style.display = 'block'; // Added safety check
+            if(messageContainer) messageContainer.style.display = 'block'; 
             
             setTimeout(() => 
             {

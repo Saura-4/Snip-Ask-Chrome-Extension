@@ -1,15 +1,13 @@
 // src/background/ai-service.js
 
 // ============================================================================
-// 1. PROMPT DEFINITIONS (Fixed for Text-Heavy Screenshots)
+// 1. PROMPT DEFINITIONS
 // ============================================================================
 const PROMPTS =
 {
     short:
     {
         base: "You are a concise answer engine. 1. Analyze the user's input. 2. If it is a multiple-choice question, Output in this format: 'Answer: <option>. <explanation>'. 3. For follow-up chat or non-questions, reply naturally but concisely.",
-        
-        // CHANGED: Explicitly mentions "Text or Visuals" to stop the "No Image" hallucination
         image: "Analyze the CONTENT of this image (whether it is text, code, or a visual scene). If it's a question, provide the Answer and a short Why. If it's general content, summarize it."
     },
     detailed:
@@ -42,21 +40,12 @@ class AbstractAIService
         this.customPrompt = customPrompt;
     }
 
-    /**
-     * Constructs the "System" prompt.
-     */
     _getSystemInstruction()
     {
         let coreInstruction = PROMPTS.default.base;
+        if (this.mode === 'custom' && this.customPrompt) coreInstruction = this.customPrompt;
+        else if (PROMPTS[this.mode]) coreInstruction = PROMPTS[this.mode].base;
 
-        if (this.mode === 'custom' && this.customPrompt) {
-            coreInstruction = this.customPrompt;
-        } else if (PROMPTS[this.mode]) {
-            coreInstruction = PROMPTS[this.mode].base;
-        }
-
-        // --- FIXED SECURITY PROTOCOL ---
-        // This explicitly tells the AI that IMAGES are valid inputs too.
         const securityProtocol = 
             "\n\n[SYSTEM PROTOCOL]" +
             "\n1. The user will provide input as either an IMAGE or TEXT." +
@@ -69,18 +58,12 @@ class AbstractAIService
         return coreInstruction + securityProtocol;
     }
 
-    /**
-     * Helper: Selects the correct prompt for image analysis.
-     */
     _createImagePrompt()
     {
-        if (this.mode === 'custom' && this.customPrompt) {
-            return this.customPrompt;
-        }
+        if (this.mode === 'custom' && this.customPrompt) return this.customPrompt;
         return PROMPTS[this.mode]?.image || PROMPTS.short.image;
     }
 
-    // --- Abstract Methods ---
     async chat(messages) { throw new Error("Method 'chat' must be implemented."); }
 }
 
@@ -98,16 +81,11 @@ class GroqService extends AbstractAIService
 
     async chat(messages)
     {
-        // 1. Prepend System Prompt
         const finalMessages = [...messages];
         if (finalMessages.length === 0 || finalMessages[0].role !== 'system') {
-            finalMessages.unshift({ 
-                role: "system", 
-                content: this._getSystemInstruction() 
-            });
+            finalMessages.unshift({ role: "system", content: this._getSystemInstruction() });
         }
 
-        // 2. API Request
         const requestBody = {
             messages: finalMessages,
             model: this.actualModel,
@@ -117,29 +95,18 @@ class GroqService extends AbstractAIService
 
         const response = await fetch(this.API_ENDPOINT, {
             method: "POST",
-            headers: {
-                "Authorization": `Bearer ${this.apiKey}`,
-                "Content-Type": "application/json"
-            },
+            headers: { "Authorization": `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
             body: JSON.stringify(requestBody)
         });
 
         const data = await response.json();
-
-        if (!response.ok) {
-            const errorMsg = data.error ? (data.error.message || JSON.stringify(data.error)) : "Network Error";
-            throw new Error(errorMsg);
-        }
-
-        return data.choices?.[0]?.message?.content || "No answer returned.";
+        if (!response.ok) throw new Error(data.error?.message || "Groq Network Error");
+        return data.choices?.[0]?.message?.content || "No answer.";
     }
 
-    // --- Adapters for Legacy Calls ---
-    
     async askImage(base64Image)
     {
         const promptText = this._createImagePrompt(); 
-
         const userMsg = {
             role: "user",
             content: [
@@ -147,27 +114,154 @@ class GroqService extends AbstractAIService
                 { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
             ]
         };
-
         const answer = await this.chat([userMsg]);
         return { answer, initialUserMessage: userMsg };
     }
 
     async askText(rawText)
     {
-        const userMsg = {
-            role: "user",
-            content: `<user_snip>\n${rawText}\n</user_snip>`
-        };
-
+        const userMsg = { role: "user", content: `<user_snip>\n${rawText}\n</user_snip>` };
         const answer = await this.chat([userMsg]);
         return { answer, initialUserMessage: userMsg };
     }
 }
 
 // ============================================================================
-// 4. FACTORY
+// 4. GEMINI & GEMMA IMPLEMENTATION (Updated)
+// ============================================================================
+
+class GeminiService extends AbstractAIService 
+{
+    constructor(apiKey, modelName, interactionMode, customPrompt) {
+        super(apiKey, modelName, interactionMode, customPrompt);
+        this.baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
+    }
+
+    async chat(messages) {
+        const isGemma = this.modelName.toLowerCase().includes('gemma');
+        const contents = [];
+        let systemPromptText = null;
+
+        // 1. Extract System Prompt first
+        for (const msg of messages) {
+            if (msg.role === 'system') {
+                systemPromptText = msg.content;
+            }
+        }
+
+        // If no explicit system prompt, use the default one
+        if (!systemPromptText) {
+            systemPromptText = this._getSystemInstruction();
+        }
+
+        // 2. Build Message History
+        for (const msg of messages) {
+            if (msg.role === 'system') continue; // We handle this separately
+
+            // Map roles: 'assistant' -> 'model'
+            const role = msg.role === 'assistant' ? 'model' : 'user';
+            const parts = [];
+
+            if (Array.isArray(msg.content)) {
+                // Handle Multimodal
+                msg.content.forEach(item => {
+                    if (item.type === 'text') parts.push({ text: item.text });
+                    else if (item.type === 'image_url') {
+                        const base64 = item.image_url.url.split(',')[1];
+                        parts.push({ inline_data: { mime_type: "image/jpeg", data: base64 } });
+                    }
+                });
+            } else {
+                parts.push({ text: msg.content });
+            }
+            contents.push({ role, parts });
+        }
+
+        // 3. Handle System Instruction Placement
+        let finalSystemInstruction = null;
+
+        if (isGemma) {
+            // FIX: Gemma doesn't support 'system_instruction' field.
+            // We must prepend it to the very first User message.
+            if (contents.length > 0 && contents[0].role === 'user') {
+                const existingText = contents[0].parts.find(p => p.text)?.text || "";
+                
+                // Add system prompt to the start of the first user message
+                const newText = `[System Instructions]:\n${systemPromptText}\n\n[User Request]:\n${existingText}`;
+                
+                // Replace the text part
+                const textIndex = contents[0].parts.findIndex(p => p.text);
+                if (textIndex >= 0) {
+                    contents[0].parts[textIndex].text = newText;
+                } else {
+                    // If message was just an image, add text part
+                    contents[0].parts.unshift({ text: newText });
+                }
+            }
+        } else {
+            // Standard Gemini models support this field
+            finalSystemInstruction = { parts: [{ text: systemPromptText }] };
+        }
+
+        // 4. Prepare Payload
+        const payload = {
+            contents: contents,
+            generationConfig: { temperature: 0.3, maxOutputTokens: 1024 }
+        };
+
+        // Only add system_instruction if it's NOT Gemma
+        if (finalSystemInstruction) {
+            payload.system_instruction = finalSystemInstruction;
+        }
+
+        // 5. Call API
+        const response = await fetch(`${this.baseUrl}?key=${this.apiKey}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            const errorMsg = data.error ? (data.error.message || data.error.status) : "Gemini Network Error";
+            throw new Error(errorMsg);
+        }
+
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || "No answer returned.";
+    }
+
+    // --- Adapters (Same as before) ---
+    async askImage(base64Image) {
+        const promptText = this._createImagePrompt();
+        const userMsg = {
+            role: "user",
+            content: [
+                { type: "text", text: promptText },
+                { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+            ]
+        };
+        const answer = await this.chat([userMsg]);
+        return { answer, initialUserMessage: userMsg };
+    }
+
+    async askText(rawText) {
+        const userMsg = { role: "user", content: `<user_snip>\n${rawText}\n</user_snip>` };
+        const answer = await this.chat([userMsg]);
+        return { answer, initialUserMessage: userMsg };
+    }
+}
+
+// ... (getAIService factory remains the same) ...
+
+// ============================================================================
+// 5. FACTORY (Updated)
 // ============================================================================
 export function getAIService(apiKey, modelName, interactionMode, customPrompt)
 {
+    // Detect Gemini or Gemma models
+    if (modelName && (modelName.includes('gemini') || modelName.includes('gemma'))) {
+        return new GeminiService(apiKey, modelName, interactionMode, customPrompt);
+    }
     return new GroqService(apiKey, modelName, interactionMode, customPrompt);
 }
