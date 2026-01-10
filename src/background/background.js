@@ -91,6 +91,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         handleAIRequest(request.apiKey, content, type, request.model, sendResponse, ocrConfidence);
         return true; 
     }
+    // --- D. CHAT CONTINUATION (REPLY) ---
+    if (request.action === "CONTINUE_CHAT") {
+        (async () => {
+            try {
+                const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel']);
+                const aiService = getAIService(request.apiKey, request.model, storage.interactionMode, storage.customPrompt);
+                
+                // request.history contains the full conversation so far
+                const answer = await aiService.chat(request.history);
+                
+                sendResponse({ success: true, answer: answer });
+                
+                // OPTIONAL: Save to history here
+                // saveConversationToStorage(request.history, answer); 
+                
+            } catch (err) {
+                sendResponse({ success: false, error: err.message });
+            }
+        })();
+        return true; 
+    }
 });
 
 
@@ -106,20 +127,21 @@ async function handleAIRequest(apiKey, inputContent, type, explicitModel, sendRe
 
         console.log(`[Background] Asking AI: Model=${modelName}, Mode=${mode}, Type=${type}`);
 
-        let answer;
+// Inside handleAIRequest function in background.js
+        let result;
         if (type === 'image') {
-            answer = await aiService.askImage(inputContent);
+            result = await aiService.askImage(inputContent);
         } else {
-            answer = await aiService.askText(inputContent);
+            result = await aiService.askText(inputContent);
         }
-
+        // Standardize response for content.js
         sendResponse({
             success: true,
-            answer: answer,
+            answer: result.answer,
+            initialUserMessage: result.initialUserMessage, // IMPORTANT: Send this back
             usedOCR: type === 'text',
             ocrConfidence
         });
-
     } catch (error) {
         console.error("AI Service Error:", error);
         sendResponse({
@@ -127,4 +149,5 @@ async function handleAIRequest(apiKey, inputContent, type, explicitModel, sendRe
             error: error.message || String(error)
         });
     }
+    
 }
