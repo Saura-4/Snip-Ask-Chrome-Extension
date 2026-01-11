@@ -128,6 +128,7 @@
       <label>API Keys</label>
       <input type="password" id="apiKey" placeholder="Groq Key (gsk_...)" />
       <input type="password" id="geminiKey" placeholder="Google Key (AIza...)" />
+      <input type="text" id="ollamaHost" placeholder="Ollama URL (default: http://localhost:11434)" />
   </div>
 
   <label for="modelSelect">AI Model</label>
@@ -152,6 +153,15 @@
       <option value="gemini-2.0-flash-lite-preview-02-05">✨ Gemini 2.0 Flash Lite</option>
       <option value="gemma-3-4b-it">✨ Gemma 3 (4B)</option>
       <option value="gemma-3-1b-it">✨ Gemma 3 (1B)</option>
+    </optgroup>
+
+    <optgroup label="🦙 Ollama (Local / Offline)">
+      <option value="ollama:gemma3:4b">✨ Gemma 3 (4B - Local)</option>
+      <option value="ollama:llama3">Llama 3 (Text)</option>
+      <option value="ollama:mistral">Mistral (Text)</option>
+      <option value="ollama:llava">Llava (Vision)</option>
+      <option value="ollama:moondream">Moondream (Vision)</option>
+      <option value="ollama:custom">⚙️ Custom (Enter name manually)</option>
     </optgroup>
 
     <optgroup label="🧪 Experimental">

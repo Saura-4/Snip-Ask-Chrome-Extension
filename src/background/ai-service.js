@@ -127,9 +127,8 @@ class GroqService extends AbstractAIService
 }
 
 // ============================================================================
-// 4. GEMINI & GEMMA IMPLEMENTATION (Updated)
+// 4. GEMINI & GEMMA IMPLEMENTATION
 // ============================================================================
-
 class GeminiService extends AbstractAIService 
 {
     constructor(apiKey, modelName, interactionMode, customPrompt) {
@@ -142,28 +141,17 @@ class GeminiService extends AbstractAIService
         const contents = [];
         let systemPromptText = null;
 
-        // 1. Extract System Prompt first
         for (const msg of messages) {
-            if (msg.role === 'system') {
-                systemPromptText = msg.content;
-            }
+            if (msg.role === 'system') systemPromptText = msg.content;
         }
+        if (!systemPromptText) systemPromptText = this._getSystemInstruction();
 
-        // If no explicit system prompt, use the default one
-        if (!systemPromptText) {
-            systemPromptText = this._getSystemInstruction();
-        }
-
-        // 2. Build Message History
         for (const msg of messages) {
-            if (msg.role === 'system') continue; // We handle this separately
-
-            // Map roles: 'assistant' -> 'model'
+            if (msg.role === 'system') continue; 
             const role = msg.role === 'assistant' ? 'model' : 'user';
             const parts = [];
 
             if (Array.isArray(msg.content)) {
-                // Handle Multimodal
                 msg.content.forEach(item => {
                     if (item.type === 'text') parts.push({ text: item.text });
                     else if (item.type === 'image_url') {
@@ -177,44 +165,27 @@ class GeminiService extends AbstractAIService
             contents.push({ role, parts });
         }
 
-        // 3. Handle System Instruction Placement
         let finalSystemInstruction = null;
 
         if (isGemma) {
-            // FIX: Gemma doesn't support 'system_instruction' field.
-            // We must prepend it to the very first User message.
             if (contents.length > 0 && contents[0].role === 'user') {
                 const existingText = contents[0].parts.find(p => p.text)?.text || "";
-                
-                // Add system prompt to the start of the first user message
                 const newText = `[System Instructions]:\n${systemPromptText}\n\n[User Request]:\n${existingText}`;
-                
-                // Replace the text part
                 const textIndex = contents[0].parts.findIndex(p => p.text);
-                if (textIndex >= 0) {
-                    contents[0].parts[textIndex].text = newText;
-                } else {
-                    // If message was just an image, add text part
-                    contents[0].parts.unshift({ text: newText });
-                }
+                if (textIndex >= 0) contents[0].parts[textIndex].text = newText;
+                else contents[0].parts.unshift({ text: newText });
             }
         } else {
-            // Standard Gemini models support this field
             finalSystemInstruction = { parts: [{ text: systemPromptText }] };
         }
 
-        // 4. Prepare Payload
         const payload = {
             contents: contents,
             generationConfig: { temperature: 0.3, maxOutputTokens: 1024 }
         };
 
-        // Only add system_instruction if it's NOT Gemma
-        if (finalSystemInstruction) {
-            payload.system_instruction = finalSystemInstruction;
-        }
+        if (finalSystemInstruction) payload.system_instruction = finalSystemInstruction;
 
-        // 5. Call API
         const response = await fetch(`${this.baseUrl}?key=${this.apiKey}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -222,16 +193,11 @@ class GeminiService extends AbstractAIService
         });
 
         const data = await response.json();
-
-        if (!response.ok) {
-            const errorMsg = data.error ? (data.error.message || data.error.status) : "Gemini Network Error";
-            throw new Error(errorMsg);
-        }
+        if (!response.ok) throw new Error(data.error ? (data.error.message || data.error.status) : "Gemini Network Error");
 
         return data.candidates?.[0]?.content?.parts?.[0]?.text || "No answer returned.";
     }
 
-    // --- Adapters (Same as before) ---
     async askImage(base64Image) {
         const promptText = this._createImagePrompt();
         const userMsg = {
@@ -252,16 +218,101 @@ class GeminiService extends AbstractAIService
     }
 }
 
-// ... (getAIService factory remains the same) ...
+// ============================================================================
+// 5. OLLAMA IMPLEMENTATION
+// ============================================================================
+class OllamaService extends AbstractAIService 
+{
+    constructor(host, modelName, interactionMode, customPrompt) {
+        super(null, modelName, interactionMode, customPrompt);
+        this.actualModel = modelName.replace('ollama:', ''); 
+        this.baseUrl = (host || "http://localhost:11434").replace(/\/$/, ""); 
+    }
+
+    async chat(messages) {
+        const endpoint = `${this.baseUrl}/api/chat`;
+
+        const cleanMessages = messages.map(msg => {
+            const cleanMsg = { role: msg.role, content: "" };
+            
+            if (Array.isArray(msg.content)) {
+                msg.content.forEach(part => {
+                    if (part.type === 'text') cleanMsg.content += part.text;
+                    if (part.type === 'image_url') {
+                        const base64 = part.image_url.url.split(',')[1];
+                        if (!cleanMsg.images) cleanMsg.images = [];
+                        cleanMsg.images.push(base64);
+                    }
+                });
+            } else {
+                cleanMsg.content = msg.content;
+            }
+            return cleanMsg;
+        });
+
+        if (cleanMessages.length > 0 && cleanMessages[0].role !== 'system') {
+            cleanMessages.unshift({ role: "system", content: this._getSystemInstruction() });
+        }
+
+        const payload = {
+            model: this.actualModel,
+            messages: cleanMessages,
+            stream: false,
+            options: { temperature: 0.3, num_ctx: 4096 }
+        };
+
+        try {
+            const response = await fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) throw new Error("Ollama Connection Failed. Is it running?");
+            const data = await response.json();
+            return data.message.content;
+
+        } catch (e) {
+            throw new Error(`Ollama Error: ${e.message}. Ensure 'OLLAMA_ORIGINS="*"' is set.`);
+        }
+    }
+
+    async askImage(base64Image) {
+        const promptText = this._createImagePrompt(); 
+        const userMsg = {
+            role: "user",
+            content: [
+                { type: "text", text: promptText },
+                { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+            ]
+        };
+        const answer = await this.chat([userMsg]);
+        return { answer, initialUserMessage: userMsg };
+    }
+
+    async askText(rawText) {
+        const userMsg = { role: "user", content: `<user_snip>\n${rawText}\n</user_snip>` };
+        const answer = await this.chat([userMsg]);
+        return { answer, initialUserMessage: userMsg };
+    }
+}
 
 // ============================================================================
-// 5. FACTORY (Updated)
+// 6. FACTORY (FIXED ORDERING)
 // ============================================================================
-export function getAIService(apiKey, modelName, interactionMode, customPrompt)
+export function getAIService(apiKeyOrHost, modelName, interactionMode, customPrompt)
 {
-    // Detect Gemini or Gemma models
-    if (modelName && (modelName.includes('gemini') || modelName.includes('gemma'))) {
-        return new GeminiService(apiKey, modelName, interactionMode, customPrompt);
+    // === FIX 2: Check Ollama FIRST ===
+    // If we don't do this, 'ollama:gemma3' gets caught by the Gemma check below
+    if (modelName && modelName.startsWith('ollama')) {
+        return new OllamaService(apiKeyOrHost, modelName, interactionMode, customPrompt);
     }
-    return new GroqService(apiKey, modelName, interactionMode, customPrompt);
+
+    // Detect Gemini or Gemma models (Cloud)
+    if (modelName && (modelName.includes('gemini') || modelName.includes('gemma'))) {
+        return new GeminiService(apiKeyOrHost, modelName, interactionMode, customPrompt);
+    }
+
+    // Default to Groq
+    return new GroqService(apiKeyOrHost, modelName, interactionMode, customPrompt);
 }

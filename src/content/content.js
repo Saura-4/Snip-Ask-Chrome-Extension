@@ -3,14 +3,17 @@
 let startX, startY, selectionBox, glassPane;
 let isSelecting = false;
 
-// Helper to identify Vision Models (Updated for Gemini/Gemma)
+// Helper to identify Vision Models
 function isVisionModel(modelName) {
     if (!modelName) return false;
     const lower = modelName.toLowerCase();
     return lower.includes("llama-4") || 
            lower.includes("vision") || 
            lower.includes("gemini") || 
-           lower.includes("gemma");
+           lower.includes("gemma") ||
+           lower.includes("llava") ||
+           lower.includes("moondream") ||
+           lower.includes("minicpm");
 }
 
 // 1. Message Listener
@@ -19,10 +22,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (isSelecting) return true;
         isSelecting = true;
         
-        // A. Create the "Glass Pane"
         createGlassPane();
-        
-        // B. Create the Selection Box
         createSelectionBox();
         
         sendResponse({ status: "Snip started" });
@@ -129,17 +129,29 @@ async function onMouseUp(e) {
         // Crop the image
         cropImage(response.dataUrl, rect, async (croppedBase64) => {
 
-            // === UPDATE: GET BOTH KEYS ===
-            chrome.storage.local.get(['groqKey', 'geminiKey', 'selectedModel'], async (result) => {
+            // === UPDATE: GET ALL KEYS ===
+            chrome.storage.local.get(['groqKey', 'geminiKey','ollamaHost', 'selectedModel'], async (result) => {
                 
                 const currentModel = result.selectedModel || "llama-3.3-70b-versatile";
 
-                // === UPDATE: DETERMINE ACTIVE KEY ===
+                // === UPDATE: DETERMINE ACTIVE KEY OR HOST ===
+                let activeKey;
+                // === FIX 3: Typos Fixed (stratsWith -> startsWith) ===
+                const isOllama = currentModel.startsWith('ollama');
                 const isGoogle = currentModel.includes('gemini') || currentModel.includes('gemma');
-                const activeKey = isGoogle ? result.geminiKey : result.groqKey;
+                
+                if(isOllama) {
+                    activeKey = result.ollamaHost || "http://localhost:11434";
+                }
+                else if(isGoogle) {
+                    activeKey = result.geminiKey; // Fixed capitalization
+                }
+                else {
+                    activeKey = result.groqKey;
+                }
 
                 if (!activeKey) {
-                    alert(`Please set your ${isGoogle ? 'Google' : 'Groq'} API Key in the extension popup!`);
+                    alert(`Please set your ${isOllama ? 'Ollama Host' : (isGoogle ? 'Google Key' : 'Groq Key')} in the extension popup!`);
                     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
                     return;
                 }
@@ -148,8 +160,8 @@ async function onMouseUp(e) {
                 if (isVisionModel(currentModel)) {
                     console.log(`Vision Model detected (${currentModel}). Sending Image directly.`);
                     chrome.runtime.sendMessage({
-                        action: "ASK_GROQ",
-                        apiKey: activeKey, // Pass correct key
+                        action: "ASK_AI",
+                        apiKey: activeKey, 
                         model: currentModel,
                         base64Image: croppedBase64
                     }, handleResponse);
@@ -173,8 +185,8 @@ async function onMouseUp(e) {
                     if (ocrResponse.success && ocrResponse.text && ocrResponse.text.length > 3) {
                         console.log("OCR Success:", ocrResponse.text);
                         chrome.runtime.sendMessage({
-                            action: "ASK_GROQ_TEXT",
-                            apiKey: activeKey, // Pass correct key
+                            action: "ASK_AI_TEXT",
+                            apiKey: activeKey, 
                             model: currentModel,
                             text: ocrResponse.text,
                             ocrConfidence: ocrResponse.confidence
@@ -182,14 +194,15 @@ async function onMouseUp(e) {
                     } else {
                         console.warn("OCR Empty or Failed.");
                         if (isVisionModel(currentModel)) {
+                            // Retry as image if OCR fails (fallback)
                             chrome.runtime.sendMessage({
-                                action: "ASK_GROQ",
-                                apiKey: activeKey, // Pass correct key
+                                action: "ASK_AI",
+                                apiKey: activeKey, 
                                 model: currentModel,
                                 base64Image: croppedBase64
                             }, handleResponse);
                         } else {
-                            alert(`⚠️ No text found in snippet.\n\nSince '${currentModel}' cannot see images, please try snipping clearer text or switch to a Vision model (Llama 4, Gemini, or Gemma).`);
+                            alert(`⚠️ No text found in snippet.\n\nSince '${currentModel}' cannot see images, please try snipping clearer text or switch to a Vision model.`);
                             if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
                         }
                     }
@@ -380,16 +393,24 @@ class FloatingChatUI {
         this.chatBody.appendChild(loadingDiv);
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
 
-        // === UPDATE: GET BOTH KEYS FOR CHAT ===
-        chrome.storage.local.get(['groqKey', 'geminiKey', 'selectedModel'], async (res) => {
+        // === UPDATE: GET KEYS FOR CHAT ===
+        chrome.storage.local.get(['groqKey', 'geminiKey', 'ollamaHost', 'selectedModel'], async (res) => {
             try {
                 // Determine Active Key
-                const isGoogle = (res.selectedModel || '').includes('gemini') || (res.selectedModel || '').includes('gemma');
-                const activeKey = isGoogle ? res.geminiKey : res.groqKey;
+                const modelName = res.selectedModel || '';
+                let activeKey;
+                
+                if (modelName.startsWith('ollama')) {
+                    activeKey = res.ollamaHost || "http://localhost:11434";
+                } else if (modelName.includes('gemini') || modelName.includes('gemma')) {
+                    activeKey = res.geminiKey;
+                } else {
+                    activeKey = res.groqKey;
+                }
 
                 const response = await chrome.runtime.sendMessage({
                     action: "CONTINUE_CHAT", 
-                    apiKey: activeKey, // Pass correct key
+                    apiKey: activeKey, 
                     model: res.selectedModel, 
                     history: this.chatHistory
                 });

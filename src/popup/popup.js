@@ -1,7 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => 
 {
     const apiKeyInput = document.getElementById('apiKey');
-    const geminiKeyInput = document.getElementById('geminiKey'); // NEW
+    const geminiKeyInput = document.getElementById('geminiKey');
+    const ollamaHostInput = document.getElementById('ollamaHost');
     const modelSelect = document.getElementById('modelSelect');
     const modeSelect = document.getElementById('modeSelect');
     const customPromptContainer = document.getElementById('customPromptContainer');
@@ -10,10 +11,11 @@ document.addEventListener('DOMContentLoaded', () =>
     const resetBtn = document.getElementById('resetBtn'); 
 
     // 1. Load Saved Settings
-    chrome.storage.local.get(['groqKey', 'geminiKey', 'interactionMode', 'customPrompt', 'selectedModel'], (result) => 
+    chrome.storage.local.get(['groqKey', 'geminiKey', 'ollamaHost','interactionMode', 'customPrompt', 'selectedModel'], (result) => 
     {
       if (result.groqKey) apiKeyInput.value = result.groqKey;
-      if (result.geminiKey) geminiKeyInput.value = result.geminiKey; // NEW
+      if (result.geminiKey) geminiKeyInput.value = result.geminiKey; 
+      ollamaHostInput.value = result.ollamaHost || "http://localhost:11434"; 
       
       if (result.interactionMode) 
       {
@@ -25,16 +27,27 @@ document.addEventListener('DOMContentLoaded', () =>
       if (result.selectedModel) {
           modelSelect.value = result.selectedModel;
       } else {
-          // Default save on first run
           chrome.storage.local.set({ selectedModel: modelSelect.value });
       }
     });
       
-    // 2. Save Settings (Auto-save on change)
+    // 2. Save Settings
     apiKeyInput.addEventListener('change', () => chrome.storage.local.set({ groqKey: apiKeyInput.value.trim() }));
-    geminiKeyInput.addEventListener('change', () => chrome.storage.local.set({ geminiKey: geminiKeyInput.value.trim() })); // NEW
+    geminiKeyInput.addEventListener('change', () => chrome.storage.local.set({ geminiKey: geminiKeyInput.value.trim() })); 
+    ollamaHostInput.addEventListener('change', () => chrome.storage.local.set({ ollamaHost: ollamaHostInput.value.trim() })); 
     
-    modelSelect.addEventListener('change', () => chrome.storage.local.set({ selectedModel: modelSelect.value }));
+    modelSelect.addEventListener('change', () => {
+        if(modelSelect.value === 'ollama:custom') {
+            const modelName = prompt("Enter your local Ollama model name (e.g., 'deepseek-coder'):", "llama3");
+            if(modelName) {
+                chrome.storage.local.set({ selectedModel: "ollama:" + modelName });
+                const opt = modelSelect.querySelector('option[value="ollama:custom"]');
+                if(opt) opt.text = `Custom: ${modelName}`;
+            }
+        } else {
+            chrome.storage.local.set({ selectedModel: modelSelect.value });
+        }
+    });
     
     modeSelect.addEventListener('change', () => 
     {
@@ -49,36 +62,45 @@ document.addEventListener('DOMContentLoaded', () =>
       customPromptContainer.style.display = (mode === 'custom') ? 'block' : 'none';
     }
 
-    // 3. Start Snipping (Updated Validation)
+    // 3. Start Snipping
     snipBtn.addEventListener('click', () => 
     {
       const currentModel = modelSelect.value;
       
-      // Determine which key is required based on the model name
-      // (Gemini and Gemma both use the Google API Key)
-      const isGoogleModel = currentModel.includes('gemini') || currentModel.includes('gemma');
+      // === FIX 1: Correct Variable Naming ===
+      const isOllama = currentModel.startsWith('ollama');
+      const isGoogle = currentModel.includes('gemini') || currentModel.includes('gemma'); // Renamed to isGoogle for consistency
       
-      const requiredKey = isGoogleModel ? geminiKeyInput.value.trim() : apiKeyInput.value.trim();
-      
-      if (!requiredKey) {
-          const providerName = isGoogleModel ? "Google (Gemini)" : "Groq";
-          alert(`Please enter your ${providerName} API Key to use this model!`); 
-          return; 
-      }
-      
-      // Basic format check
-      if (!isGoogleModel && !requiredKey.startsWith("gsk_")) { 
-          alert("⚠️ Warning: That doesn't look like a Groq key (it should start with 'gsk_')."); 
-      }
-      if (isGoogleModel && !requiredKey.startsWith("AIza")) {
-          alert("⚠️ Warning: That doesn't look like a Google API key (it should start with 'AIza').");
+      // Validation Logic
+      if (isOllama) {
+          if (!ollamaHostInput.value.trim()) {
+              alert("Please enter your Ollama Host URL (default: http://localhost:11434)");
+              return;
+          }
+      } 
+      else if (isGoogle) {
+          if (!geminiKeyInput.value.trim()) { 
+              alert("Please enter your Google API Key (starts with AIza...)"); 
+              return; 
+          }
+      } 
+      else {
+          // Groq
+          if (!apiKeyInput.value.trim()) { 
+              alert("Please enter your Groq API Key (starts with gsk_...)"); 
+              return; 
+          }
       }
 
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) =>
       {
+        if (tabs.length === 0) return;
         chrome.tabs.sendMessage(tabs[0].id, { action: "START_SNIP" })
           .then(() => window.close())
-          .catch(() => alert("⚠️ Refresh the page first!"));
+          .catch((err) => {
+              console.error(err);
+              alert("⚠️ Could not start snip. Please refresh the page!");
+          });
       });
     });
 
@@ -87,23 +109,16 @@ document.addEventListener('DOMContentLoaded', () =>
     if (resetBtn) {
       resetBtn.addEventListener('click', () =>
       {
-        if (confirm("Are you sure? This will remove ALL your API Keys and settings."))
+        if (confirm("Reset all settings?"))
         {
-          resetBtn.disabled = true; 
-          resetBtn.innerText = "Purging...";
-          snipBtn.disabled = true;
-          
           chrome.storage.local.clear(() => 
           {
             apiKeyInput.value = "";
-            geminiKeyInput.value = ""; // Clear UI
+            geminiKeyInput.value = ""; 
             customPromptText.value = "";
+            ollamaHostInput.value = "http://localhost:11434";
             if(messageContainer) messageContainer.style.display = 'block'; 
-            
-            setTimeout(() => 
-            {
-              window.close(); 
-            }, 1500); 
+            setTimeout(() => window.close(), 1000); 
           });
         }
       });

@@ -69,12 +69,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     // --- C. AI REQUEST HANDLER (Initial Snip) ---
-    if (request.action === "ASK_GROQ" || request.action === "ASK_GROQ_TEXT") {
-        const type = request.action === "ASK_GROQ_TEXT" ? 'text' : 'image';
+    if (request.action === "ASK_AI" || request.action === "ASK_AI_TEXT") {
+        const type = request.action === "ASK_AI_TEXT" ? 'text' : 'image';
         const content = type === 'text' ? request.text : request.base64Image;
         const ocrConfidence = request.ocrConfidence || null;
 
-        // Note: content.js sends 'apiKey', but we double-check in handleAIRequest to ensure we use the right one
         handleAIRequest(request.apiKey, content, type, request.model, sendResponse, ocrConfidence);
         return true; 
     }
@@ -83,17 +82,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "CONTINUE_CHAT") {
         (async () => {
             try {
-                // Load keys and settings to ensure we have the latest
-                const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey']);
+                const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey','ollamaHost']);
                 
                 // Determine Key
                 const modelName = request.model || storage.selectedModel;
-                const isGoogle = modelName.includes('gemini') || modelName.includes('gemma');
-                const activeKey = isGoogle ? storage.geminiKey : storage.groqKey;
 
-                if (!activeKey) throw new Error(`Missing API Key for ${isGoogle ? 'Google' : 'Groq'}`);
+                // === FIX 4: Correct Variable Name ===
+                let activeKeyOrHost;
+                if (modelName.startsWith('ollama')) activeKeyOrHost = storage.ollamaHost || "http://localhost:11434";
+                else if (modelName.includes('gemini') || modelName.includes('gemma')) activeKeyOrHost = storage.geminiKey;
+                else activeKeyOrHost = storage.groqKey;
 
-                const aiService = getAIService(activeKey, modelName, storage.interactionMode, storage.customPrompt);
+                const aiService = getAIService(activeKeyOrHost, modelName, storage.interactionMode, storage.customPrompt);
                 
                 const answer = await aiService.chat(request.history);
                 sendResponse({ success: true, answer: answer });
@@ -110,25 +110,35 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // 3. The Core Logic
 async function handleAIRequest(passedApiKey, inputContent, type, explicitModel, sendResponse, ocrConfidence) {
     try {
-        const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey']);
+        const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey','ollamaHost']);
         const mode = storage.interactionMode || 'short';
         
         const modelName = explicitModel || storage.selectedModel || "meta-llama/llama-4-scout-17b-16e-instruct";
 
-        // === KEY SELECTION LOGIC ===
-        // We ignore the 'passedApiKey' if it doesn't match the model provider requirements, 
-        // prioritizing the secure storage keys.
-        const isGoogle = modelName.includes('gemini') || modelName.includes('gemma');
-        let activeKey = isGoogle ? storage.geminiKey : storage.groqKey;
-
-        // Fallback: if storage was empty but content.js passed one (rare), use it
-        if (!activeKey && passedApiKey) activeKey = passedApiKey;
-
-        if (!activeKey) {
-            throw new Error(`Missing API Key. Please add your ${isGoogle ? 'Google' : 'Groq'} Key in the extension popup.`);
+        // === KEY/HOST SELECTION LOGIC ===
+        let activeKeyOrHost;
+        if (modelName.startsWith('ollama')) {
+            // For Ollama, we pass the Host URL
+            activeKeyOrHost = storage.ollamaHost || "http://localhost:11434";
+        } 
+        else if (modelName.includes('gemini') || modelName.includes('gemma')) {
+            activeKeyOrHost = storage.geminiKey;
+        } 
+        else {
+            activeKeyOrHost = storage.groqKey;
         }
 
-        const aiService = getAIService(activeKey, modelName, mode, storage.customPrompt);
+        // Fallback: if storage was empty but content.js passed one, use it
+        // Note: content.js now correctly passes host for ollama models
+        if (!activeKeyOrHost) {
+            activeKeyOrHost = passedApiKey;
+        }
+
+        if (!activeKeyOrHost) {
+            throw new Error(`Missing Configuration. Please check your keys/host in the extension popup.`);
+        }
+
+        const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt);
 
         console.log(`[Background] Asking AI: Model=${modelName}, Mode=${mode}, Type=${type}`);
 
