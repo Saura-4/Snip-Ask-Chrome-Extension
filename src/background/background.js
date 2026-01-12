@@ -83,14 +83,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "CONTINUE_CHAT") {
         (async () => {
             try {
-                const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey', 'ollamaHost']);
+                const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
 
                 // Determine Key
                 const modelName = request.model || storage.selectedModel;
 
-                // === FIX 4: Correct Variable Name ===
+                // Select appropriate key/host based on model type
                 let activeKeyOrHost;
-                if (modelName.startsWith('ollama')) activeKeyOrHost = storage.ollamaHost || "http://localhost:11434";
+                if (modelName.startsWith('ollama:')) activeKeyOrHost = storage.ollamaHost || "http://localhost:11434";
+                else if (modelName.startsWith('openrouter:')) activeKeyOrHost = storage.openrouterKey;
                 else if (modelName.includes('gemini') || modelName.includes('gemma')) activeKeyOrHost = storage.geminiKey;
                 else activeKeyOrHost = storage.groqKey;
 
@@ -112,16 +113,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // SECURITY: API keys are retrieved from storage only, never passed via messages
 async function handleAIRequest(inputContent, type, explicitModel, sendResponse, ocrConfidence) {
     try {
-        const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey', 'ollamaHost']);
-        const mode = storage.interactionMode || 'short';
+        const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'selectedMode', 'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
+        const mode = storage.selectedMode || storage.interactionMode || 'short';
 
         const modelName = explicitModel || storage.selectedModel || "meta-llama/llama-4-scout-17b-16e-instruct";
 
         // === KEY/HOST SELECTION LOGIC (from secure storage only) ===
         let activeKeyOrHost;
-        if (modelName.startsWith('ollama')) {
+        if (modelName.startsWith('ollama:')) {
             // For Ollama, we pass the Host URL
             activeKeyOrHost = storage.ollamaHost || "http://localhost:11434";
+        }
+        else if (modelName.startsWith('openrouter:')) {
+            activeKeyOrHost = storage.openrouterKey;
         }
         else if (modelName.includes('gemini') || modelName.includes('gemma')) {
             activeKeyOrHost = storage.geminiKey;
@@ -134,7 +138,8 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
             throw new Error(`Missing Configuration. Please configure your API keys in the extension popup.`);
         }
 
-        const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt);
+        // Pass customModes from storage to enable user-defined prompts
+        const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
 
         // Route to unified chat method or specific handlers
         let result;

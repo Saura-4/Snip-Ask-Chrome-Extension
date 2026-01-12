@@ -31,6 +31,7 @@ const PROMPTS =
 // REQUEST TIMEOUT HELPER
 // ============================================================================
 const CLOUD_TIMEOUT_MS = 30000;  // 30 seconds for Groq/Gemini
+const OPENROUTER_TIMEOUT_MS = 90000; // 90 seconds for OpenRouter free tier (slow)
 const LOCAL_TIMEOUT_MS = 120000; // 2 minutes for Ollama (cold start can be slow)
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = CLOUD_TIMEOUT_MS) {
@@ -57,17 +58,30 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = CLOUD_TIMEOUT_MS)
 // 2. ABSTRACT SERVICE
 // ============================================================================
 class AbstractAIService {
-    constructor(apiKey, modelName, interactionMode, customPrompt) {
+    constructor(apiKey, modelName, interactionMode, customPrompt, customModes = null) {
         this.apiKey = apiKey;
         this.modelName = modelName;
         this.mode = interactionMode;
         this.customPrompt = customPrompt;
+        this.customModes = customModes; // Modes loaded from storage
     }
 
     _getSystemInstruction() {
         let coreInstruction = PROMPTS.default.base;
-        if (this.mode === 'custom' && this.customPrompt) coreInstruction = this.customPrompt;
-        else if (PROMPTS[this.mode]) coreInstruction = PROMPTS[this.mode].base;
+
+        // First check if using custom prompt mode
+        if (this.mode === 'custom' && this.customPrompt) {
+            coreInstruction = this.customPrompt;
+        }
+        // Then check customModes from storage
+        else if (this.customModes) {
+            const mode = this.customModes.find(m => m.id === this.mode);
+            if (mode) coreInstruction = mode.prompt;
+        }
+        // Fallback to hardcoded PROMPTS
+        else if (PROMPTS[this.mode]) {
+            coreInstruction = PROMPTS[this.mode].base;
+        }
 
         const securityProtocol =
             "\n\n[SYSTEM PROTOCOL]" +
@@ -83,6 +97,13 @@ class AbstractAIService {
 
     _createImagePrompt() {
         if (this.mode === 'custom' && this.customPrompt) return this.customPrompt;
+
+        // Check customModes from storage
+        if (this.customModes) {
+            const mode = this.customModes.find(m => m.id === this.mode);
+            if (mode) return mode.prompt;
+        }
+
         return PROMPTS[this.mode]?.image || PROMPTS.short.image;
     }
 
@@ -92,9 +113,17 @@ class AbstractAIService {
 // ============================================================================
 // 3. GROQ IMPLEMENTATION
 // ============================================================================
+
+// Helper to strip Qwen/DeepSeek thinking tags from responses
+function stripThinkingTags(text) {
+    if (!text) return text;
+    // Remove <think>...</think> blocks (Qwen 3 thinking mode)
+    return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+}
+
 class GroqService extends AbstractAIService {
-    constructor(apiKey, modelName, interactionMode, customPrompt) {
-        super(apiKey, modelName, interactionMode, customPrompt);
+    constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
+        super(apiKey, modelName, interactionMode, customPrompt, customModes);
         this.actualModel = modelName || "meta-llama/llama-4-scout-17b-16e-instruct";
         this.API_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
     }
@@ -120,7 +149,10 @@ class GroqService extends AbstractAIService {
 
         const data = await response.json();
         if (!response.ok) throw new Error(data.error?.message || "Groq Network Error");
-        return data.choices?.[0]?.message?.content || "No answer.";
+
+        // Strip thinking tags from Qwen models
+        const rawContent = data.choices?.[0]?.message?.content || "No answer.";
+        return stripThinkingTags(rawContent);
     }
 
     async askImage(base64Image) {
@@ -151,8 +183,8 @@ class GroqService extends AbstractAIService {
 // 4. GEMINI & GEMMA IMPLEMENTATION
 // ============================================================================
 class GeminiService extends AbstractAIService {
-    constructor(apiKey, modelName, interactionMode, customPrompt) {
-        super(apiKey, modelName, interactionMode, customPrompt);
+    constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
+        super(apiKey, modelName, interactionMode, customPrompt, customModes);
         this.baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
     }
 
@@ -246,6 +278,134 @@ class GeminiService extends AbstractAIService {
 }
 
 // ============================================================================
+// 5. OPENROUTER IMPLEMENTATION (OpenAI-compatible API)
+// ============================================================================
+class OpenRouterService extends AbstractAIService {
+    constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
+        super(apiKey, modelName, interactionMode, customPrompt, customModes);
+        this.actualModel = modelName.replace('openrouter:', '');
+        this.API_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
+    }
+
+    async chat(messages) {
+        // Build messages - keep it simple like OpenRouter quickstart
+        const finalMessages = [];
+
+        // Add system instruction if not already present
+        if (messages.length === 0 || messages[0].role !== 'system') {
+            finalMessages.push({ role: "system", content: this._getSystemInstruction() });
+        }
+
+        // Add all messages, converting complex content to simple strings where needed
+        for (const msg of messages) {
+            if (msg.role === 'system' && finalMessages.length > 0 && finalMessages[0].role === 'system') {
+                continue; // Skip duplicate system message
+            }
+
+            // Simplify message content for non-vision models
+            let content = msg.content;
+            if (Array.isArray(content)) {
+                // Extract text parts for text-only models
+                const textParts = content.filter(p => p.type === 'text').map(p => p.text);
+                const hasImage = content.some(p => p.type === 'image_url');
+
+                if (hasImage && this._isVisionModel()) {
+                    // Keep full content for vision models
+                    content = msg.content;
+                } else {
+                    // For non-vision models, just use text
+                    content = textParts.join('\n') || 'Analyze this content.';
+                }
+            }
+
+            finalMessages.push({ role: msg.role, content });
+        }
+
+        const requestBody = {
+            model: this.actualModel,
+            messages: finalMessages
+        };
+
+        console.log('[OpenRouter] Request:', JSON.stringify({
+            model: this.actualModel,
+            messageCount: finalMessages.length,
+            firstMsgRole: finalMessages[0]?.role
+        }));
+
+        try {
+            const response = await fetchWithTimeout(this.API_ENDPOINT, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${this.apiKey}`,
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/Saura-4/Snip-Ask-Chrome-Extension",
+                    "X-Title": "Snip & Ask Extension"
+                },
+                body: JSON.stringify(requestBody)
+            }, OPENROUTER_TIMEOUT_MS);
+
+            const data = await response.json();
+            console.log('[OpenRouter] Response status:', response.status);
+
+            if (!response.ok) {
+                console.error('[OpenRouter] Error response:', data);
+                throw new Error(data.error?.message || `OpenRouter Error (${response.status})`);
+            }
+
+            const answer = data.choices?.[0]?.message?.content;
+            if (!answer) {
+                console.error('[OpenRouter] No content in response:', data);
+                throw new Error('No response content from OpenRouter');
+            }
+
+            // Strip thinking tags from DeepSeek/Qwen models
+            return stripThinkingTags(answer);
+        } catch (error) {
+            console.error('[OpenRouter] Fetch error:', error);
+            throw error;
+        }
+    }
+
+    _isVisionModel() {
+        const lower = this.actualModel.toLowerCase();
+        return lower.includes('vision') ||
+            lower.includes('vl') ||
+            lower.includes('llava') ||
+            lower.includes('llama-4');
+    }
+
+    async askImage(base64Image) {
+        const promptText = this._createImagePrompt();
+
+        // Check if this model supports vision
+        if (this._isVisionModel()) {
+            const userMsg = {
+                role: "user",
+                content: [
+                    { type: "text", text: promptText },
+                    { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+                ]
+            };
+            const answer = await this.chat([userMsg]);
+            return { answer, initialUserMessage: userMsg };
+        } else {
+            // For non-vision models, we shouldn't be here (OCR should handle it)
+            // But just in case, send just the prompt
+            const userMsg = { role: "user", content: promptText + "\n\n[Image provided but model doesn't support vision]" };
+            const answer = await this.chat([userMsg]);
+            return { answer, initialUserMessage: userMsg };
+        }
+    }
+
+    async askText(rawText) {
+        // Simpler format - don't use XML tags that might confuse some models
+        const userMsg = { role: "user", content: rawText };
+        const answer = await this.chat([userMsg]);
+        return { answer, initialUserMessage: userMsg };
+    }
+}
+
+// ============================================================================
 // SECURITY HELPER: SSRF Protection for Ollama Host
 // ============================================================================
 function isValidOllamaHost(url) {
@@ -291,11 +451,11 @@ function isValidOllamaHost(url) {
 }
 
 // ============================================================================
-// 5. OLLAMA IMPLEMENTATION
+// 6. OLLAMA IMPLEMENTATION
 // ============================================================================
 class OllamaService extends AbstractAIService {
-    constructor(host, modelName, interactionMode, customPrompt) {
-        super(null, modelName, interactionMode, customPrompt);
+    constructor(host, modelName, interactionMode, customPrompt, customModes) {
+        super(null, modelName, interactionMode, customPrompt, customModes);
         this.actualModel = modelName.replace('ollama:', '');
 
         // SECURITY: Validate Ollama host to prevent SSRF attacks
@@ -381,20 +541,24 @@ class OllamaService extends AbstractAIService {
 }
 
 // ============================================================================
-// 6. FACTORY (FIXED ORDERING)
+// 7. FACTORY (FIXED ORDERING)
 // ============================================================================
-export function getAIService(apiKeyOrHost, modelName, interactionMode, customPrompt) {
-    // === FIX 2: Check Ollama FIRST ===
-    // If we don't do this, 'ollama:gemma3' gets caught by the Gemma check below
-    if (modelName && modelName.startsWith('ollama')) {
-        return new OllamaService(apiKeyOrHost, modelName, interactionMode, customPrompt);
+export function getAIService(apiKeyOrHost, modelName, interactionMode, customPrompt, customModes = null) {
+    // Check Ollama FIRST to catch 'ollama:gemma3' before Gemma check
+    if (modelName && modelName.startsWith('ollama:')) {
+        return new OllamaService(apiKeyOrHost, modelName, interactionMode, customPrompt, customModes);
+    }
+
+    // Check OpenRouter second
+    if (modelName && modelName.startsWith('openrouter:')) {
+        return new OpenRouterService(apiKeyOrHost, modelName, interactionMode, customPrompt, customModes);
     }
 
     // Detect Gemini or Gemma models (Cloud)
     if (modelName && (modelName.includes('gemini') || modelName.includes('gemma'))) {
-        return new GeminiService(apiKeyOrHost, modelName, interactionMode, customPrompt);
+        return new GeminiService(apiKeyOrHost, modelName, interactionMode, customPrompt, customModes);
     }
 
     // Default to Groq
-    return new GroqService(apiKeyOrHost, modelName, interactionMode, customPrompt);
+    return new GroqService(apiKeyOrHost, modelName, interactionMode, customPrompt, customModes);
 }

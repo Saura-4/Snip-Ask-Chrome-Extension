@@ -6,6 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Groq Snip & Ask</title>
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       width: 320px;
       padding: 15px;
@@ -13,17 +17,52 @@
       color: #e0e0e0;
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       font-size: 14px;
+      overflow-x: hidden;
+      position: relative;
     }
 
-    h2 {
-      margin-top: 0;
-      color: #f55036;
-      /* Groq Orange */
-      font-size: 18px;
-      text-align: center;
+    .header {
+      display: flex;
+      justify-content: center;
+      align-items: center;
       margin-bottom: 15px;
       border-bottom: 1px solid #333;
       padding-bottom: 10px;
+    }
+
+    .header h2 {
+      margin: 0;
+      color: #f55036;
+      font-size: 18px;
+      white-space: nowrap;
+    }
+
+    .settings-btn {
+      background: none;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0;
+      transition: all 0.2s;
+    }
+
+    .settings-btn:hover {
+      color: #f55036;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 15px;
+      padding-top: 10px;
+      border-top: 1px solid #333;
+    }
+
+    .footer-text {
+      font-size: 10px;
+      color: #666;
     }
 
     label {
@@ -45,7 +84,6 @@
       border: 1px solid #454545;
       color: #fff;
       border-radius: 4px;
-      box-sizing: border-box;
     }
 
     input:focus,
@@ -55,18 +93,6 @@
       border-color: #f55036;
     }
 
-    /* Input Group Styling */
-    .key-group {
-      margin-bottom: 10px;
-    }
-
-    .key-group input {
-      margin-bottom: 8px;
-      font-family: monospace;
-      font-size: 11px;
-    }
-
-    /* Model Group Headers */
     optgroup {
       background-color: #1e1e1e;
       color: #f55036;
@@ -83,7 +109,7 @@
     button {
       width: 100%;
       padding: 10px;
-      margin-top: 15px;
+      margin-top: 10px;
       border: none;
       border-radius: 4px;
       cursor: pointer;
@@ -94,28 +120,11 @@
     #snipBtn {
       background-color: #f55036;
       color: white;
+      margin-top: 15px;
     }
 
     #snipBtn:hover {
       background-color: #d43d25;
-    }
-
-    #resetBtn {
-      background-color: transparent;
-      border: 1px solid #454545;
-      color: #888;
-      margin-top: 10px;
-      font-size: 11px;
-      padding: 6px;
-    }
-
-    #resetBtn:hover {
-      background-color: #2d2d2d;
-      color: #bbb;
-    }
-
-    .hidden {
-      display: none;
     }
 
     .footer {
@@ -124,101 +133,487 @@
       font-size: 10px;
       color: #666;
     }
+
+    .hidden {
+      display: none;
+    }
+
+    /* Slide-out Settings Panel */
+    .settings-panel {
+      position: fixed;
+      top: 0;
+      left: 0;
+      min-width: 480px;
+      min-height: 600px;
+      width: auto;
+      height: auto;
+      max-width: 800px;
+      max-height: 90vh;
+      background: #1e1e1e;
+      transition: transform 0.3s ease, width 0.2s ease, height 0.2s ease;
+      z-index: 1000;
+      overflow-y: auto;
+      padding: 20px;
+      transform: translateX(-100%);
+      border-right: 1px solid #333;
+    }
+
+    .settings-panel.open {
+      transform: translateX(0);
+    }
+
+    /* Expand body when settings open */
+    body.settings-open {
+      min-width: 480px;
+      min-height: 600px;
+      width: auto;
+      height: auto;
+    }
+
+    /* Fixed textarea in mode editor */
+    #modePromptInput {
+      resize: none;
+      width: 100%;
+      height: 100px;
+    }
+
+    .settings-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #333;
+    }
+
+    .settings-header h3 {
+      margin: 0;
+      color: #f55036;
+      font-size: 16px;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 20px;
+      padding: 0;
+      width: auto;
+    }
+
+    .close-btn:hover {
+      color: #f55036;
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      margin-bottom: 15px;
+      border-bottom: 1px solid #333;
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 8px;
+      background: none;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 12px;
+      border-bottom: 2px solid transparent;
+      margin: 0;
+      width: auto;
+    }
+
+    .tab-btn.active {
+      color: #f55036;
+      border-bottom-color: #f55036;
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* Provider Toggle */
+    .provider-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px;
+      background: #252526;
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+
+    .provider-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .provider-icon {
+      font-size: 16px;
+    }
+
+    .provider-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: #ccc;
+    }
+
+    /* Toggle Switch */
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+    }
+
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #454545;
+      transition: 0.3s;
+      border-radius: 22px;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+    }
+
+    .toggle input:checked+.toggle-slider {
+      background-color: #f55036;
+    }
+
+    .toggle input:checked+.toggle-slider:before {
+      transform: translateX(18px);
+    }
+
+    /* Mode Item */
+    .mode-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px;
+      background: #252526;
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+
+    .mode-item .mode-name {
+      font-size: 12px;
+      color: #ccc;
+    }
+
+    .mode-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .mode-actions button {
+      width: auto;
+      padding: 4px 8px;
+      margin: 0;
+      font-size: 10px;
+      background: #333;
+      color: #888;
+    }
+
+    .mode-actions button:hover {
+      background: #444;
+      color: #fff;
+    }
+
+    .add-mode-btn {
+      background: #333 !important;
+      color: #f55036 !important;
+      font-size: 12px;
+    }
+
+    /* Mode Editor Modal */
+    .mode-editor {
+      display: none;
+      margin-top: 15px;
+      padding: 12px;
+      background: #252526;
+      border-radius: 6px;
+      border: 1px solid #333;
+    }
+
+    .mode-editor.active {
+      display: block;
+    }
+
+    .mode-editor input,
+    .mode-editor textarea {
+      margin-bottom: 8px;
+    }
+
+    .mode-editor-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .mode-editor-actions button {
+      flex: 1;
+      padding: 8px;
+      font-size: 11px;
+    }
+
+    .save-btn {
+      background: #f55036 !important;
+      color: white !important;
+    }
+
+    .cancel-btn {
+      background: #333 !important;
+      color: #888 !important;
+    }
+
+    /* Hint banner */
+    .provider-hint {
+      padding: 8px 10px;
+      background: #252526;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      font-size: 11px;
+      color: #888;
+      border-left: 2px solid #f55036;
+    }
+
+    .provider-hint a {
+      color: #f55036;
+      cursor: pointer;
+    }
+
+    /* Model Items */
+    .model-provider-header {
+      font-size: 11px;
+      font-weight: 600;
+      color: #f55036;
+      padding: 8px 0 4px 0;
+      margin-top: 8px;
+      border-bottom: 1px solid #333;
+    }
+
+    .model-provider-header:first-child {
+      margin-top: 0;
+    }
+
+    .provider-disabled-badge {
+      color: #666;
+      font-weight: normal;
+      font-size: 10px;
+    }
+
+    .model-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 10px;
+      background: #252526;
+      border-radius: 6px;
+      margin-top: 6px;
+    }
+
+    .model-item-disabled {
+      opacity: 0.5;
+    }
+
+    .model-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .model-name {
+      font-size: 11px;
+      color: #ccc;
+    }
   </style>
 </head>
 
 <body>
 
-  <h2>⚡ Snip & Ask</h2>
-
-  <div id="messageContainer" class="hidden" style="color: #4caf50; text-align: center; margin-bottom: 10px;">
-    Settings cleared!
-  </div>
-
-  <div class="key-group">
-    <label>API Keys</label>
-    <div
-      style="background: #2d2d2d; padding: 6px 8px; border-left: 2px solid #f55036; margin-bottom: 8px; font-size: 10px; color: #999;">
-      🔒 Keys are stored locally in your browser only.
+  <!-- Main Content -->
+  <div id="mainView">
+    <div class="header">
+      <h2>⚡ Snip & Ask</h2>
     </div>
-    <input type="password" id="apiKey" placeholder="Groq Key (gsk_...)" />
-    <input type="password" id="geminiKey" placeholder="Google Key (AIza...)" />
-    <input type="text" id="ollamaHost" placeholder="Ollama URL (default: http://localhost:11434)" />
-    <div style="text-align: right; margin-top: 2px;">
-      <a href="https://github.com/Saura-4/Snip-Ask-Chrome-Extension" target="_blank"
-        style="font-size: 11px; color: #f55036; text-decoration: none; border-bottom: 1px dotted #f55036;"
-        title="Click to download the One-Click Setup Script">
-        ⚠️ Enable Offline Access (Script)
-      </a>
+
+    <div id="messageContainer" class="hidden" style="color: #4caf50; text-align: center; margin-bottom: 10px;">
+      Settings saved!
+    </div>
+
+    <!-- Provider Hint (shown if only Groq enabled) -->
+    <div id="providerHint" class="provider-hint hidden">
+      💡 <a id="enableMoreProviders">Enable more providers</a> like Google, OpenRouter, or Ollama in settings.
+    </div>
+
+    <!-- API Keys (collapsed) -->
+    <details id="apiKeysSection" style="margin-bottom: 12px;">
+      <summary
+        style="cursor: pointer; font-weight: 600; color: #ccc; font-size: 12px; padding: 8px 0; user-select: none;">
+        🔐 API Keys <span style="color: #666; font-size: 10px;">(click to expand)</span>
+      </summary>
+      <div
+        style="padding: 10px; background: #252526; border-radius: 0 0 6px 6px; border: 1px solid #333; border-top: none;">
+        <div style="font-size: 10px; color: #888; margin-bottom: 8px;">
+          🔒 Keys are stored locally in your browser only.
+        </div>
+        <div id="apiKeyInputs">
+          <!-- Dynamically populated based on enabled providers -->
+        </div>
+        <div style="font-size: 10px; color: #888; margin-top: 8px; padding-top: 8px; border-top: 1px solid #333;">
+          📁 <strong style="color: #ccc;">PDF Snipping:</strong>
+          <a href="#" id="openExtSettings" style="color: #f55036;">Enable file access</a>
+        </div>
+      </div>
+    </details>
+
+    <label for="modelSelect">AI Model</label>
+    <select id="modelSelect">
+      <!-- Dynamically populated based on enabled providers -->
+    </select>
+
+    <label for="modeSelect">Interaction Mode</label>
+    <select id="modeSelect">
+      <!-- Dynamically populated from storage -->
+    </select>
+
+    <div id="customPromptContainer" class="hidden">
+      <label for="customPromptText">Your System Instruction:</label>
+      <textarea id="customPromptText" rows="3" placeholder="Ex: You are a helpful assistant..."></textarea>
+    </div>
+
+    <button id="snipBtn">Snip Screen</button>
+
+    <div class="footer">
+      <span class="footer-text">v4.0 • Customizable</span>
+      <button class="settings-btn" id="openSettingsBtn" title="Settings">⚙️ Settings</button>
     </div>
   </div>
 
-  <!-- PDF Access Tip -->
-  <div style="background: #252526; padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; border: 1px solid #333;">
-    <div style="font-size: 11px; color: #888;">
-      📁 <strong style="color: #ccc;">PDF Snipping:</strong> To use on local files, enable
-      <a href="#" id="openExtSettings" style="color: #f55036; text-decoration: underline; cursor: pointer;">
-        "Allow access to file URLs"
-      </a> in extension settings.
+  <!-- Slide-out Settings Panel -->
+  <div class="settings-panel" id="settingsPanel">
+    <div class="settings-header">
+      <h3>⚙️ Settings</h3>
+      <button class="close-btn" id="closeSettingsBtn">✕</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="providers">Providers</button>
+      <button class="tab-btn" data-tab="models">Models</button>
+      <button class="tab-btn" data-tab="modes">Modes</button>
+    </div>
+
+    <!-- Providers Tab -->
+    <div class="tab-content active" id="providersTab">
+      <div style="font-size: 11px; color: #888; margin-bottom: 12px;">
+        Enable/disable AI providers. Hidden providers' API keys are deleted after 7 days.
+      </div>
+
+      <div class="provider-item">
+        <div class="provider-info">
+          <span class="provider-icon">🚀</span>
+          <span class="provider-name">Groq</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="providerGroq" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="provider-item">
+        <div class="provider-info">
+          <span class="provider-icon">✨</span>
+          <span class="provider-name">Google (Gemini)</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="providerGoogle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="provider-item">
+        <div class="provider-info">
+          <span class="provider-icon">🌐</span>
+          <span class="provider-name">OpenRouter</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="providerOpenRouter">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="provider-item">
+        <div class="provider-info">
+          <span class="provider-icon">🦙</span>
+          <span class="provider-name">Ollama (Local)</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="providerOllama">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Models Tab -->
+    <div class="tab-content" id="modelsTab">
+      <div style="font-size: 11px; color: #888; margin-bottom: 12px;">
+        Enable/disable individual AI models. Disabled models won't appear in the model selector.
+      </div>
+
+      <div id="modelsList">
+        <!-- Dynamically populated -->
+      </div>
+    </div>
+
+    <!-- Modes Tab -->
+    <div class="tab-content" id="modesTab">
+      <div style="font-size: 11px; color: #888; margin-bottom: 12px;">
+        Customize interaction modes with your own prompts.
+      </div>
+
+      <div id="modesList">
+        <!-- Dynamically populated -->
+      </div>
+
+      <button class="add-mode-btn" id="addModeBtn">+ Add Custom Mode</button>
+
+      <!-- Mode Editor -->
+      <div class="mode-editor" id="modeEditor">
+        <input type="text" id="modeNameInput" placeholder="Mode name (e.g., Summarize)">
+        <textarea id="modePromptInput" rows="4" placeholder="System prompt..."></textarea>
+        <div class="mode-editor-actions">
+          <button class="cancel-btn" id="cancelModeBtn">Cancel</button>
+          <button class="save-btn" id="saveModeBtn">Save</button>
+        </div>
+      </div>
     </div>
   </div>
-
-  <label for="modelSelect">AI Model</label>
-  <select id="modelSelect">
-
-    <optgroup label="👁️ Vision (Best for Images)">
-      <option value="meta-llama/llama-4-scout-17b-16e-instruct">🚀 Llama 4 Scout (Groq)</option>
-      <option value="meta-llama/llama-4-maverick-17b-128e-instruct">🚀 Llama 4 maverick (Groq)</option>
-      <option value="gemini-3-flash-preview">✨ Gemini 3 Flash (Preview)</option>
-      <option value="gemini-3-pro-preview">✨ Gemini 3 Pro (Preview)</option>
-
-      <option value="gemini-2.5-flash">✨ Gemini 2.5 Flash</option>
-      <option value="gemini-2.5-pro">✨ Gemini 2.5 Pro</option>
-
-      <option value="gemma-3-12b-it">✨ Gemma 3 (12B Vision)</option>
-      <option value="gemma-3-27b-it">✨ Gemma 3 (27B Vision)</option>
-    </optgroup>
-
-    <optgroup label="📄 Text / Lightweight">
-      <option value="llama-3.3-70b-versatile">🚀 Llama 3.3 70B (Groq)</option>
-
-      <option value="gemini-2.0-flash-lite-preview-02-05">✨ Gemini 2.0 Flash Lite</option>
-      <option value="gemma-3-4b-it">✨ Gemma 3 (4B)</option>
-      <option value="gemma-3-1b-it">✨ Gemma 3 (1B)</option>
-    </optgroup>
-
-    <optgroup label="🦙 Ollama (Local / Offline)">
-      <option value="ollama:gemma3:4b">✨ Gemma 3 (4B - Local)</option>
-      <option value="ollama:llama3">Llama 3 (Text)</option>
-      <option value="ollama:mistral">Mistral (Text)</option>
-      <option value="ollama:llava">Llava (Vision)</option>
-      <option value="ollama:moondream">Moondream (Vision)</option>
-      <option value="ollama:custom">⚙️ Custom (Enter name manually)</option>
-    </optgroup>
-
-    <optgroup label="🧪 Experimental">
-      <option value="gemini-2.5-computer-use-preview-10-2025">Computer Use (Preview)</option>
-    </optgroup>
-
-  </select>
-
-  <label for="modeSelect">Interaction Mode</label>
-  <select id="modeSelect">
-    <option value="short">⚡ Short Answer (Quiz Mode)</option>
-    <option value="detailed">🧠 Detailed Explanation</option>
-    <option value="code">💻 Code Debugger</option>
-    <option value="custom">✍️ Custom Prompt</option>
-  </select>
-
-  <div id="customPromptContainer" class="hidden">
-    <label for="customPromptText">Your System Instruction:</label>
-    <textarea id="customPromptText" rows="3" placeholder="Ex: You are a cynical pirate..."></textarea>
-  </div>
-
-  <button id="snipBtn">Snip Screen</button>
-  <button id="resetBtn">Reset / Logout</button>
-
-  <div class="footer">v3.4 • Groq & Gemini</div>
 
   <script src="popup.js"></script>
 </body>

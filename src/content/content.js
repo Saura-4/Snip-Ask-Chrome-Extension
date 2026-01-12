@@ -130,7 +130,7 @@ async function onMouseUp(e) {
         cropImage(response.dataUrl, rect, async (croppedBase64) => {
 
             // === UPDATE: GET ALL KEYS ===
-            chrome.storage.local.get(['groqKey', 'geminiKey', 'ollamaHost', 'selectedModel'], async (result) => {
+            chrome.storage.local.get(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'selectedModel'], async (result) => {
 
                 const currentModel = result.selectedModel || "llama-3.3-70b-versatile";
 
@@ -138,10 +138,14 @@ async function onMouseUp(e) {
                 let activeKey;
                 // === FIX 3: Typos Fixed (stratsWith -> startsWith) ===
                 const isOllama = currentModel.startsWith('ollama');
+                const isOpenRouter = currentModel.startsWith('openrouter:');
                 const isGoogle = currentModel.includes('gemini') || currentModel.includes('gemma');
 
                 if (isOllama) {
                     activeKey = result.ollamaHost || "http://localhost:11434";
+                }
+                else if (isOpenRouter) {
+                    activeKey = result.openrouterKey;
                 }
                 else if (isGoogle) {
                     activeKey = result.geminiKey; // Fixed capitalization
@@ -151,7 +155,8 @@ async function onMouseUp(e) {
                 }
 
                 if (!activeKey) {
-                    alert(`Please set your ${isOllama ? 'Ollama Host' : (isGoogle ? 'Google Key' : 'Groq Key')} in the extension popup!`);
+                    const keyType = isOllama ? 'Ollama Host' : (isOpenRouter ? 'OpenRouter Key' : (isGoogle ? 'Google Key' : 'Groq Key'));
+                    alert(`Please set your ${keyType} in the extension popup!`);
                     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
                     return;
                 }
@@ -396,7 +401,7 @@ class FloatingChatUI {
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
 
         // === UPDATE: GET KEYS FOR CHAT ===
-        chrome.storage.local.get(['groqKey', 'geminiKey', 'ollamaHost', 'selectedModel'], async (res) => {
+        chrome.storage.local.get(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'selectedModel'], async (res) => {
             try {
                 // Determine Active Key
                 const modelName = res.selectedModel || '';
@@ -404,6 +409,8 @@ class FloatingChatUI {
 
                 if (modelName.startsWith('ollama')) {
                     activeKey = res.ollamaHost || "http://localhost:11434";
+                } else if (modelName.startsWith('openrouter:')) {
+                    activeKey = res.openrouterKey;
                 } else if (modelName.includes('gemini') || modelName.includes('gemma')) {
                     activeKey = res.geminiKey;
                 } else {

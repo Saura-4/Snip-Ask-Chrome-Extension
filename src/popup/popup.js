@@ -1,136 +1,605 @@
-document.addEventListener('DOMContentLoaded', () => {
-  const apiKeyInput = document.getElementById('apiKey');
-  const geminiKeyInput = document.getElementById('geminiKey');
-  const ollamaHostInput = document.getElementById('ollamaHost');
-  const modelSelect = document.getElementById('modelSelect');
+// popup.js - Custom Modes & Provider Selection
+
+// ============================================================================
+// DEFAULT DATA
+// ============================================================================
+const DEFAULT_MODES = [
+  { id: 'short', name: '⚡ Short Answer', prompt: "You are a concise answer engine. 1. Analyze the user's input. 2. If it is a multiple-choice question, Output in this format: 'Answer: <option>. <explanation>'. 3. For follow-up chat or non-questions, reply naturally but concisely.", isDefault: true },
+  { id: 'detailed', name: '🧠 Detailed', prompt: "You are an expert tutor. Analyze the input. Provide a detailed, step-by-step answer. Use Markdown.", isDefault: true },
+  { id: 'code', name: '💻 Code Debug', prompt: "You are a code debugger. Correct the code and explain the fix. Output a single fenced code block first.", isDefault: true }
+];
+
+const DEFAULT_PROVIDERS = {
+  groq: true,
+  google: false,
+  openrouter: false,
+  ollama: false
+};
+
+// Generate default enabled models (all enabled by default)
+function getDefaultEnabledModels() {
+  const enabled = {};
+  for (const [provider, models] of Object.entries(ALL_MODELS)) {
+    models.forEach(model => {
+      enabled[model.value] = true;
+    });
+  }
+  return enabled;
+}
+
+const ALL_MODELS = {
+  groq: [
+    { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout (Vision)' },
+    { value: 'meta-llama/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick (Vision)' },
+    { value: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (Text)' },
+    { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B (Text)' }
+  ],
+  google: [
+    { value: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    { value: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+    { value: 'gemini-2.0-flash-lite-preview-02-05', name: 'Gemini 2.0 Flash Lite' },
+    { value: 'gemma-3-27b-it', name: 'Gemma 3 27B (Vision)' },
+    { value: 'gemma-3-12b-it', name: 'Gemma 3 12B (Vision)' },
+    { value: 'gemma-3-4b-it', name: 'Gemma 3 4B' },
+    { value: 'gemma-3-1b-it', name: 'Gemma 3 1B' }
+  ],
+  openrouter: [
+    { value: 'openrouter:deepseek/deepseek-r1-0528:free', name: 'DeepSeek R1 (Free)' },
+    { value: 'openrouter:custom', name: '⚙️ Custom Model' }
+  ],
+  ollama: [
+    { value: 'ollama:gemma3:4b', name: 'Gemma 3 4B' },
+    { value: 'ollama:llama3', name: 'Llama 3' },
+    { value: 'ollama:mistral', name: 'Mistral' },
+    { value: 'ollama:llava', name: 'LLaVA (Vision)' },
+    { value: 'ollama:moondream', name: 'Moondream (Vision)' },
+    { value: 'ollama:custom', name: '⚙️ Custom Model' }
+  ]
+};
+
+const PROVIDER_LABELS = {
+  groq: '🚀 Groq (Fast)',
+  google: '✨ Google (Gemini)',
+  openrouter: '🌐 OpenRouter',
+  ollama: '🦙 Ollama (Local)'
+};
+
+const API_KEY_CONFIG = {
+  groq: { id: 'apiKey', placeholder: 'Groq Key (gsk_...)', type: 'password', storageKey: 'groqKey' },
+  google: { id: 'geminiKey', placeholder: 'Google Key (AIza...)', type: 'password', storageKey: 'geminiKey' },
+  openrouter: { id: 'openrouterKey', placeholder: 'OpenRouter Key (sk-or-...)', type: 'password', storageKey: 'openrouterKey' },
+  ollama: { id: 'ollamaHost', placeholder: 'Ollama URL (http://localhost:11434)', type: 'text', storageKey: 'ollamaHost' }
+};
+
+// ============================================================================
+// STATE
+// ============================================================================
+let editingModeId = null;
+const MIN_PANEL_WIDTH = 480;
+const MIN_PANEL_HEIGHT = 600;
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+document.addEventListener('DOMContentLoaded', async () => {
+  await initializeDefaults();
+  await loadSettings();
+  setupEventListeners();
+  setupDynamicResize();
+});
+
+async function initializeDefaults() {
+  const result = await chrome.storage.local.get(['customModes', 'enabledProviders', 'enabledModels']);
+
+  if (!result.customModes) {
+    await chrome.storage.local.set({ customModes: DEFAULT_MODES });
+  }
+
+  if (!result.enabledProviders) {
+    await chrome.storage.local.set({ enabledProviders: DEFAULT_PROVIDERS });
+  }
+
+  if (!result.enabledModels) {
+    await chrome.storage.local.set({ enabledModels: getDefaultEnabledModels() });
+  }
+}
+
+// ============================================================================
+// LOAD SETTINGS
+// ============================================================================
+async function loadSettings() {
+  const result = await chrome.storage.local.get([
+    'customModes', 'enabledProviders', 'enabledModels', 'selectedModel', 'selectedMode',
+    'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'customPrompt',
+    'providerHiddenSince'
+  ]);
+
+  // Check and cleanup old keys
+  await checkKeyCleanup(result.enabledProviders || DEFAULT_PROVIDERS, result.providerHiddenSince || {});
+
+  // Load providers into settings panel
+  loadProviderToggles(result.enabledProviders || DEFAULT_PROVIDERS);
+
+  // Load models list in settings
+  loadModelsList(result.enabledProviders || DEFAULT_PROVIDERS, result.enabledModels || getDefaultEnabledModels());
+
+  // Load models based on enabled providers and enabled models
+  loadModels(result.enabledProviders || DEFAULT_PROVIDERS, result.enabledModels || getDefaultEnabledModels(), result.selectedModel);
+
+  // Load API key inputs based on enabled providers
+  loadApiKeyInputs(result.enabledProviders || DEFAULT_PROVIDERS, result);
+
+  // Load modes
+  loadModes(result.customModes || DEFAULT_MODES, result.selectedMode);
+
+  // Load modes list in settings
+  loadModesList(result.customModes || DEFAULT_MODES);
+
+  // Show provider hint if only Groq enabled
+  updateProviderHint(result.enabledProviders || DEFAULT_PROVIDERS);
+
+  // Handle custom prompt visibility
   const modeSelect = document.getElementById('modeSelect');
   const customPromptContainer = document.getElementById('customPromptContainer');
   const customPromptText = document.getElementById('customPromptText');
-  const snipBtn = document.getElementById('snipBtn');
-  const resetBtn = document.getElementById('resetBtn');
 
-  // 1. Load Saved Settings
-  chrome.storage.local.get(['groqKey', 'geminiKey', 'ollamaHost', 'interactionMode', 'customPrompt', 'selectedModel'], (result) => {
-    if (result.groqKey) apiKeyInput.value = result.groqKey;
-    if (result.geminiKey) geminiKeyInput.value = result.geminiKey;
-    ollamaHostInput.value = result.ollamaHost || "http://localhost:11434";
-
-    if (result.interactionMode) {
-      modeSelect.value = result.interactionMode;
-      toggleCustomBox(result.interactionMode);
-    }
-    if (result.customPrompt) customPromptText.value = result.customPrompt;
-
-    if (result.selectedModel) {
-      modelSelect.value = result.selectedModel;
-    } else {
-      chrome.storage.local.set({ selectedModel: modelSelect.value });
-    }
-  });
-
-  // 2. Save Settings
-  apiKeyInput.addEventListener('change', () => chrome.storage.local.set({ groqKey: apiKeyInput.value.trim() }));
-  geminiKeyInput.addEventListener('change', () => chrome.storage.local.set({ geminiKey: geminiKeyInput.value.trim() }));
-  ollamaHostInput.addEventListener('change', () => chrome.storage.local.set({ ollamaHost: ollamaHostInput.value.trim() }));
-
-  // Open extension settings for file access
-  const openExtSettingsLink = document.getElementById('openExtSettings');
-  if (openExtSettingsLink) {
-    openExtSettingsLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      // Open the extension's details page in Chrome settings
-      chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
-    });
+  if (result.selectedMode === 'custom') {
+    customPromptContainer.classList.remove('hidden');
   }
-
-  modelSelect.addEventListener('change', () => {
-    if (modelSelect.value === 'ollama:custom') {
-      const modelName = prompt("Enter your local Ollama model name (e.g., 'deepseek-coder'):", "llama3");
-      if (modelName) {
-        // SECURITY: Validate model name to prevent injection attacks
-        if (/^[a-zA-Z0-9\-_:.]+$/.test(modelName)) {
-          chrome.storage.local.set({ selectedModel: "ollama:" + modelName });
-          const opt = modelSelect.querySelector('option[value="ollama:custom"]');
-          if (opt) opt.text = `Custom: ${modelName}`;
-        } else {
-          alert("⚠️ Invalid model name. Use only letters, numbers, hyphens, colons, and underscores.");
-          modelSelect.value = "meta-llama/llama-4-scout-17b-16e-instruct";
-        }
-      } else {
-        // User cancelled - reset to default
-        modelSelect.value = "meta-llama/llama-4-scout-17b-16e-instruct";
-      }
-    } else {
-      chrome.storage.local.set({ selectedModel: modelSelect.value });
-    }
-  });
-
-  modeSelect.addEventListener('change', () => {
-    const mode = modeSelect.value;
-    chrome.storage.local.set({ interactionMode: mode });
-    toggleCustomBox(mode);
-  });
-
-  customPromptText.addEventListener('change', () => chrome.storage.local.set({ customPrompt: customPromptText.value }));
-
-  function toggleCustomBox(mode) {
-    customPromptContainer.style.display = (mode === 'custom') ? 'block' : 'none';
+  if (result.customPrompt) {
+    customPromptText.value = result.customPrompt;
   }
+}
 
-  // 3. Start Snipping
-  snipBtn.addEventListener('click', () => {
-    const currentModel = modelSelect.value;
+function loadProviderToggles(enabledProviders) {
+  document.getElementById('providerGroq').checked = enabledProviders.groq !== false;
+  document.getElementById('providerGoogle').checked = enabledProviders.google === true;
+  document.getElementById('providerOpenRouter').checked = enabledProviders.openrouter === true;
+  document.getElementById('providerOllama').checked = enabledProviders.ollama === true;
+}
 
-    // === FIX 1: Correct Variable Naming ===
-    const isOllama = currentModel.startsWith('ollama');
-    const isGoogle = currentModel.includes('gemini') || currentModel.includes('gemma'); // Renamed to isGoogle for consistency
+function loadModels(enabledProviders, enabledModels, selectedModel) {
+  const modelSelect = document.getElementById('modelSelect');
+  modelSelect.innerHTML = '';
 
-    // Validation Logic
-    if (isOllama) {
-      if (!ollamaHostInput.value.trim()) {
-        alert("Please enter your Ollama Host URL (default: http://localhost:11434)");
-        return;
-      }
-    }
-    else if (isGoogle) {
-      if (!geminiKeyInput.value.trim()) {
-        alert("Please enter your Google API Key (starts with AIza...)");
-        return;
-      }
-    }
-    else {
-      // Groq
-      if (!apiKeyInput.value.trim()) {
-        alert("Please enter your Groq API Key (starts with gsk_...)");
-        return;
-      }
-    }
+  for (const [provider, models] of Object.entries(ALL_MODELS)) {
+    if (enabledProviders[provider]) {
+      const enabledModelsInProvider = models.filter(model => enabledModels[model.value] !== false);
+      
+      if (enabledModelsInProvider.length > 0) {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = PROVIDER_LABELS[provider];
 
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs.length === 0) return;
-      chrome.tabs.sendMessage(tabs[0].id, { action: "START_SNIP" })
-        .then(() => window.close())
-        .catch((err) => {
-          console.error(err);
-          alert("⚠️ Could not start snip. Please refresh the page!");
+        enabledModelsInProvider.forEach(model => {
+          const option = document.createElement('option');
+          option.value = model.value;
+          option.textContent = model.name;
+          optgroup.appendChild(option);
         });
+
+        modelSelect.appendChild(optgroup);
+      }
+    }
+  }
+
+  if (selectedModel && modelSelect.querySelector(`option[value="${selectedModel}"]`)) {
+    modelSelect.value = selectedModel;
+  }
+}
+
+function loadModelsList(enabledProviders, enabledModels) {
+  const modelsList = document.getElementById('modelsList');
+  if (!modelsList) return;
+  modelsList.innerHTML = '';
+
+  for (const [provider, models] of Object.entries(ALL_MODELS)) {
+    // Provider header
+    const providerHeader = document.createElement('div');
+    providerHeader.className = 'model-provider-header';
+    providerHeader.innerHTML = `<span>${PROVIDER_LABELS[provider]}</span>`;
+    if (!enabledProviders[provider]) {
+      providerHeader.innerHTML += ' <span class="provider-disabled-badge">(Provider disabled)</span>';
+    }
+    modelsList.appendChild(providerHeader);
+
+    // Models for this provider
+    models.forEach(model => {
+      const div = document.createElement('div');
+      div.className = 'model-item';
+      if (!enabledProviders[provider]) {
+        div.classList.add('model-item-disabled');
+      }
+      div.innerHTML = `
+        <div class="model-info">
+          <span class="model-name">${model.name}</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" class="model-toggle" data-model="${model.value}" ${enabledModels[model.value] !== false ? 'checked' : ''} ${!enabledProviders[provider] ? 'disabled' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      `;
+      modelsList.appendChild(div);
+    });
+  }
+
+  // Attach event listeners
+  modelsList.querySelectorAll('.model-toggle').forEach(toggle => {
+    toggle.addEventListener('change', async (e) => {
+      const modelValue = e.target.dataset.model;
+      const result = await chrome.storage.local.get(['enabledModels']);
+      const enabledModels = result.enabledModels || getDefaultEnabledModels();
+      enabledModels[modelValue] = e.target.checked;
+      await chrome.storage.local.set({ enabledModels });
+      await loadSettings();
+    });
+  });
+}
+
+function loadApiKeyInputs(enabledProviders, savedValues) {
+  const container = document.getElementById('apiKeyInputs');
+  container.innerHTML = '';
+
+  for (const [provider, config] of Object.entries(API_KEY_CONFIG)) {
+    if (enabledProviders[provider]) {
+      const input = document.createElement('input');
+      input.type = config.type;
+      input.id = config.id;
+      input.placeholder = config.placeholder;
+      input.style.marginBottom = '6px';
+      input.value = savedValues[config.storageKey] || '';
+
+      input.addEventListener('change', () => {
+        chrome.storage.local.set({ [config.storageKey]: input.value.trim() });
+      });
+
+      container.appendChild(input);
+    }
+  }
+
+  if (container.children.length === 0) {
+    container.innerHTML = '<div style="font-size: 11px; color: #666;">No providers enabled</div>';
+  }
+}
+
+function loadModes(modes, selectedMode) {
+  const modeSelect = document.getElementById('modeSelect');
+  modeSelect.innerHTML = '';
+
+  modes.forEach(mode => {
+    const option = document.createElement('option');
+    option.value = mode.id;
+    option.textContent = mode.name;
+    modeSelect.appendChild(option);
+  });
+
+  // Add custom prompt option
+  const customOption = document.createElement('option');
+  customOption.value = 'custom';
+  customOption.textContent = '✍️ Custom Prompt';
+  modeSelect.appendChild(customOption);
+
+  if (selectedMode) {
+    modeSelect.value = selectedMode;
+  }
+}
+
+function loadModesList(modes) {
+  const modesList = document.getElementById('modesList');
+  modesList.innerHTML = '';
+
+  modes.forEach(mode => {
+    const div = document.createElement('div');
+    div.className = 'mode-item';
+    div.innerHTML = `
+            <span class="mode-name">${mode.name}</span>
+            <div class="mode-actions">
+                <button data-mode-id="${mode.id}" class="edit-mode-btn">Edit</button>
+                ${!mode.isDefault ? `<button data-mode-id="${mode.id}" class="delete-mode-btn">🗑️</button>` : ''}
+            </div>
+        `;
+    modesList.appendChild(div);
+  });
+
+  // Attach event listeners
+  modesList.querySelectorAll('.edit-mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => editMode(btn.dataset.modeId));
+  });
+
+  modesList.querySelectorAll('.delete-mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => deleteMode(btn.dataset.modeId));
+  });
+}
+
+function updateProviderHint(enabledProviders) {
+  const hint = document.getElementById('providerHint');
+  const enabledCount = Object.values(enabledProviders).filter(v => v).length;
+
+  if (enabledCount <= 1) {
+    hint.classList.remove('hidden');
+  } else {
+    hint.classList.add('hidden');
+  }
+}
+
+// ============================================================================
+// KEY CLEANUP (Delete keys after 7 days of provider being hidden)
+// ============================================================================
+async function checkKeyCleanup(enabledProviders, hiddenSince) {
+  const now = Date.now();
+  const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+  const keysToDelete = [];
+
+  for (const [provider, config] of Object.entries(API_KEY_CONFIG)) {
+    if (!enabledProviders[provider] && hiddenSince[provider]) {
+      if (now - hiddenSince[provider] > SEVEN_DAYS) {
+        keysToDelete.push(config.storageKey);
+        delete hiddenSince[provider];
+      }
+    }
+  }
+
+  if (keysToDelete.length > 0) {
+    await chrome.storage.local.remove(keysToDelete);
+    await chrome.storage.local.set({ providerHiddenSince: hiddenSince });
+    console.log('Cleaned up old API keys:', keysToDelete);
+  }
+}
+
+async function trackProviderHidden(provider, isEnabled) {
+  const result = await chrome.storage.local.get(['providerHiddenSince']);
+  const hiddenSince = result.providerHiddenSince || {};
+
+  if (!isEnabled) {
+    if (!hiddenSince[provider]) {
+      hiddenSince[provider] = Date.now();
+    }
+  } else {
+    delete hiddenSince[provider];
+  }
+
+  await chrome.storage.local.set({ providerHiddenSince: hiddenSince });
+}
+
+// ============================================================================
+// EVENT LISTENERS
+// ============================================================================
+function setupEventListeners() {
+  // Settings panel toggle
+  document.getElementById('openSettingsBtn').addEventListener('click', () => {
+    document.getElementById('settingsPanel').classList.add('open');
+    document.body.classList.add('settings-open');
+  });
+
+  document.getElementById('closeSettingsBtn').addEventListener('click', () => {
+    document.getElementById('settingsPanel').classList.remove('open');
+    document.body.classList.remove('settings-open');
+  });
+
+  // Provider hint link
+  document.getElementById('enableMoreProviders')?.addEventListener('click', () => {
+    document.getElementById('settingsPanel').classList.add('open');
+    document.body.classList.add('settings-open');
+  });
+
+  // Tabs
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(btn.dataset.tab + 'Tab').classList.add('active');
     });
   });
 
-  // 4. Reset / Logout
-  const messageContainer = document.getElementById('messageContainer');
-  if (resetBtn) {
-    resetBtn.addEventListener('click', () => {
-      if (confirm("Reset all settings?")) {
-        chrome.storage.local.clear(() => {
-          apiKeyInput.value = "";
-          geminiKeyInput.value = "";
-          customPromptText.value = "";
-          ollamaHostInput.value = "http://localhost:11434";
-          if (messageContainer) messageContainer.style.display = 'block';
-          setTimeout(() => window.close(), 1000);
-        });
-      }
+  // Provider toggles
+  ['Groq', 'Google', 'OpenRouter', 'Ollama'].forEach(provider => {
+    const checkbox = document.getElementById('provider' + provider);
+    checkbox?.addEventListener('change', async () => {
+      const result = await chrome.storage.local.get(['enabledProviders']);
+      const enabledProviders = result.enabledProviders || DEFAULT_PROVIDERS;
+      const key = provider.toLowerCase();
+      enabledProviders[key] = checkbox.checked;
+
+      await chrome.storage.local.set({ enabledProviders });
+      await trackProviderHidden(key, checkbox.checked);
+      await loadSettings();
     });
+  });
+
+  // Model selection
+  document.getElementById('modelSelect').addEventListener('change', async (e) => {
+    const model = e.target.value;
+
+    if (model === 'ollama:custom') {
+      const name = prompt("Enter your Ollama model name:", "llama3");
+      if (name && /^[a-zA-Z0-9\-_:.]+$/.test(name)) {
+        await chrome.storage.local.set({ selectedModel: 'ollama:' + name });
+      }
+    } else if (model === 'openrouter:custom') {
+      const slug = prompt("Enter OpenRouter model slug:", "openai/gpt-4");
+      if (slug) {
+        await chrome.storage.local.set({ selectedModel: 'openrouter:' + slug });
+      }
+    } else {
+      await chrome.storage.local.set({ selectedModel: model });
+    }
+  });
+
+  // Mode selection
+  document.getElementById('modeSelect').addEventListener('change', async (e) => {
+    const mode = e.target.value;
+    await chrome.storage.local.set({ selectedMode: mode });
+
+    const customPromptContainer = document.getElementById('customPromptContainer');
+    if (mode === 'custom') {
+      customPromptContainer.classList.remove('hidden');
+    } else {
+      customPromptContainer.classList.add('hidden');
+    }
+  });
+
+  // Custom prompt
+  document.getElementById('customPromptText')?.addEventListener('change', async (e) => {
+    await chrome.storage.local.set({ customPrompt: e.target.value });
+  });
+
+  // Mode editor
+  document.getElementById('addModeBtn').addEventListener('click', () => {
+    editingModeId = null;
+    document.getElementById('modeNameInput').value = '';
+    document.getElementById('modePromptInput').value = '';
+    document.getElementById('modeEditor').classList.add('active');
+  });
+
+  document.getElementById('cancelModeBtn').addEventListener('click', () => {
+    document.getElementById('modeEditor').classList.remove('active');
+    editingModeId = null;
+  });
+
+  document.getElementById('saveModeBtn').addEventListener('click', saveMode);
+
+  // Snip button
+  document.getElementById('snipBtn').addEventListener('click', startSnip);
+
+  // PDF settings link
+  document.getElementById('openExtSettings')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
+  });
+}
+
+// ============================================================================
+// MODE MANAGEMENT
+// ============================================================================
+async function editMode(modeId) {
+  const result = await chrome.storage.local.get(['customModes']);
+  const modes = result.customModes || DEFAULT_MODES;
+  const mode = modes.find(m => m.id === modeId);
+
+  if (mode) {
+    editingModeId = modeId;
+    document.getElementById('modeNameInput').value = mode.name;
+    document.getElementById('modePromptInput').value = mode.prompt;
+    document.getElementById('modeEditor').classList.add('active');
   }
-});
+}
+
+async function saveMode() {
+  const name = document.getElementById('modeNameInput').value.trim();
+  const prompt = document.getElementById('modePromptInput').value.trim();
+
+  if (!name || !prompt) {
+    alert('Please fill in both name and prompt');
+    return;
+  }
+
+  const result = await chrome.storage.local.get(['customModes']);
+  let modes = result.customModes || DEFAULT_MODES;
+
+  if (editingModeId) {
+    modes = modes.map(m => m.id === editingModeId ? { ...m, name, prompt } : m);
+  } else {
+    const id = 'custom_' + Date.now();
+    modes.push({ id, name, prompt, isDefault: false });
+  }
+
+  await chrome.storage.local.set({ customModes: modes });
+  document.getElementById('modeEditor').classList.remove('active');
+  editingModeId = null;
+  await loadSettings();
+}
+
+async function deleteMode(modeId) {
+  if (!confirm('Delete this mode?')) return;
+
+  const result = await chrome.storage.local.get(['customModes']);
+  let modes = result.customModes || DEFAULT_MODES;
+  modes = modes.filter(m => m.id !== modeId);
+
+  await chrome.storage.local.set({ customModes: modes });
+  await loadSettings();
+}
+
+// ============================================================================
+// SNIP FUNCTIONALITY
+// ============================================================================
+async function startSnip() {
+  const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
+  const model = result.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+  // Validate API key based on model
+  if (model.startsWith('ollama')) {
+    if (!result.ollamaHost) {
+      alert('Please set Ollama URL in API Keys');
+      return;
+    }
+  } else if (model.includes('gemini') || model.includes('gemma')) {
+    if (!result.geminiKey) {
+      alert('Please set Google API Key');
+      return;
+    }
+  } else if (model.startsWith('openrouter')) {
+    if (!result.openrouterKey) {
+      alert('Please set OpenRouter API Key');
+      return;
+    }
+  } else {
+    if (!result.groqKey) {
+      alert('Please set Groq API Key');
+      return;
+    }
+  }
+
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tabs.length === 0) return;
+
+  try {
+    await chrome.tabs.sendMessage(tabs[0].id, { action: "START_SNIP" });
+    window.close();
+  } catch (err) {
+    console.error(err);
+    alert("⚠️ Could not start snip. Please refresh the page!");
+  }
+}
+
+// ============================================================================
+// DYNAMIC PANEL RESIZE
+// ============================================================================
+function setupDynamicResize() {
+  const textarea = document.getElementById('modePromptInput');
+  const settingsPanel = document.getElementById('settingsPanel');
+
+  if (!textarea || !settingsPanel) return;
+
+  // Use ResizeObserver to watch textarea size changes
+  const resizeObserver = new ResizeObserver(entries => {
+    for (const entry of entries) {
+      // Calculate new panel size based on content
+      const panelContent = settingsPanel.scrollHeight;
+      const panelWidth = settingsPanel.scrollWidth;
+
+      // Enforce minimum dimensions
+      const newHeight = Math.max(MIN_PANEL_HEIGHT, panelContent + 40);
+      const newWidth = Math.max(MIN_PANEL_WIDTH, panelWidth);
+
+      // Apply new dimensions
+      settingsPanel.style.height = newHeight + 'px';
+      settingsPanel.style.width = newWidth + 'px';
+
+      // Also update body dimensions when settings panel is open
+      if (document.body.classList.contains('settings-open')) {
+        document.body.style.height = newHeight + 'px';
+        document.body.style.width = newWidth + 'px';
+      }
+    }
+  });
+
+  resizeObserver.observe(textarea);
+
+  // Also handle input changes that might affect textarea height
+  textarea.addEventListener('input', () => {
+    // Auto-grow textarea based on content
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.max(100, textarea.scrollHeight) + 'px';
+  });
+}
