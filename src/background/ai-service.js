@@ -326,44 +326,30 @@ class OpenRouterService extends AbstractAIService {
             messages: finalMessages
         };
 
-        console.log('[OpenRouter] Request:', JSON.stringify({
-            model: this.actualModel,
-            messageCount: finalMessages.length,
-            firstMsgRole: finalMessages[0]?.role
-        }));
+        const response = await fetchWithTimeout(this.API_ENDPOINT, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${this.apiKey}`,
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/Saura-4/Snip-Ask-Chrome-Extension",
+                "X-Title": "Snip & Ask Extension"
+            },
+            body: JSON.stringify(requestBody)
+        }, OPENROUTER_TIMEOUT_MS);
 
-        try {
-            const response = await fetchWithTimeout(this.API_ENDPOINT, {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${this.apiKey}`,
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://github.com/Saura-4/Snip-Ask-Chrome-Extension",
-                    "X-Title": "Snip & Ask Extension"
-                },
-                body: JSON.stringify(requestBody)
-            }, OPENROUTER_TIMEOUT_MS);
+        const data = await response.json();
 
-            const data = await response.json();
-            console.log('[OpenRouter] Response status:', response.status);
-
-            if (!response.ok) {
-                console.error('[OpenRouter] Error response:', data);
-                throw new Error(data.error?.message || `OpenRouter Error (${response.status})`);
-            }
-
-            const answer = data.choices?.[0]?.message?.content;
-            if (!answer) {
-                console.error('[OpenRouter] No content in response:', data);
-                throw new Error('No response content from OpenRouter');
-            }
-
-            // Strip thinking tags from DeepSeek/Qwen models
-            return stripThinkingTags(answer);
-        } catch (error) {
-            console.error('[OpenRouter] Fetch error:', error);
-            throw error;
+        if (!response.ok) {
+            throw new Error(data.error?.message || `OpenRouter Error (${response.status})`);
         }
+
+        const answer = data.choices?.[0]?.message?.content;
+        if (!answer) {
+            throw new Error('No response content from OpenRouter');
+        }
+
+        // Strip thinking tags from DeepSeek/Qwen models
+        return stripThinkingTags(answer);
     }
 
     _isVisionModel() {

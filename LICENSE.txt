@@ -1,4 +1,3 @@
-```txt
 MIT License
 
 Copyright (c) 2025 Saurav Chourasia

@@ -1,9 +1,9 @@
-# ⚡ Snip & Ask (v3.1)
+# ⚡ Snip & Ask (v4.0)
 
 > **A high-performance, modular Chrome Extension that brings multimodal AI analysis to any webpage.**
-> *Now featuring a scalable Service-Oriented Architecture.*
+> *Now with multi-provider support: Groq, Google Gemini, OpenRouter, and Ollama.*
 
-**Snip & Ask** allows users to instantly capture any region of their screen and receive an AI-powered analysis using the Groq API. It supports standard Llama models as well as the new **Reasoning Models** (OpenAI GPT-OSS).
+**Snip & Ask** allows users to instantly capture any region of their screen and receive an AI-powered analysis. It supports multiple AI providers including **Groq**, **Google Gemini**, **OpenRouter** (DeepSeek, Qwen, etc.), and **Ollama** for local inference.
 
 ---
 
@@ -48,7 +48,23 @@ I built **Snip & Ask** to eliminate this friction. The core idea was to enable i
 ### 3. Setup
 1.  Pin the extension icon to your toolbar.
 2.  Click the icon and paste your API Key.
-3.  Select your preferred model (e.g., **OpenAI GPT-OSS 120B**).
+3.  Select your preferred model (e.g., **Llama 4 Scout**).
+
+### 4. Keyboard Shortcut (Optional)
+Configure a custom shortcut for instant snipping:
+1.  Go to `chrome://extensions/shortcuts`
+2.  Find **Snip & Ask**
+3.  Click the input next to "Start screen snip"
+4.  Press your preferred shortcut (e.g., `Ctrl+Shift+S`)
+
+---
+
+## ⚡ Quick Actions
+
+| Action | How |
+|--------|-----|
+| **Snip Screen** | Click extension icon → "Snip Screen", or use your keyboard shortcut |
+| **Ask About Text** | Select text on any page → Right-click → "Ask AI about '...'" |
 
 ---
 
@@ -96,11 +112,11 @@ This architecture allows for:
 
 ## 🗺️ Roadmap
 
-* **v3.1 (Current):** Modular Refactor, Support for OpenAI OSS Reasoning models.
-* **v3.2 (Planned):**
-    * **Contextual Chat:** Ability to reply to the AI's answer within the popup.
+* **v4.0 (Current):** Multi-provider support (Groq, Gemini, OpenRouter, Ollama), customizable interaction modes, Chrome Web Store release.
+* **v4.1 (Planned):**
     * **History Sync:** Local storage of past snips and solutions.
-* **v4.0 (Future):**
+    * **Keyboard Shortcuts:** Quick snip via hotkeys.
+* **v5.0 (Future):**
     * **Electron Port:** Converting the modular `ai-service.js` core into a native Desktop Application for Windows/Mac.
 
 ---

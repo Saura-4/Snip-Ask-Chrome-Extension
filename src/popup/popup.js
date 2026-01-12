@@ -165,7 +165,7 @@ function loadModels(enabledProviders, enabledModels, selectedModel) {
   for (const [provider, models] of Object.entries(ALL_MODELS)) {
     if (enabledProviders[provider]) {
       const enabledModelsInProvider = models.filter(model => enabledModels[model.value] !== false);
-      
+
       if (enabledModelsInProvider.length > 0) {
         const optgroup = document.createElement('optgroup');
         optgroup.label = PROVIDER_LABELS[provider];
@@ -341,7 +341,6 @@ async function checkKeyCleanup(enabledProviders, hiddenSince) {
   if (keysToDelete.length > 0) {
     await chrome.storage.local.remove(keysToDelete);
     await chrome.storage.local.set({ providerHiddenSince: hiddenSince });
-    console.log('Cleaned up old API keys:', keysToDelete);
   }
 }
 
@@ -557,7 +556,6 @@ async function startSnip() {
     await chrome.tabs.sendMessage(tabs[0].id, { action: "START_SNIP" });
     window.close();
   } catch (err) {
-    console.error(err);
     alert("⚠️ Could not start snip. Please refresh the page!");
   }
 }

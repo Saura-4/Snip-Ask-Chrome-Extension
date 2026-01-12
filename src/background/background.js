@@ -2,7 +2,10 @@
 
 import { getAIService } from './ai-service.js';
 
-// 1. Helper to use chrome.storage.local.get with await
+// ============================================================================
+// 1. UTILITIES
+// ============================================================================
+
 function getStorage(keys) {
     return new Promise((resolve) => {
         try {
@@ -13,7 +16,65 @@ function getStorage(keys) {
     });
 }
 
-// --- OFFSCREEN DOCUMENT MANAGER ---
+// ============================================================================
+// 2. CONTEXT MENU & KEYBOARD SHORTCUTS
+// ============================================================================
+
+// Create context menu on install
+chrome.runtime.onInstalled.addListener(() => {
+    chrome.contextMenus.create({
+        id: "askAI",
+        title: "Ask AI about '%s'",
+        contexts: ["selection"]
+    });
+});
+
+// Handle context menu clicks
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+    if (info.menuItemId === "askAI" && info.selectionText) {
+        // Send selected text to content script for display
+        try {
+            await chrome.tabs.sendMessage(tab.id, {
+                action: "SHOW_AI_RESPONSE_FOR_TEXT",
+                text: info.selectionText
+            });
+        } catch (e) {
+            // Content script not loaded, inject it first
+            await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['src/content/utils.js', 'src/content/content.js']
+            });
+            await chrome.tabs.sendMessage(tab.id, {
+                action: "SHOW_AI_RESPONSE_FOR_TEXT",
+                text: info.selectionText
+            });
+        }
+    }
+});
+
+// Handle keyboard shortcuts
+chrome.commands.onCommand.addListener(async (command) => {
+    if (command === "start-snip") {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab) {
+            try {
+                await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP" });
+            } catch (e) {
+                // Content script not loaded, inject it first
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    files: ['src/content/utils.js', 'src/content/content.js']
+                });
+                await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP" });
+            }
+        }
+    }
+});
+
+// ============================================================================
+// 3. OFFSCREEN DOCUMENT MANAGER
+// ============================================================================
+
 let creating;
 
 async function setupOffscreenDocument(path) {
@@ -36,7 +97,10 @@ async function setupOffscreenDocument(path) {
     }
 }
 
-// 2. Main Message Listener
+// ============================================================================
+// 4. MESSAGE LISTENER
+// ============================================================================
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     // --- A. SCREENSHOT HANDLER ---
@@ -61,20 +125,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 });
                 sendResponse(response);
             } catch (err) {
-                console.error("Offscreen OCR Error:", err);
                 sendResponse({ success: false, error: err.message });
             }
         })();
         return true;
     }
 
-    // --- C. AI REQUEST HANDLER (Initial Snip) ---
+    // --- C. AI REQUEST HANDLER (Initial Snip or Text Selection) ---
     if (request.action === "ASK_AI" || request.action === "ASK_AI_TEXT") {
         const type = request.action === "ASK_AI_TEXT" ? 'text' : 'image';
         const content = type === 'text' ? request.text : request.base64Image;
         const ocrConfidence = request.ocrConfidence || null;
 
-        // SECURITY: Keys are retrieved from storage, not passed via messages
         handleAIRequest(content, type, request.model, sendResponse, ocrConfidence);
         return true;
     }
@@ -83,19 +145,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "CONTINUE_CHAT") {
         (async () => {
             try {
-                const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
+                const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'selectedMode', 'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
 
-                // Determine Key
                 const modelName = request.model || storage.selectedModel;
 
-                // Select appropriate key/host based on model type
                 let activeKeyOrHost;
                 if (modelName.startsWith('ollama:')) activeKeyOrHost = storage.ollamaHost || "http://localhost:11434";
                 else if (modelName.startsWith('openrouter:')) activeKeyOrHost = storage.openrouterKey;
                 else if (modelName.includes('gemini') || modelName.includes('gemma')) activeKeyOrHost = storage.geminiKey;
                 else activeKeyOrHost = storage.groqKey;
 
-                const aiService = getAIService(activeKeyOrHost, modelName, storage.interactionMode, storage.customPrompt);
+                const mode = storage.selectedMode || storage.interactionMode || 'short';
+                const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
 
                 const answer = await aiService.chat(request.history);
                 sendResponse({ success: true, answer: answer });
@@ -108,9 +169,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 });
 
+// ============================================================================
+// 5. AI REQUEST HANDLER
+// ============================================================================
 
-// 3. The Core Logic
-// SECURITY: API keys are retrieved from storage only, never passed via messages
 async function handleAIRequest(inputContent, type, explicitModel, sendResponse, ocrConfidence) {
     try {
         const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'selectedMode', 'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
@@ -118,10 +180,9 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
 
         const modelName = explicitModel || storage.selectedModel || "meta-llama/llama-4-scout-17b-16e-instruct";
 
-        // === KEY/HOST SELECTION LOGIC (from secure storage only) ===
+        // KEY/HOST SELECTION LOGIC
         let activeKeyOrHost;
         if (modelName.startsWith('ollama:')) {
-            // For Ollama, we pass the Host URL
             activeKeyOrHost = storage.ollamaHost || "http://localhost:11434";
         }
         else if (modelName.startsWith('openrouter:')) {
@@ -138,10 +199,8 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
             throw new Error(`Missing Configuration. Please configure your API keys in the extension popup.`);
         }
 
-        // Pass customModes from storage to enable user-defined prompts
         const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
 
-        // Route to unified chat method or specific handlers
         let result;
         if (type === 'image') {
             result = await aiService.askImage(inputContent);
@@ -158,7 +217,6 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
         });
 
     } catch (error) {
-        console.error("AI Service Error:", error);
         sendResponse({
             success: false,
             error: error.message || String(error)

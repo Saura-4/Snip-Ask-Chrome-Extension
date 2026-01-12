@@ -2,6 +2,7 @@
 
 let startX, startY, selectionBox, glassPane;
 let isSelecting = false;
+let activeChatUI = null; // Singleton reference for chat window
 
 // Helper to identify Vision Models
 function isVisionModel(modelName) {
@@ -27,6 +28,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         sendResponse({ status: "Snip started" });
     }
+
+    // Handle text selection from context menu
+    if (request.action === "SHOW_AI_RESPONSE_FOR_TEXT") {
+        if (typeof showLoadingCursor === 'function') showLoadingCursor();
+
+        chrome.runtime.sendMessage({
+            action: "ASK_AI_TEXT",
+            text: request.text
+        }, handleResponse);
+
+        sendResponse({ status: "Processing text" });
+    }
+
     return true;
 });
 
@@ -219,12 +233,38 @@ function handleResponse(apiResponse) {
     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
 
     if (apiResponse && apiResponse.success) {
-        const ui = new FloatingChatUI();
-        ui.addMessage('user', apiResponse.initialUserMessage);
-        ui.addMessage('assistant', apiResponse.answer);
+        // Singleton pattern: close existing chat window before creating new one
+        if (activeChatUI) {
+            activeChatUI.close();
+        }
+        activeChatUI = new FloatingChatUI();
+        activeChatUI.addMessage('user', apiResponse.initialUserMessage);
+        activeChatUI.addMessage('assistant', apiResponse.answer);
     } else {
-        alert("Error: " + (apiResponse ? apiResponse.error : "Unknown error"));
+        // Show error in a styled toast instead of native alert
+        showErrorToast(apiResponse ? apiResponse.error : "Unknown error");
     }
+}
+
+// Error toast notification
+function showErrorToast(message) {
+    const existing = document.getElementById('snip-error-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.id = 'snip-error-toast';
+    toast.style.cssText = `
+        position: fixed; top: 20px; right: 20px; z-index: 2147483647;
+        padding: 15px 20px; background: #1e1e1e; color: #f55036;
+        border: 1px solid #f55036; border-radius: 8px;
+        font-family: 'Segoe UI', sans-serif; font-size: 14px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        animation: slideIn 0.3s ease;
+    `;
+    toast.textContent = '⚠️ ' + message;
+    document.body.appendChild(toast);
+
+    setTimeout(() => toast.remove(), 5000);
 }
 
 // 5. HELPER: Text Sanitizer
@@ -248,6 +288,16 @@ class FloatingChatUI {
         this.chatHistory = [];
         this.createWindow();
         this.loadState();
+    }
+
+    close() {
+        if (this.host) {
+            this.host.remove();
+            this.host = null;
+        }
+        if (activeChatUI === this) {
+            activeChatUI = null;
+        }
     }
 
     createWindow() {
@@ -336,7 +386,7 @@ class FloatingChatUI {
         document.body.appendChild(this.host);
 
         // --- Event Listeners ---
-        header.querySelector("#closeBtn").onclick = () => this.host.remove();
+        header.querySelector("#closeBtn").onclick = () => this.close();
 
         this.makeDraggable(header);
 

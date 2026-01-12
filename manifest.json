@@ -1,17 +1,20 @@
 {
   "manifest_version": 3,
-  "name": "Groq Snip & Ask",
-  "version": "3.2",
-  "description": "Snip any part of your screen and ask AI (Llama 4 Scout) to explain, solve, or debug it.",
+  "name": "Snip & Ask - AI Screen Assistant",
+  "short_name": "Snip & Ask",
+  "version": "4.0",
+  "description": "Snip any part of your screen and ask AI to explain, solve, or debug it. Supports Groq, Gemini, OpenRouter, and Ollama.",
   "permissions": [
     "activeTab",
     "scripting",
     "storage",
-    "offscreen"
+    "offscreen",
+    "contextMenus"
   ],
   "host_permissions": [
     "https://api.groq.com/*",
     "https://generativelanguage.googleapis.com/*",
+    "https://openrouter.ai/*",
     "http://localhost:*/*",
     "http://127.0.0.1:*/*",
     "file://*/*"
@@ -49,15 +52,20 @@
   "action": {
     "default_popup": "src/popup/popup.html",
     "default_icon": {
-      "16": "assets/icons/icon.png",
-      "48": "assets/icons/icon.png",
-      "128": "assets/icons/icon.png"
+      "16": "assets/icons/icon-16.png",
+      "48": "assets/icons/icon-48.png",
+      "128": "assets/icons/icon-128.png"
     }
   },
   "icons": {
-    "16": "assets/icons/icon.png",
-    "48": "assets/icons/icon.png",
-    "128": "assets/icons/icon.png"
+    "16": "assets/icons/icon-16.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  },
+  "commands": {
+    "start-snip": {
+      "description": "Start screen snip"
+    }
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
