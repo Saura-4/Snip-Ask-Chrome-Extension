@@ -22,7 +22,14 @@ function parseMarkdown(text) {
     return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
   });
 
-  // Highlight the "Answer" label specifically
+  // SECURITY: Escape HTML in remaining text to prevent XSS attacks
+  // But preserve code block placeholders
+  text = text.replace(/(__CODE_BLOCK_\d+__)|([^_]+)/g, (match, codeBlock, normalText) => {
+    if (codeBlock) return codeBlock;
+    return escapeHtml(normalText || '');
+  });
+
+  // Highlight the "Answer" label specifically (now safe after escaping)
   text = text.replace(/\*\*Answer:\*\*/g, '<strong style="color: #f55036; font-size: 1.1em;">✓ Answer:</strong>');
 
   // Parse standard Markdown syntax

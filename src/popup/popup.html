@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -16,7 +17,8 @@
 
     h2 {
       margin-top: 0;
-      color: #f55036; /* Groq Orange */
+      color: #f55036;
+      /* Groq Orange */
       font-size: 18px;
       text-align: center;
       margin-bottom: 15px;
@@ -33,7 +35,9 @@
       font-size: 12px;
     }
 
-    input, select, textarea {
+    input,
+    select,
+    textarea {
       width: 100%;
       padding: 8px;
       margin-bottom: 5px;
@@ -44,19 +48,22 @@
       box-sizing: border-box;
     }
 
-    input:focus, select:focus, textarea:focus {
+    input:focus,
+    select:focus,
+    textarea:focus {
       outline: none;
       border-color: #f55036;
     }
 
     /* Input Group Styling */
     .key-group {
-        margin-bottom: 10px;
+      margin-bottom: 10px;
     }
+
     .key-group input {
-        margin-bottom: 8px;
-        font-family: monospace;
-        font-size: 11px;
+      margin-bottom: 8px;
+      font-family: monospace;
+      font-size: 11px;
     }
 
     /* Model Group Headers */
@@ -66,6 +73,7 @@
       font-style: normal;
       font-weight: bold;
     }
+
     option {
       background-color: #2d2d2d;
       color: #fff;
@@ -87,6 +95,7 @@
       background-color: #f55036;
       color: white;
     }
+
     #snipBtn:hover {
       background-color: #d43d25;
     }
@@ -99,6 +108,7 @@
       font-size: 11px;
       padding: 6px;
     }
+
     #resetBtn:hover {
       background-color: #2d2d2d;
       color: #bbb;
@@ -116,6 +126,7 @@
     }
   </style>
 </head>
+
 <body>
 
   <h2>⚡ Snip & Ask</h2>
@@ -125,15 +136,36 @@
   </div>
 
   <div class="key-group">
-      <label>API Keys</label>
-      <input type="password" id="apiKey" placeholder="Groq Key (gsk_...)" />
-      <input type="password" id="geminiKey" placeholder="Google Key (AIza...)" />
-      <input type="text" id="ollamaHost" placeholder="Ollama URL (default: http://localhost:11434)" />
+    <label>API Keys</label>
+    <div
+      style="background: #2d2d2d; padding: 6px 8px; border-left: 2px solid #f55036; margin-bottom: 8px; font-size: 10px; color: #999;">
+      🔒 Keys are stored locally in your browser only.
+    </div>
+    <input type="password" id="apiKey" placeholder="Groq Key (gsk_...)" />
+    <input type="password" id="geminiKey" placeholder="Google Key (AIza...)" />
+    <input type="text" id="ollamaHost" placeholder="Ollama URL (default: http://localhost:11434)" />
+    <div style="text-align: right; margin-top: 2px;">
+      <a href="https://github.com/Saura-4/Snip-Ask-Chrome-Extension" target="_blank"
+        style="font-size: 11px; color: #f55036; text-decoration: none; border-bottom: 1px dotted #f55036;"
+        title="Click to download the One-Click Setup Script">
+        ⚠️ Enable Offline Access (Script)
+      </a>
+    </div>
+  </div>
+
+  <!-- PDF Access Tip -->
+  <div style="background: #252526; padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; border: 1px solid #333;">
+    <div style="font-size: 11px; color: #888;">
+      📁 <strong style="color: #ccc;">PDF Snipping:</strong> To use on local files, enable
+      <a href="#" id="openExtSettings" style="color: #f55036; text-decoration: underline; cursor: pointer;">
+        "Allow access to file URLs"
+      </a> in extension settings.
+    </div>
   </div>
 
   <label for="modelSelect">AI Model</label>
   <select id="modelSelect">
-    
+
     <optgroup label="👁️ Vision (Best for Images)">
       <option value="meta-llama/llama-4-scout-17b-16e-instruct">🚀 Llama 4 Scout (Groq)</option>
       <option value="meta-llama/llama-4-maverick-17b-128e-instruct">🚀 Llama 4 maverick (Groq)</option>
@@ -142,14 +174,14 @@
 
       <option value="gemini-2.5-flash">✨ Gemini 2.5 Flash</option>
       <option value="gemini-2.5-pro">✨ Gemini 2.5 Pro</option>
-      
+
       <option value="gemma-3-12b-it">✨ Gemma 3 (12B Vision)</option>
       <option value="gemma-3-27b-it">✨ Gemma 3 (27B Vision)</option>
     </optgroup>
 
     <optgroup label="📄 Text / Lightweight">
       <option value="llama-3.3-70b-versatile">🚀 Llama 3.3 70B (Groq)</option>
-      
+
       <option value="gemini-2.0-flash-lite-preview-02-05">✨ Gemini 2.0 Flash Lite</option>
       <option value="gemma-3-4b-it">✨ Gemma 3 (4B)</option>
       <option value="gemma-3-1b-it">✨ Gemma 3 (1B)</option>
@@ -190,4 +222,5 @@
 
   <script src="popup.js"></script>
 </body>
+
 </html>

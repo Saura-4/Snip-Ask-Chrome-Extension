@@ -10,8 +10,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function runOCR(base64Image) {
     try {
+        // SECURITY: Validate input
+        if (!base64Image || typeof base64Image !== 'string') {
+            throw new Error("Invalid image data provided");
+        }
+
         // 1. Prepare Image Data
         const base64Data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
+        
+        // SECURITY: Validate base64 format
+        if (!/^[A-Za-z0-9+/=]+$/.test(base64Data)) {
+            throw new Error("Invalid base64 encoding detected");
+        }
+        
+        // SECURITY: Check reasonable size (10MB limit to prevent memory attacks)
+        if (base64Data.length > 10 * 1024 * 1024) {
+            throw new Error("Image too large for processing (max 10MB)");
+        }
+
         const binaryString = atob(base64Data);
         const len = binaryString.length;
         const bytes = new Uint8Array(len);

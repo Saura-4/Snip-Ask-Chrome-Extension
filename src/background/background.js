@@ -14,7 +14,7 @@ function getStorage(keys) {
 }
 
 // --- OFFSCREEN DOCUMENT MANAGER ---
-let creating; 
+let creating;
 
 async function setupOffscreenDocument(path) {
     const existingContexts = await chrome.runtime.getContexts({
@@ -28,7 +28,7 @@ async function setupOffscreenDocument(path) {
     } else {
         creating = chrome.offscreen.createDocument({
             url: path,
-            reasons: ['BLOBS'], 
+            reasons: ['BLOBS'],
             justification: 'OCR processing for image to text conversion',
         });
         await creating;
@@ -47,7 +47,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }, (dataUrl) => {
             sendResponse({ dataUrl: dataUrl });
         });
-        return true; 
+        return true;
     }
 
     // --- B. OCR HANDLER ---
@@ -65,7 +65,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 sendResponse({ success: false, error: err.message });
             }
         })();
-        return true; 
+        return true;
     }
 
     // --- C. AI REQUEST HANDLER (Initial Snip) ---
@@ -74,16 +74,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const content = type === 'text' ? request.text : request.base64Image;
         const ocrConfidence = request.ocrConfidence || null;
 
-        handleAIRequest(request.apiKey, content, type, request.model, sendResponse, ocrConfidence);
-        return true; 
+        // SECURITY: Keys are retrieved from storage, not passed via messages
+        handleAIRequest(content, type, request.model, sendResponse, ocrConfidence);
+        return true;
     }
 
     // --- D. CHAT CONTINUATION (REPLY) ---
     if (request.action === "CONTINUE_CHAT") {
         (async () => {
             try {
-                const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey','ollamaHost']);
-                
+                const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey', 'ollamaHost']);
+
                 // Determine Key
                 const modelName = request.model || storage.selectedModel;
 
@@ -94,53 +95,46 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 else activeKeyOrHost = storage.groqKey;
 
                 const aiService = getAIService(activeKeyOrHost, modelName, storage.interactionMode, storage.customPrompt);
-                
+
                 const answer = await aiService.chat(request.history);
                 sendResponse({ success: true, answer: answer });
-                
+
             } catch (err) {
                 sendResponse({ success: false, error: err.message });
             }
         })();
-        return true; 
+        return true;
     }
 });
 
 
 // 3. The Core Logic
-async function handleAIRequest(passedApiKey, inputContent, type, explicitModel, sendResponse, ocrConfidence) {
+// SECURITY: API keys are retrieved from storage only, never passed via messages
+async function handleAIRequest(inputContent, type, explicitModel, sendResponse, ocrConfidence) {
     try {
-        const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey','ollamaHost']);
+        const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'groqKey', 'geminiKey', 'ollamaHost']);
         const mode = storage.interactionMode || 'short';
-        
+
         const modelName = explicitModel || storage.selectedModel || "meta-llama/llama-4-scout-17b-16e-instruct";
 
-        // === KEY/HOST SELECTION LOGIC ===
+        // === KEY/HOST SELECTION LOGIC (from secure storage only) ===
         let activeKeyOrHost;
         if (modelName.startsWith('ollama')) {
             // For Ollama, we pass the Host URL
             activeKeyOrHost = storage.ollamaHost || "http://localhost:11434";
-        } 
+        }
         else if (modelName.includes('gemini') || modelName.includes('gemma')) {
             activeKeyOrHost = storage.geminiKey;
-        } 
+        }
         else {
             activeKeyOrHost = storage.groqKey;
         }
 
-        // Fallback: if storage was empty but content.js passed one, use it
-        // Note: content.js now correctly passes host for ollama models
         if (!activeKeyOrHost) {
-            activeKeyOrHost = passedApiKey;
-        }
-
-        if (!activeKeyOrHost) {
-            throw new Error(`Missing Configuration. Please check your keys/host in the extension popup.`);
+            throw new Error(`Missing Configuration. Please configure your API keys in the extension popup.`);
         }
 
         const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt);
-
-        console.log(`[Background] Asking AI: Model=${modelName}, Mode=${mode}, Type=${type}`);
 
         // Route to unified chat method or specific handlers
         let result;

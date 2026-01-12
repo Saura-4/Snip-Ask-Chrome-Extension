@@ -7,13 +7,13 @@ let isSelecting = false;
 function isVisionModel(modelName) {
     if (!modelName) return false;
     const lower = modelName.toLowerCase();
-    return lower.includes("llama-4") || 
-           lower.includes("vision") || 
-           lower.includes("gemini") || 
-           lower.includes("gemma") ||
-           lower.includes("llava") ||
-           lower.includes("moondream") ||
-           lower.includes("minicpm");
+    return lower.includes("llama-4") ||
+        lower.includes("vision") ||
+        lower.includes("gemini") ||
+        lower.includes("gemma") ||
+        lower.includes("llava") ||
+        lower.includes("moondream") ||
+        lower.includes("minicpm");
 }
 
 // 1. Message Listener
@@ -21,10 +21,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "START_SNIP") {
         if (isSelecting) return true;
         isSelecting = true;
-        
+
         createGlassPane();
         createSelectionBox();
-        
+
         sendResponse({ status: "Snip started" });
     }
     return true;
@@ -33,8 +33,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // 2. Selection UI Logic
 function createGlassPane() {
     glassPane = document.createElement("div");
-    glassPane.setAttribute("tabindex", "-1"); 
-    
+    glassPane.setAttribute("tabindex", "-1");
+
     glassPane.style.cssText = `
         position: fixed; 
         top: 0; left: 0; 
@@ -45,7 +45,7 @@ function createGlassPane() {
         transform: translateZ(100px);
         outline: none;
     `;
-    
+
     document.documentElement.appendChild(glassPane);
     glassPane.focus();
     glassPane.addEventListener("mousedown", onMouseDown);
@@ -68,17 +68,17 @@ function createSelectionBox() {
 function onMouseDown(e) {
     if (!isSelecting) return;
     e.preventDefault();
-    e.stopPropagation(); 
+    e.stopPropagation();
 
     startX = e.clientX;
     startY = e.clientY;
-    
+
     selectionBox.style.left = startX + "px";
     selectionBox.style.top = startY + "px";
     selectionBox.style.width = "0px";
     selectionBox.style.height = "0px";
     selectionBox.style.display = "block";
-    
+
     glassPane.addEventListener("mousemove", onMouseMove);
     glassPane.addEventListener("mouseup", onMouseUp);
 }
@@ -86,7 +86,7 @@ function onMouseDown(e) {
 function onMouseMove(e) {
     const currentX = e.clientX;
     const currentY = e.clientY;
-    
+
     const width = Math.abs(currentX - startX);
     const height = Math.abs(currentY - startY);
     const left = Math.min(currentX, startX);
@@ -103,11 +103,11 @@ async function onMouseUp(e) {
     glassPane.removeEventListener("mousemove", onMouseMove);
     glassPane.removeEventListener("mouseup", onMouseUp);
     glassPane.removeEventListener("mousedown", onMouseDown);
-    
+
     const rect = selectionBox.getBoundingClientRect();
-    
+
     selectionBox.remove();
-    glassPane.remove(); 
+    glassPane.remove();
     selectionBox = null;
     glassPane = null;
     isSelecting = false;
@@ -130,8 +130,8 @@ async function onMouseUp(e) {
         cropImage(response.dataUrl, rect, async (croppedBase64) => {
 
             // === UPDATE: GET ALL KEYS ===
-            chrome.storage.local.get(['groqKey', 'geminiKey','ollamaHost', 'selectedModel'], async (result) => {
-                
+            chrome.storage.local.get(['groqKey', 'geminiKey', 'ollamaHost', 'selectedModel'], async (result) => {
+
                 const currentModel = result.selectedModel || "llama-3.3-70b-versatile";
 
                 // === UPDATE: DETERMINE ACTIVE KEY OR HOST ===
@@ -139,11 +139,11 @@ async function onMouseUp(e) {
                 // === FIX 3: Typos Fixed (stratsWith -> startsWith) ===
                 const isOllama = currentModel.startsWith('ollama');
                 const isGoogle = currentModel.includes('gemini') || currentModel.includes('gemma');
-                
-                if(isOllama) {
+
+                if (isOllama) {
                     activeKey = result.ollamaHost || "http://localhost:11434";
                 }
-                else if(isGoogle) {
+                else if (isGoogle) {
                     activeKey = result.geminiKey; // Fixed capitalization
                 }
                 else {
@@ -158,10 +158,9 @@ async function onMouseUp(e) {
 
                 // === PATH A: VISION MODEL (Direct Image) ===
                 if (isVisionModel(currentModel)) {
-                    console.log(`Vision Model detected (${currentModel}). Sending Image directly.`);
                     chrome.runtime.sendMessage({
                         action: "ASK_AI",
-                        apiKey: activeKey, 
+                        // SECURITY: API keys are retrieved from storage in background.js
                         model: currentModel,
                         base64Image: croppedBase64
                     }, handleResponse);
@@ -169,7 +168,6 @@ async function onMouseUp(e) {
                 }
 
                 // === PATH B: TEXT MODEL (Engage OCR via Background) ===
-                console.log(`Text Model detected (${currentModel}). Engaging OCR via Background.`);
 
                 chrome.runtime.sendMessage({
                     action: "PERFORM_OCR",
@@ -183,10 +181,9 @@ async function onMouseUp(e) {
                     }
 
                     if (ocrResponse.success && ocrResponse.text && ocrResponse.text.length > 3) {
-                        console.log("OCR Success:", ocrResponse.text);
                         chrome.runtime.sendMessage({
                             action: "ASK_AI_TEXT",
-                            apiKey: activeKey, 
+                            // SECURITY: API keys are retrieved from storage in background.js
                             model: currentModel,
                             text: ocrResponse.text,
                             ocrConfidence: ocrResponse.confidence
@@ -197,7 +194,7 @@ async function onMouseUp(e) {
                             // Retry as image if OCR fails (fallback)
                             chrome.runtime.sendMessage({
                                 action: "ASK_AI",
-                                apiKey: activeKey, 
+                                // SECURITY: API keys are retrieved from storage in background.js
                                 model: currentModel,
                                 base64Image: croppedBase64
                             }, handleResponse);
@@ -215,10 +212,10 @@ async function onMouseUp(e) {
 // 4. Response Handler
 function handleResponse(apiResponse) {
     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
-    
+
     if (apiResponse && apiResponse.success) {
         const ui = new FloatingChatUI();
-        ui.addMessage('user', apiResponse.initialUserMessage); 
+        ui.addMessage('user', apiResponse.initialUserMessage);
         ui.addMessage('assistant', apiResponse.answer);
     } else {
         alert("Error: " + (apiResponse ? apiResponse.error : "Unknown error"));
@@ -243,16 +240,16 @@ function sanitizeModelText(rawText) {
 // 6. UI CLASS (Robust State Management)
 class FloatingChatUI {
     constructor() {
-        this.chatHistory = []; 
+        this.chatHistory = [];
         this.createWindow();
-        this.loadState(); 
+        this.loadState();
     }
 
     createWindow() {
         this.host = document.createElement("div");
         this.host.id = "groq-chat-host";
         this.host.style.cssText = "all: initial; position: fixed; z-index: 2147483647; top: 0; left: 0;";
-        
+
         this.shadow = this.host.attachShadow({ mode: 'closed' });
 
         this.container = document.createElement("div");
@@ -297,7 +294,7 @@ class FloatingChatUI {
             padding: 10px; border-top: 1px solid #454545; background: #252526;
             display: flex; gap: 10px; border-radius: 0 0 10px 10px; align-items: flex-end;
         `;
-        
+
         this.input = document.createElement("textarea");
         this.input.placeholder = "Ask a follow-up...";
         this.input.rows = 1;
@@ -305,7 +302,7 @@ class FloatingChatUI {
             flex-grow: 1; background: #333; border: 1px solid #444; color: white;
             padding: 8px; border-radius: 4px; resize: none; font-family: inherit; min-height: 36px; max-height: 120px;
         `;
-        
+
         this.input.addEventListener('input', () => {
             this.input.style.height = 'auto';
             this.input.style.height = Math.min(this.input.scrollHeight, 120) + 'px';
@@ -317,7 +314,7 @@ class FloatingChatUI {
             background: #f55036; color: white; border: none; padding: 0 15px; height: 36px;
             border-radius: 4px; cursor: pointer; font-weight: bold;
         `;
-        
+
         this.sendBtn.onclick = () => this.handleSend();
         this.input.onkeydown = (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -332,20 +329,20 @@ class FloatingChatUI {
 
         this.shadow.appendChild(this.container);
         document.body.appendChild(this.host);
-        
+
         // --- Event Listeners ---
         header.querySelector("#closeBtn").onclick = () => this.host.remove();
-        
+
         this.makeDraggable(header);
-        
+
         this.container.addEventListener('mouseup', () => this.saveState());
     }
 
     addMessage(role, content) {
         if (typeof content === 'string') {
-             this.chatHistory.push({ role: role, content: content });
+            this.chatHistory.push({ role: role, content: content });
         } else {
-             this.chatHistory.push(content);
+            this.chatHistory.push(content);
         }
 
         const msgDiv = document.createElement("div");
@@ -355,14 +352,19 @@ class FloatingChatUI {
             msgDiv.style.alignSelf = "flex-end"; msgDiv.style.background = "#3a3a3a"; msgDiv.style.color = "#ececec";
             if (typeof content === 'object' && content.content) {
                 const textPart = Array.isArray(content.content) ? content.content.find(c => c.type === 'text') : { text: content.content };
-                msgDiv.innerHTML = `<em>(Snippet)</em><br>${textPart ? textPart.text : ''}`;
+                // SECURITY: Use DOM methods instead of innerHTML to prevent XSS
+                const em = document.createElement('em');
+                em.textContent = '(Snippet)';
+                msgDiv.appendChild(em);
+                msgDiv.appendChild(document.createElement('br'));
+                msgDiv.appendChild(document.createTextNode(textPart ? textPart.text : ''));
             } else { msgDiv.innerText = content; }
         } else {
             msgDiv.style.alignSelf = "flex-start"; msgDiv.style.background = "#2d2d2d"; msgDiv.style.borderLeft = "3px solid #f55036";
             const cleanText = sanitizeModelText(content);
             if (typeof parseMarkdown === 'function') msgDiv.innerHTML = parseMarkdown(cleanText);
             else msgDiv.innerText = cleanText;
-            
+
             const codeBlocks = msgDiv.querySelectorAll("pre");
             codeBlocks.forEach(pre => {
                 pre.style.position = "relative";
@@ -399,7 +401,7 @@ class FloatingChatUI {
                 // Determine Active Key
                 const modelName = res.selectedModel || '';
                 let activeKey;
-                
+
                 if (modelName.startsWith('ollama')) {
                     activeKey = res.ollamaHost || "http://localhost:11434";
                 } else if (modelName.includes('gemini') || modelName.includes('gemma')) {
@@ -409,14 +411,14 @@ class FloatingChatUI {
                 }
 
                 const response = await chrome.runtime.sendMessage({
-                    action: "CONTINUE_CHAT", 
-                    apiKey: activeKey, 
-                    model: res.selectedModel, 
+                    action: "CONTINUE_CHAT",
+                    // SECURITY: API keys are retrieved from storage in background.js
+                    model: res.selectedModel,
                     history: this.chatHistory
                 });
-                
+
                 loadingDiv.remove();
-                if (response && response.success) { this.addMessage('assistant', response.answer); } 
+                if (response && response.success) { this.addMessage('assistant', response.answer); }
                 else { this.addMessage('assistant', "⚠️ Error: " + (response.error || "Unknown error")); }
             } catch (e) { loadingDiv.remove(); this.addMessage('assistant', "⚠️ Network Error: " + e.message); }
         });
@@ -427,7 +429,7 @@ class FloatingChatUI {
         let offsetX, offsetY;
 
         header.addEventListener('mousedown', (e) => {
-            if (e.target.id === 'closeBtn') return; 
+            if (e.target.id === 'closeBtn') return;
             isDragging = true;
             const rect = this.container.getBoundingClientRect();
             offsetX = e.clientX - rect.left;
@@ -436,7 +438,7 @@ class FloatingChatUI {
 
         document.addEventListener('mousemove', (e) => {
             if (isDragging) {
-                e.preventDefault(); 
+                e.preventDefault();
                 this.container.style.left = (e.clientX - offsetX) + "px";
                 this.container.style.top = (e.clientY - offsetY) + "px";
             }
@@ -468,10 +470,10 @@ class FloatingChatUI {
                 const s = res.chatWinState;
                 const top = Math.max(0, Math.min(s.top, window.innerHeight - 50));
                 const left = Math.max(0, Math.min(s.left, window.innerWidth - 50));
-                
+
                 this.container.style.top = top + "px";
                 this.container.style.left = left + "px";
-                
+
                 if (s.width) this.container.style.width = s.width + "px";
                 if (s.height) this.container.style.height = s.height + "px";
             } else {
