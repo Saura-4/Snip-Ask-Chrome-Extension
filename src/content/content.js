@@ -2,7 +2,64 @@
 
 let startX, startY, selectionBox, glassPane;
 let isSelecting = false;
-let activeChatUI = null; // Singleton reference for chat window
+
+// Compare Windows System
+let chatWindows = []; // Array of FloatingChatUI instances
+let pendingResponses = 0; // Track responses for synchronized follow-up
+let maxCompareWindows = 4; // Default limit, loaded from storage
+
+// Window Management Functions
+function registerWindow(ui) {
+    chatWindows.push(ui);
+    autoPositionWindow(ui, chatWindows.length - 1);
+}
+
+function unregisterWindow(ui) {
+    const idx = chatWindows.indexOf(ui);
+    if (idx > -1) chatWindows.splice(idx, 1);
+}
+
+function autoPositionWindow(ui, index) {
+    const width = 420;
+    const gap = 30;
+    const startX = 50 + (index * (width + gap));
+    const maxX = window.innerWidth - width - 50;
+
+    // Ensure container exists and apply position after a small delay for DOM readiness
+    setTimeout(() => {
+        if (ui.container) {
+            ui.container.style.left = Math.min(startX, maxX) + 'px';
+            ui.container.style.top = '50px';
+            ui.container.style.right = 'auto'; // Override any right positioning
+        }
+    }, 50);
+}
+
+function broadcastFollowUp(text, senderUI) {
+    if (chatWindows.length <= 1) {
+        // Single window mode - just send normally
+        senderUI.sendMessageDirect(text);
+        return;
+    }
+    // Multi-window mode - sync all
+    pendingResponses = chatWindows.length;
+    chatWindows.forEach(w => w.setInputDisabled(true));
+    chatWindows.forEach(w => w.sendMessageDirect(text));
+}
+
+function onResponseReceived() {
+    if (chatWindows.length <= 1) return;
+    pendingResponses--;
+    if (pendingResponses <= 0) {
+        pendingResponses = 0;
+        chatWindows.forEach(w => w.setInputDisabled(false));
+    }
+}
+
+// Load max windows setting
+chrome.storage.local.get(['maxCompareWindows'], (res) => {
+    if (res.maxCompareWindows) maxCompareWindows = res.maxCompareWindows;
+});
 
 // Helper to identify Vision Models
 function isVisionModel(modelName) {
@@ -229,17 +286,21 @@ async function onMouseUp(e) {
 }
 
 // 4. Response Handler
-function handleResponse(apiResponse) {
+async function handleResponse(apiResponse) {
     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
 
     if (apiResponse && apiResponse.success) {
-        // Singleton pattern: close existing chat window before creating new one
-        if (activeChatUI) {
-            activeChatUI.close();
-        }
-        activeChatUI = new FloatingChatUI();
-        activeChatUI.addMessage('user', apiResponse.initialUserMessage);
-        activeChatUI.addMessage('assistant', apiResponse.answer);
+        // Close all existing chat windows on new snip
+        chatWindows.forEach(w => w.close());
+        chatWindows = [];
+
+        const ui = await FloatingChatUI.create();
+        registerWindow(ui);
+        ui.addMessage('user', apiResponse.initialUserMessage);
+        ui.addMessage('assistant', apiResponse.answer);
+
+        // Store initial state for comparison cloning
+        ui.initialUserMessage = apiResponse.initialUserMessage;
     } else {
         // Show error in a styled toast instead of native alert
         showErrorToast(apiResponse ? apiResponse.error : "Unknown error");
@@ -286,8 +347,60 @@ function sanitizeModelText(rawText) {
 class FloatingChatUI {
     constructor() {
         this.chatHistory = [];
-        this.createWindow();
-        this.loadState();
+        this.currentModel = null;
+        this.availableModels = [];
+    }
+
+    // Static factory method for async initialization
+    static async create() {
+        const ui = new FloatingChatUI();
+        await ui.initModel();
+        ui.createWindow();
+        ui.loadState();
+        return ui;
+    }
+
+    async initModel() {
+        const result = await new Promise(resolve => {
+            chrome.storage.local.get(['selectedModel', 'enabledProviders', 'enabledModels'], resolve);
+        });
+        this.currentModel = result.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+        // Build available models list from enabled providers
+        const ALL_MODELS = {
+            groq: [
+                { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout' },
+                { value: 'meta-llama/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick' },
+                { value: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B' },
+                { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B' }
+            ],
+            google: [
+                { value: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+                { value: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+                { value: 'gemma-3-27b-it', name: 'Gemma 3 27B' }
+            ],
+            openrouter: [
+                { value: 'openrouter:deepseek/deepseek-r1-0528:free', name: 'DeepSeek R1' }
+            ],
+            ollama: [
+                { value: 'ollama:llama3', name: 'Ollama Llama 3' },
+                { value: 'ollama:gemma3:4b', name: 'Ollama Gemma 3' }
+            ]
+        };
+
+        const enabledProviders = result.enabledProviders || { groq: true };
+        const enabledModels = result.enabledModels || {};
+
+        this.availableModels = [];
+        for (const [provider, models] of Object.entries(ALL_MODELS)) {
+            if (enabledProviders[provider]) {
+                models.forEach(m => {
+                    if (enabledModels[m.value] !== false) {
+                        this.availableModels.push(m);
+                    }
+                });
+            }
+        }
     }
 
     close() {
@@ -295,9 +408,7 @@ class FloatingChatUI {
             this.host.remove();
             this.host = null;
         }
-        if (activeChatUI === this) {
-            activeChatUI = null;
-        }
+        unregisterWindow(this);
     }
 
     createWindow() {
@@ -321,17 +432,61 @@ class FloatingChatUI {
             max-width: 90vw; max-height: 90vh;
         `;
 
-        // Header
+        // Header with model selector
         const header = document.createElement("div");
-        header.innerHTML = `
-            <strong style="color: #f55036;">⚡ Groq/Gemini Chat</strong>
-            <span id="closeBtn" style="cursor: pointer; color: #888; font-weight: bold; font-size:16px;">✖</span>
-        `;
         header.style.cssText = `
-            padding: 12px; background: #2d2d2d; border-bottom: 1px solid #454545;
+            padding: 10px 12px; background: #2d2d2d; border-bottom: 1px solid #454545;
             cursor: move; display: flex; justify-content: space-between; align-items: center;
-            border-radius: 10px 10px 0 0; user-select: none;
+            border-radius: 10px 10px 0 0; user-select: none; gap: 8px;
         `;
+
+        const titleSection = document.createElement("div");
+        titleSection.style.cssText = "display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;";
+        titleSection.innerHTML = `<strong style="color: #f55036; white-space: nowrap;">⚡</strong>`;
+
+        // Model selector dropdown
+        this.modelSelect = document.createElement("select");
+        this.modelSelect.style.cssText = `
+            background: #1e1e1e; color: #ccc; border: 1px solid #454545; 
+            border-radius: 4px; padding: 4px 8px; font-size: 12px;
+            cursor: pointer; flex: 1; min-width: 0; max-width: 200px;
+        `;
+
+        // Populate options
+        this.availableModels.forEach(m => {
+            const opt = document.createElement("option");
+            opt.value = m.value;
+            opt.textContent = m.name;
+            if (m.value === this.currentModel) opt.selected = true;
+            this.modelSelect.appendChild(opt);
+        });
+
+        this.modelSelect.addEventListener("change", () => {
+            this.currentModel = this.modelSelect.value;
+            chrome.storage.local.set({ selectedModel: this.currentModel });
+        });
+
+        titleSection.appendChild(this.modelSelect);
+        header.appendChild(titleSection);
+
+        // Compare button
+        const compareBtn = document.createElement("button");
+        compareBtn.textContent = "+";
+        compareBtn.title = "Compare with another model";
+        compareBtn.style.cssText = `
+            background: #3a3a3a; color: #f55036; border: 1px solid #f55036;
+            width: 24px; height: 24px; border-radius: 4px; cursor: pointer;
+            font-weight: bold; font-size: 16px; line-height: 1;
+        `;
+        compareBtn.onclick = () => this.spawnCompareWindow();
+        header.appendChild(compareBtn);
+
+        const closeBtn = document.createElement("span");
+        closeBtn.id = "closeBtn";
+        closeBtn.textContent = "✖";
+        closeBtn.style.cssText = "cursor: pointer; color: #888; font-weight: bold; font-size: 16px; margin-left: 8px;";
+        header.appendChild(closeBtn);
+
         this.container.appendChild(header);
 
         // Chat Body
@@ -386,18 +541,23 @@ class FloatingChatUI {
         document.body.appendChild(this.host);
 
         // --- Event Listeners ---
-        header.querySelector("#closeBtn").onclick = () => this.close();
+        closeBtn.onclick = () => this.close();
 
         this.makeDraggable(header);
 
         this.container.addEventListener('mouseup', () => this.saveState());
     }
 
-    addMessage(role, content) {
+    addMessage(role, content, modelName = null) {
+        // Track model name for assistant messages
+        const msgModel = role === 'assistant' ? (modelName || this.currentModel) : null;
+
         if (typeof content === 'string') {
-            this.chatHistory.push({ role: role, content: content });
+            this.chatHistory.push({ role: role, content: content, model: msgModel });
         } else {
-            this.chatHistory.push(content);
+            const entry = { ...content };
+            if (msgModel) entry.model = msgModel;
+            this.chatHistory.push(entry);
         }
 
         const msgDiv = document.createElement("div");
@@ -416,9 +576,19 @@ class FloatingChatUI {
             } else { msgDiv.innerText = content; }
         } else {
             msgDiv.style.alignSelf = "flex-start"; msgDiv.style.background = "#2d2d2d"; msgDiv.style.borderLeft = "3px solid #f55036";
+
+            // Add model label for assistant messages
+            const modelLabel = this._getModelDisplayName(msgModel);
+            const labelDiv = document.createElement("div");
+            labelDiv.style.cssText = "font-size: 10px; color: #888; margin-bottom: 6px; font-weight: 500;";
+            labelDiv.textContent = `🤖 ${modelLabel}`;
+            msgDiv.appendChild(labelDiv);
+
+            const contentDiv = document.createElement("div");
             const cleanText = sanitizeModelText(content);
-            if (typeof parseMarkdown === 'function') msgDiv.innerHTML = parseMarkdown(cleanText);
-            else msgDiv.innerText = cleanText;
+            if (typeof parseMarkdown === 'function') contentDiv.innerHTML = parseMarkdown(cleanText);
+            else contentDiv.innerText = cleanText;
+            msgDiv.appendChild(contentDiv);
 
             const codeBlocks = msgDiv.querySelectorAll("pre");
             codeBlocks.forEach(pre => {
@@ -437,48 +607,122 @@ class FloatingChatUI {
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
     }
 
-    async handleSend() {
-        const text = this.input.value.trim();
-        if (!text) return;
+    _getModelDisplayName(modelValue) {
+        if (!modelValue) return 'AI';
+        // Find in available models or generate from value
+        const found = this.availableModels.find(m => m.value === modelValue);
+        if (found) return found.name;
+        // Fallback: extract last part of model ID
+        const parts = modelValue.split(/[/:]/);
+        return parts[parts.length - 1] || 'AI';
+    }
 
-        this.input.value = ""; this.input.style.height = 'auto';
+    // === COMPARE WINDOWS FUNCTIONALITY ===
+
+    async spawnCompareWindow() {
+        if (chatWindows.length >= maxCompareWindows) {
+            showErrorToast(`Maximum ${maxCompareWindows} comparison windows allowed`);
+            return;
+        }
+
+        const newUI = await FloatingChatUI.create();
+        registerWindow(newUI);
+
+        if (this.initialUserMessage) {
+            newUI.initialUserMessage = this.initialUserMessage;
+            newUI.addMessage('user', this.initialUserMessage);
+
+            const otherModel = this._getNextAvailableModel();
+            if (otherModel && newUI.modelSelect) {
+                newUI.currentModel = otherModel;
+                newUI.modelSelect.value = otherModel;
+            }
+
+            const loadingDiv = document.createElement("div");
+            loadingDiv.innerText = `🤖 ${newUI._getModelDisplayName(newUI.currentModel)} is thinking...`;
+            loadingDiv.style.cssText = "align-self: flex-start; color: #888; font-style: italic; font-size: 12px;";
+            newUI.chatBody.appendChild(loadingDiv);
+
+            try {
+                const msgContent = typeof this.initialUserMessage === 'string' ? this.initialUserMessage : this.initialUserMessage.content;
+                const response = await chrome.runtime.sendMessage({
+                    action: "CONTINUE_CHAT",
+                    model: newUI.currentModel,
+                    history: [{ role: 'user', content: msgContent }]
+                });
+                loadingDiv.remove();
+                if (response && response.success) {
+                    newUI.addMessage('assistant', response.answer, newUI.currentModel);
+                } else {
+                    newUI.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), newUI.currentModel);
+                }
+            } catch (e) {
+                loadingDiv.remove();
+                newUI.addMessage('assistant', "⚠️ Network Error: " + e.message, newUI.currentModel);
+            }
+        }
+    }
+
+    _getNextAvailableModel() {
+        const usedModels = chatWindows.map(w => w.currentModel);
+        for (const m of this.availableModels) {
+            if (!usedModels.includes(m.value)) return m.value;
+        }
+        return this.availableModels.find(m => m.value !== this.currentModel)?.value || null;
+    }
+
+    setInputDisabled(disabled) {
+        if (this.input) {
+            this.input.disabled = disabled;
+            this.input.style.opacity = disabled ? '0.5' : '1';
+        }
+        if (this.sendBtn) {
+            this.sendBtn.disabled = disabled;
+            this.sendBtn.style.opacity = disabled ? '0.5' : '1';
+        }
+    }
+
+    async sendMessageDirect(text) {
         this.addMessage('user', text);
 
         const loadingDiv = document.createElement("div");
-        loadingDiv.innerText = "Thinking...";
-        loadingDiv.style.cssText = "align-self: flex-start; color: #888; font-style: italic; font-size: 12px; margin-left: 10px;";
+        loadingDiv.innerText = `🤖 ${this._getModelDisplayName(this.currentModel)} is thinking...`;
+        loadingDiv.style.cssText = "align-self: flex-start; color: #888; font-style: italic; font-size: 12px;";
         this.chatBody.appendChild(loadingDiv);
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
 
-        // === UPDATE: GET KEYS FOR CHAT ===
-        chrome.storage.local.get(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'selectedModel'], async (res) => {
-            try {
-                // Determine Active Key
-                const modelName = res.selectedModel || '';
-                let activeKey;
-
-                if (modelName.startsWith('ollama')) {
-                    activeKey = res.ollamaHost || "http://localhost:11434";
-                } else if (modelName.startsWith('openrouter:')) {
-                    activeKey = res.openrouterKey;
-                } else if (modelName.includes('gemini') || modelName.includes('gemma')) {
-                    activeKey = res.geminiKey;
-                } else {
-                    activeKey = res.groqKey;
-                }
-
-                const response = await chrome.runtime.sendMessage({
-                    action: "CONTINUE_CHAT",
-                    // SECURITY: API keys are retrieved from storage in background.js
-                    model: res.selectedModel,
-                    history: this.chatHistory
-                });
-
-                loadingDiv.remove();
-                if (response && response.success) { this.addMessage('assistant', response.answer); }
-                else { this.addMessage('assistant', "⚠️ Error: " + (response.error || "Unknown error")); }
-            } catch (e) { loadingDiv.remove(); this.addMessage('assistant', "⚠️ Network Error: " + e.message); }
+        const modelToUse = this.currentModel;
+        const formattedHistory = this.chatHistory.map(msg => {
+            if (msg.model && msg.role === 'assistant') {
+                return { role: msg.role, content: `[Response from ${this._getModelDisplayName(msg.model)}]: ${msg.content}` };
+            }
+            return { role: msg.role, content: msg.content };
         });
+
+        try {
+            const response = await chrome.runtime.sendMessage({
+                action: "CONTINUE_CHAT",
+                model: modelToUse,
+                history: formattedHistory
+            });
+            loadingDiv.remove();
+            if (response && response.success) {
+                this.addMessage('assistant', response.answer, modelToUse);
+            } else {
+                this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), modelToUse);
+            }
+        } catch (e) {
+            loadingDiv.remove();
+            this.addMessage('assistant', "⚠️ Network Error: " + e.message, modelToUse);
+        }
+        onResponseReceived();
+    }
+
+    async handleSend() {
+        const text = this.input.value.trim();
+        if (!text) return;
+        this.input.value = ""; this.input.style.height = 'auto';
+        broadcastFollowUp(text, this);
     }
 
     makeDraggable(header) {

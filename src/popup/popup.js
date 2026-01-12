@@ -465,6 +465,23 @@ function setupEventListeners() {
     e.preventDefault();
     chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
   });
+
+  // Keyboard shortcuts link
+  document.getElementById('openShortcutsLink')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  });
+
+  // Max compare windows setting
+  const maxCompareSelect = document.getElementById('maxCompareWindows');
+  if (maxCompareSelect) {
+    chrome.storage.local.get(['maxCompareWindows'], (res) => {
+      if (res.maxCompareWindows) maxCompareSelect.value = res.maxCompareWindows;
+    });
+    maxCompareSelect.addEventListener('change', () => {
+      chrome.storage.local.set({ maxCompareWindows: parseInt(maxCompareSelect.value) });
+    });
+  }
 }
 
 // ============================================================================

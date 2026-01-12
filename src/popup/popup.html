@@ -535,6 +535,12 @@
         Enable/disable AI providers. Hidden providers' API keys are deleted after 7 days.
       </div>
 
+      <div
+        style="font-size: 11px; color: #666; margin-bottom: 12px; padding: 8px; background: #252526; border-radius: 4px; border-left: 2px solid #f55036;">
+        ⌨️ <strong style="color: #ccc;">Tip:</strong> Set a keyboard shortcut at
+        <a href="#" id="openShortcutsLink" style="color: #f55036;">chrome://extensions/shortcuts</a>
+      </div>
+
       <div class="provider-item">
         <div class="provider-info">
           <span class="provider-icon">🚀</span>
@@ -577,6 +583,19 @@
           <input type="checkbox" id="providerOllama">
           <span class="toggle-slider"></span>
         </label>
+      </div>
+
+      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #333;">
+        <div style="font-size: 11px; color: #888; margin-bottom: 8px;">Compare Windows</div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 12px; color: #ccc;">Max comparison windows:</span>
+          <select id="maxCompareWindows"
+            style="background: #252526; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 8px; font-size: 12px;">
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4" selected>4</option>
+          </select>
+        </div>
       </div>
     </div>
 
