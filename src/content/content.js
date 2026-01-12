@@ -644,7 +644,20 @@ class FloatingChatUI {
             newUI.chatBody.appendChild(loadingDiv);
 
             try {
-                const msgContent = typeof this.initialUserMessage === 'string' ? this.initialUserMessage : this.initialUserMessage.content;
+                // Handle vision model content (array with image parts) vs text content
+                let msgContent = this.initialUserMessage;
+                if (typeof msgContent === 'object') {
+                    // Vision model format: { role, content: [{type: 'text', text: '...'}, {type: 'image_url', ...}] }
+                    if (Array.isArray(msgContent.content)) {
+                        const textPart = msgContent.content.find(c => c.type === 'text');
+                        msgContent = textPart ? textPart.text : 'Analyze this image';
+                    } else if (typeof msgContent.content === 'string') {
+                        msgContent = msgContent.content;
+                    } else {
+                        msgContent = 'Analyze this content';
+                    }
+                }
+
                 const response = await chrome.runtime.sendMessage({
                     action: "CONTINUE_CHAT",
                     model: newUI.currentModel,
