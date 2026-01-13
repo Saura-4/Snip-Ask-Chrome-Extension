@@ -64,6 +64,8 @@ body {
     font-size: 14px;
     padding: 0;
     transition: all 0.2s;
+    width: auto;
+    margin: 0;
 }
 
 .settings-btn:hover {
@@ -72,19 +74,52 @@ body {
 
 .footer {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
     align-items: center;
+    gap: 8px;
     margin-top: 15px;
     padding-top: 10px;
     border-top: 1px solid #333;
     text-align: center;
+}
+
+.footer-version {
     font-size: 10px;
     color: #666;
 }
 
-.footer-text {
-    font-size: 10px;
-    color: #666;
+.footer-icons {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.icon-btn {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    padding: 4px;
+    text-decoration: none;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    width: 26px;
+    height: 26px;
+    margin: 0;
+}
+
+.icon-btn:hover {
+    color: #f55036;
+    background: rgba(245, 80, 54, 0.1);
+}
+
+.icon-btn svg {
+    display: block;
+    width: 18px;
+    height: 18px;
 }
 
 label {
@@ -279,6 +314,19 @@ body.settings-open {
     font-size: 12px;
     font-weight: 600;
     color: #ccc;
+}
+
+.provider-dashboard-link {
+    font-size: 12px;
+    color: #666;
+    text-decoration: none;
+    margin-left: 4px;
+    transition: all 0.2s;
+}
+
+.provider-dashboard-link:hover {
+    color: #f55036;
+    transform: scale(1.1);
 }
 
 /* Toggle Switch */

@@ -479,10 +479,58 @@ function setupEventListeners() {
     chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
   });
 
+  // Reset All Keys
+  document.getElementById('resetAllKeys')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (confirm('⚠️ Are you sure you want to reset all API keys? This will clear all stored keys (Groq, Google, OpenRouter, and Ollama host).')) {
+      await chrome.storage.local.remove(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
+      alert('✅ All API keys have been cleared.');
+      await loadSettings(); // Reload to clear the input fields
+    }
+  });
+
   // Keyboard shortcuts link
   document.getElementById('openShortcutsLink')?.addEventListener('click', (e) => {
     e.preventDefault();
     chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  });
+
+  // Contact links
+  document.getElementById('instagramLink')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'https://www.instagram.com/saura_v_chourasia/' });
+  });
+
+  document.getElementById('linkedinLink')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'https://www.linkedin.com/in/saurav-chourasia/' });
+  });
+
+  document.getElementById('discordLink')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'https://discord.gg/your_invite' });
+  });
+
+  document.getElementById('githubLink')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'https://github.com/Saura-4' });
+  });
+
+  // Groq API keys link (for beginners)
+  document.getElementById('groqKeysLink')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'https://console.groq.com/keys' });
+  });
+
+  // Provider dashboard links
+  document.querySelectorAll('.provider-dashboard-link').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const url = e.target.dataset.url || e.target.parentElement.dataset.url;
+      if (url) {
+        chrome.tabs.create({ url });
+      }
+    });
   });
 
   // Max compare windows setting
