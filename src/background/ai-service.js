@@ -121,6 +121,32 @@ function stripThinkingTags(text) {
     return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 }
 
+// Helper to normalize API errors into user-friendly messages
+function normalizeErrorMessage(response, data, provider) {
+    const status = response.status;
+    const apiMessage = data?.error?.message || data?.error?.status || '';
+
+    // Common HTTP error handling
+    if (status === 401) {
+        return `Invalid ${provider} API key. Please check your key in extension settings.`;
+    }
+    if (status === 403) {
+        return `Access denied by ${provider}. Your API key may lack permissions.`;
+    }
+    if (status === 429) {
+        return `Rate limit exceeded on ${provider}. Please wait a moment and try again.`;
+    }
+    if (status === 500 || status === 502 || status === 503) {
+        return `${provider} server is temporarily unavailable. Please try again later.`;
+    }
+    if (status === 0 || !response.ok && !apiMessage) {
+        return `Network error. Please check your internet connection.`;
+    }
+
+    // Return API message or generic fallback
+    return apiMessage || `${provider} error (${status})`;
+}
+
 class GroqService extends AbstractAIService {
     constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
         super(apiKey, modelName, interactionMode, customPrompt, customModes);
@@ -148,7 +174,7 @@ class GroqService extends AbstractAIService {
         });
 
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error?.message || "Groq Network Error");
+        if (!response.ok) throw new Error(normalizeErrorMessage(response, data, 'Groq'));
 
         // Strip thinking tags from Qwen models
         const rawContent = data.choices?.[0]?.message?.content || "No answer.";
@@ -248,7 +274,7 @@ class GeminiService extends AbstractAIService {
         });
 
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error ? (data.error.message || data.error.status) : "Gemini Network Error");
+        if (!response.ok) throw new Error(normalizeErrorMessage(response, data, 'Google Gemini'));
 
         return data.candidates?.[0]?.content?.parts?.[0]?.text || "No answer returned.";
     }
@@ -340,7 +366,7 @@ class OpenRouterService extends AbstractAIService {
         const data = await response.json();
 
         if (!response.ok) {
-            throw new Error(data.error?.message || `OpenRouter Error (${response.status})`);
+            throw new Error(normalizeErrorMessage(response, data, 'OpenRouter'));
         }
 
         const answer = data.choices?.[0]?.message?.content;

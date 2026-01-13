@@ -372,6 +372,11 @@ function setupEventListeners() {
   document.getElementById('closeSettingsBtn').addEventListener('click', () => {
     document.getElementById('settingsPanel').classList.remove('open');
     document.body.classList.remove('settings-open');
+    // Reset body dimensions to default popup size
+    document.body.style.width = '';
+    document.body.style.height = '';
+    document.body.style.minWidth = '';
+    document.body.style.minHeight = '';
   });
 
   // Provider hint link
@@ -415,9 +420,12 @@ function setupEventListeners() {
         await chrome.storage.local.set({ selectedModel: 'ollama:' + name });
       }
     } else if (model === 'openrouter:custom') {
-      const slug = prompt("Enter OpenRouter model slug:", "openai/gpt-4");
-      if (slug) {
+      const slug = prompt("Enter OpenRouter model slug (e.g., openai/gpt-4):", "openai/gpt-4");
+      // Validate slug format: provider/model-name[:version]
+      if (slug && /^[a-zA-Z0-9\-_]+\/[a-zA-Z0-9\-_.]+(:free)?$/.test(slug)) {
         await chrome.storage.local.set({ selectedModel: 'openrouter:' + slug });
+      } else if (slug) {
+        alert('Invalid model slug format. Use format: provider/model-name (e.g., openai/gpt-4)');
       }
     } else {
       await chrome.storage.local.set({ selectedModel: model });
@@ -447,8 +455,13 @@ function setupEventListeners() {
     editingModeId = null;
     document.getElementById('modeNameInput').value = '';
     document.getElementById('modePromptInput').value = '';
+    updateCharCounters(); // Reset counters
     document.getElementById('modeEditor').classList.add('active');
   });
+
+  // Character counter updates
+  document.getElementById('modeNameInput').addEventListener('input', updateCharCounters);
+  document.getElementById('modePromptInput').addEventListener('input', updateCharCounters);
 
   document.getElementById('cancelModeBtn').addEventListener('click', () => {
     document.getElementById('modeEditor').classList.remove('active');
@@ -496,7 +509,30 @@ async function editMode(modeId) {
     editingModeId = modeId;
     document.getElementById('modeNameInput').value = mode.name;
     document.getElementById('modePromptInput').value = mode.prompt;
+    updateCharCounters(); // Update counters for existing values
     document.getElementById('modeEditor').classList.add('active');
+  }
+}
+
+// Character counter helper
+function updateCharCounters() {
+  const nameInput = document.getElementById('modeNameInput');
+  const promptInput = document.getElementById('modePromptInput');
+  const nameCounter = document.getElementById('nameCounter');
+  const promptCounter = document.getElementById('promptCounter');
+
+  if (nameInput && nameCounter) {
+    const len = nameInput.value.length;
+    const max = 50;
+    nameCounter.textContent = `${len}/${max}`;
+    nameCounter.className = 'char-counter' + (len >= max ? ' limit' : len > max * 0.8 ? ' warning' : '');
+  }
+
+  if (promptInput && promptCounter) {
+    const len = promptInput.value.length;
+    const max = 2000;
+    promptCounter.textContent = `${len}/${max}`;
+    promptCounter.className = 'char-counter' + (len >= max ? ' limit' : len > max * 0.8 ? ' warning' : '');
   }
 }
 
@@ -504,8 +540,19 @@ async function saveMode() {
   const name = document.getElementById('modeNameInput').value.trim();
   const prompt = document.getElementById('modePromptInput').value.trim();
 
+  // Validation
   if (!name || !prompt) {
     alert('Please fill in both name and prompt');
+    return;
+  }
+
+  if (name.length > 50) {
+    alert('Mode name must be 50 characters or less');
+    return;
+  }
+
+  if (prompt.length > 2000) {
+    alert('Prompt must be 2000 characters or less');
     return;
   }
 

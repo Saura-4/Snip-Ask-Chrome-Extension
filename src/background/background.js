@@ -213,7 +213,8 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
             answer: result.answer,
             initialUserMessage: result.initialUserMessage,
             usedOCR: type === 'text',
-            ocrConfidence
+            ocrConfidence,
+            base64Image: type === 'image' ? inputContent : null
         });
 
     } catch (error) {

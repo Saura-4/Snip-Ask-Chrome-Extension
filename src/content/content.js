@@ -22,15 +22,27 @@ function unregisterWindow(ui) {
 function autoPositionWindow(ui, index) {
     const width = 420;
     const gap = 30;
-    const startX = 50 + (index * (width + gap));
-    const maxX = window.innerWidth - width - 50;
 
-    // Ensure container exists and apply position after a small delay for DOM readiness
     setTimeout(() => {
-        if (ui.container) {
-            ui.container.style.left = Math.min(startX, maxX) + 'px';
+        if (!ui.container) return;
+
+        if (index === 0) {
+            // Main window: use saved position or default to top-right
+            // loadState() will be called and restore position, don't override
+            // Just set a default right-aligned position if no saved state
+            if (!ui.hasSavedPosition) {
+                ui.container.style.right = '50px';
+                ui.container.style.left = 'auto';
+                ui.container.style.top = '50px';
+            }
+        } else {
+            // Compare windows: spawn to the LEFT of existing windows
+            // Calculate position based on rightmost window
+            const rightEdge = window.innerWidth - 50;
+            const posX = rightEdge - (index + 1) * (width + gap);
+            ui.container.style.left = Math.max(20, posX) + 'px';
+            ui.container.style.right = 'auto';
             ui.container.style.top = '50px';
-            ui.container.style.right = 'auto'; // Override any right positioning
         }
     }, 50);
 }
@@ -200,6 +212,17 @@ async function onMouseUp(e) {
         // Crop the image
         cropImage(response.dataUrl, rect, async (croppedBase64) => {
 
+            // Check if this is a snip-again (add to existing chat)
+            if (window._snipAgainMode && window._snipAgainTarget) {
+                window._snipAgainMode = false;
+                const targetUI = window._snipAgainTarget;
+                window._snipAgainTarget = null;
+
+                if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
+                targetUI.addSnippedImage(croppedBase64);
+                return;
+            }
+
             // === UPDATE: GET ALL KEYS ===
             chrome.storage.local.get(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'selectedModel'], async (result) => {
 
@@ -301,6 +324,8 @@ async function handleResponse(apiResponse) {
 
         // Store initial state for comparison cloning
         ui.initialUserMessage = apiResponse.initialUserMessage;
+        // Store base64 image for compare windows (vision models need this)
+        ui.initialBase64Image = apiResponse.base64Image || null;
     } else {
         // Show error in a styled toast instead of native alert
         showErrorToast(apiResponse ? apiResponse.error : "Unknown error");
@@ -469,6 +494,18 @@ class FloatingChatUI {
         titleSection.appendChild(this.modelSelect);
         header.appendChild(titleSection);
 
+        // Snip Again button
+        const snipAgainBtn = document.createElement("button");
+        snipAgainBtn.textContent = "📷";
+        snipAgainBtn.title = "Snip and add to this chat";
+        snipAgainBtn.style.cssText = `
+            background: #3a3a3a; color: #ccc; border: 1px solid #555;
+            width: 28px; height: 24px; border-radius: 4px; cursor: pointer;
+            font-size: 14px; line-height: 1;
+        `;
+        snipAgainBtn.onclick = () => this.startSnipAgain();
+        header.appendChild(snipAgainBtn);
+
         // Compare button
         const compareBtn = document.createElement("button");
         compareBtn.textContent = "+";
@@ -552,13 +589,27 @@ class FloatingChatUI {
         // Track model name for assistant messages
         const msgModel = role === 'assistant' ? (modelName || this.currentModel) : null;
 
-        if (typeof content === 'string') {
-            this.chatHistory.push({ role: role, content: content, model: msgModel });
-        } else {
-            const entry = { ...content };
-            if (msgModel) entry.model = msgModel;
-            this.chatHistory.push(entry);
+        // ALWAYS store string content in chatHistory for compatibility with all models
+        let historyContent = content;
+        if (typeof content !== 'string') {
+            // Extract text from complex objects (vision model messages)
+            if (Array.isArray(content)) {
+                const textPart = content.find(c => c.type === 'text');
+                historyContent = textPart ? textPart.text : '(image analyzed)';
+            } else if (content && content.content) {
+                if (Array.isArray(content.content)) {
+                    const textPart = content.content.find(c => c.type === 'text');
+                    historyContent = textPart ? textPart.text : '(image analyzed)';
+                } else if (typeof content.content === 'string') {
+                    historyContent = content.content;
+                } else {
+                    historyContent = '(complex content)';
+                }
+            } else {
+                historyContent = '(complex content)';
+            }
         }
+        this.chatHistory.push({ role: role, content: historyContent, model: msgModel });
 
         const msgDiv = document.createElement("div");
         msgDiv.style.cssText = `max-width: 90%; padding: 10px 12px; border-radius: 8px; line-height: 1.5; word-wrap: break-word; font-size: 13px;`;
@@ -617,6 +668,91 @@ class FloatingChatUI {
         return parts[parts.length - 1] || 'AI';
     }
 
+    // === SNIP AGAIN FUNCTIONALITY ===
+
+    async startSnipAgain() {
+        // Store reference to this chat for callback
+        window._snipAgainTarget = this;
+
+        // Minimize all chat windows temporarily
+        chatWindows.forEach(w => {
+            if (w.container) w.container.style.display = 'none';
+        });
+
+        // Start the snip process
+        createGlassPane();
+        createSelectionBox();
+        isSelecting = true;
+
+        // Override the normal response handler for snip-again mode
+        window._snipAgainMode = true;
+    }
+
+    addSnippedImage(croppedBase64) {
+        // Show all windows again
+        chatWindows.forEach(w => {
+            if (w.container) w.container.style.display = 'flex';
+        });
+
+        // Broadcast the new image to ALL windows
+        chatWindows.forEach(w => {
+            w._processSnippedImage(croppedBase64);
+        });
+    }
+
+    _processSnippedImage(croppedBase64) {
+        // Add loading indicator
+        const loadingDiv = document.createElement("div");
+        loadingDiv.innerText = `🤖 ${this._getModelDisplayName(this.currentModel)} is analyzing new image...`;
+        loadingDiv.style.cssText = "align-self: flex-start; color: #888; font-style: italic; font-size: 12px;";
+        this.chatBody.appendChild(loadingDiv);
+        this.chatBody.scrollTop = this.chatBody.scrollHeight;
+
+        // Add user message indicator
+        this.addMessage('user', '(New screenshot added)');
+
+        // Handle vision vs non-vision models differently
+        if (isVisionModel(this.currentModel)) {
+            // Vision model: send image directly
+            chrome.runtime.sendMessage({
+                action: "ASK_AI",
+                model: this.currentModel,
+                base64Image: croppedBase64
+            }, (response) => {
+                loadingDiv.remove();
+                if (response && response.success) {
+                    this.addMessage('assistant', response.answer, this.currentModel);
+                } else {
+                    this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), this.currentModel);
+                }
+            });
+        } else {
+            // Non-vision model: run OCR first
+            chrome.runtime.sendMessage({
+                action: "PERFORM_OCR",
+                base64Image: croppedBase64
+            }, (ocrResult) => {
+                if (ocrResult && ocrResult.success && ocrResult.text) {
+                    chrome.runtime.sendMessage({
+                        action: "ASK_AI_TEXT",
+                        model: this.currentModel,
+                        text: ocrResult.text
+                    }, (response) => {
+                        loadingDiv.remove();
+                        if (response && response.success) {
+                            this.addMessage('assistant', response.answer, this.currentModel);
+                        } else {
+                            this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), this.currentModel);
+                        }
+                    });
+                } else {
+                    loadingDiv.remove();
+                    this.addMessage('assistant', "⚠️ OCR failed - no text extracted from image", this.currentModel);
+                }
+            });
+        }
+    }
+
     // === COMPARE WINDOWS FUNCTIONALITY ===
 
     async spawnCompareWindow() {
@@ -630,6 +766,7 @@ class FloatingChatUI {
 
         if (this.initialUserMessage) {
             newUI.initialUserMessage = this.initialUserMessage;
+            newUI.initialBase64Image = this.initialBase64Image; // Copy for nested comparisons
             newUI.addMessage('user', this.initialUserMessage);
 
             const otherModel = this._getNextAvailableModel();
@@ -644,25 +781,53 @@ class FloatingChatUI {
             newUI.chatBody.appendChild(loadingDiv);
 
             try {
-                // Handle vision model content (array with image parts) vs text content
-                let msgContent = this.initialUserMessage;
-                if (typeof msgContent === 'object') {
-                    // Vision model format: { role, content: [{type: 'text', text: '...'}, {type: 'image_url', ...}] }
-                    if (Array.isArray(msgContent.content)) {
-                        const textPart = msgContent.content.find(c => c.type === 'text');
-                        msgContent = textPart ? textPart.text : 'Analyze this image';
-                    } else if (typeof msgContent.content === 'string') {
-                        msgContent = msgContent.content;
+                let response;
+
+                // Check if the new model is a vision model and we have an image
+                if (isVisionModel(newUI.currentModel) && this.initialBase64Image) {
+                    // Vision model: send the actual image
+                    response = await chrome.runtime.sendMessage({
+                        action: "ASK_AI",
+                        model: newUI.currentModel,
+                        base64Image: this.initialBase64Image
+                    });
+                } else if (!isVisionModel(newUI.currentModel) && this.initialBase64Image) {
+                    // Non-vision model BUT we have an image: run OCR first
+                    const ocrResult = await chrome.runtime.sendMessage({
+                        action: "PERFORM_OCR",
+                        base64Image: this.initialBase64Image
+                    });
+
+                    if (ocrResult && ocrResult.success && ocrResult.text) {
+                        response = await chrome.runtime.sendMessage({
+                            action: "ASK_AI_TEXT",
+                            model: newUI.currentModel,
+                            text: ocrResult.text
+                        });
                     } else {
-                        msgContent = 'Analyze this content';
+                        response = { success: false, error: "OCR failed - no text extracted from image" };
                     }
+                } else {
+                    // No image available: use text content from history
+                    let msgContent = this.initialUserMessage;
+                    if (typeof msgContent === 'object') {
+                        if (Array.isArray(msgContent.content)) {
+                            const textPart = msgContent.content.find(c => c.type === 'text');
+                            msgContent = textPart ? textPart.text : 'Analyze this content';
+                        } else if (typeof msgContent.content === 'string') {
+                            msgContent = msgContent.content;
+                        } else {
+                            msgContent = 'Analyze this content';
+                        }
+                    }
+
+                    response = await chrome.runtime.sendMessage({
+                        action: "CONTINUE_CHAT",
+                        model: newUI.currentModel,
+                        history: [{ role: 'user', content: msgContent }]
+                    });
                 }
 
-                const response = await chrome.runtime.sendMessage({
-                    action: "CONTINUE_CHAT",
-                    model: newUI.currentModel,
-                    history: [{ role: 'user', content: msgContent }]
-                });
                 loadingDiv.remove();
                 if (response && response.success) {
                     newUI.addMessage('assistant', response.answer, newUI.currentModel);
@@ -705,6 +870,7 @@ class FloatingChatUI {
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
 
         const modelToUse = this.currentModel;
+        // History is guaranteed to be strings (normalized in addMessage)
         const formattedHistory = this.chatHistory.map(msg => {
             if (msg.model && msg.role === 'assistant') {
                 return { role: msg.role, content: `[Response from ${this._getModelDisplayName(msg.model)}]: ${msg.content}` };
@@ -787,12 +953,18 @@ class FloatingChatUI {
 
                 this.container.style.top = top + "px";
                 this.container.style.left = left + "px";
+                this.container.style.right = 'auto';
 
                 if (s.width) this.container.style.width = s.width + "px";
                 if (s.height) this.container.style.height = s.height + "px";
+
+                this.hasSavedPosition = true;
             } else {
+                // Default to top-right corner
                 this.container.style.top = "50px";
-                this.container.style.left = "50px";
+                this.container.style.right = "50px";
+                this.container.style.left = "auto";
+                this.hasSavedPosition = false;
             }
         });
     }
