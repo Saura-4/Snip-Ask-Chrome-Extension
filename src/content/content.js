@@ -9,6 +9,33 @@ let pendingResponses = 0; // Track responses for synchronized follow-up
 let maxCompareWindows = 4; // Default limit, loaded from storage
 
 // Window Management Functions
+
+// Global Escape Key Handler
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && chatWindows.length > 0) {
+        // Don't close if user is typing in a page input
+        const active = document.activeElement;
+        const isInput = active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable;
+
+        // Check if the input belongs to our extension (shadow DOM host)
+        // If active element is a chat host, we DO want to close
+        const isChatHost = active.id === 'groq-chat-host'; // Host div ID
+
+        if (isInput && !isChatHost) {
+            return; // Allow page interaction
+        }
+
+        // Close all chat windows
+        // Create a copy since close() modifies the array
+        [...chatWindows].forEach(w => w.close());
+    }
+});
+
+// Page unload cleanup - close all chat windows when navigating away
+window.addEventListener('beforeunload', () => {
+    [...chatWindows].forEach(w => w.close());
+});
+
 function registerWindow(ui) {
     chatWindows.push(ui);
     autoPositionWindow(ui, chatWindows.length - 1);
@@ -132,6 +159,77 @@ function createGlassPane() {
     document.documentElement.appendChild(glassPane);
     glassPane.focus();
     glassPane.addEventListener("mousedown", onMouseDown);
+
+    // Accessibility: Allow Escape key to cancel snipping
+    glassPane.addEventListener("keydown", onKeyDown);
+
+    // Visual cancel button for safety (in case Escape key doesn't work)
+    const cancelBtn = document.createElement("button");
+    cancelBtn.id = "snip-cancel-btn";
+    cancelBtn.textContent = "✕ Cancel (Esc)";
+    cancelBtn.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 2147483647;
+        background: #1e1e1e;
+        color: #f55036;
+        border: 1px solid #f55036;
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-family: 'Segoe UI', sans-serif;
+        font-size: 14px;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    `;
+    cancelBtn.onclick = cancelSnipping;
+    glassPane.appendChild(cancelBtn);
+
+    // Safety timeout: auto-cancel after 30 seconds to prevent trapping users
+    window._snipSafetyTimeout = setTimeout(() => {
+        if (glassPane && isSelecting) {
+            console.warn("Snip & Ask: Safety timeout triggered - cancelling snip mode");
+            cancelSnipping();
+        }
+    }, 30000);
+}
+
+function onKeyDown(e) {
+    if (e.key === "Escape") {
+        cancelSnipping();
+    }
+}
+
+function cancelSnipping() {
+    // Clear safety timeout
+    if (window._snipSafetyTimeout) {
+        clearTimeout(window._snipSafetyTimeout);
+        window._snipSafetyTimeout = null;
+    }
+
+    // Clean up selection UI
+    if (selectionBox) {
+        selectionBox.remove();
+        selectionBox = null;
+    }
+    if (glassPane) {
+        glassPane.removeEventListener("mousedown", onMouseDown);
+        glassPane.removeEventListener("mousemove", onMouseMove);
+        glassPane.removeEventListener("mouseup", onMouseUp);
+        glassPane.removeEventListener("keydown", onKeyDown);
+        glassPane.remove();
+        glassPane = null;
+    }
+    isSelecting = false;
+
+    // If in snip-again mode, restore chat windows
+    if (window._snipAgainMode) {
+        window._snipAgainMode = false;
+        window._snipAgainTarget = null;
+        chatWindows.forEach(w => {
+            if (w.container) w.container.style.display = 'flex';
+        });
+    }
 }
 
 function createSelectionBox() {
@@ -212,6 +310,23 @@ async function onMouseUp(e) {
         // Crop the image
         cropImage(response.dataUrl, rect, async (croppedBase64) => {
 
+            // Show first-time privacy toast (only once per user)
+            chrome.storage.local.get(['hasShownSnipToast'], (res) => {
+                if (!res.hasShownSnipToast) {
+                    chrome.storage.local.set({ hasShownSnipToast: true });
+                    const toast = document.createElement('div');
+                    toast.textContent = '📸 Screenshot captured locally (not stored)';
+                    toast.style.cssText = `
+                        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+                        background: #2d2d2d; color: #ccc; padding: 10px 20px;
+                        border-radius: 8px; font-family: 'Segoe UI', sans-serif;
+                        z-index: 2147483647; border: 1px solid #f55036;
+                    `;
+                    document.body.appendChild(toast);
+                    setTimeout(() => toast.remove(), 3000);
+                }
+            });
+
             // Check if this is a snip-again (add to existing chat)
             if (window._snipAgainMode && window._snipAgainTarget) {
                 window._snipAgainMode = false;
@@ -223,35 +338,20 @@ async function onMouseUp(e) {
                 return;
             }
 
-            // === UPDATE: GET ALL KEYS ===
-            chrome.storage.local.get(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'selectedModel'], async (result) => {
-
-                const currentModel = result.selectedModel || "llama-3.3-70b-versatile";
-
-                // === UPDATE: DETERMINE ACTIVE KEY OR HOST ===
-                let activeKey;
-                // === FIX 3: Typos Fixed (stratsWith -> startsWith) ===
-                const isOllama = currentModel.startsWith('ollama');
-                const isOpenRouter = currentModel.startsWith('openrouter:');
-                const isGoogle = currentModel.includes('gemini') || currentModel.includes('gemma');
-
-                if (isOllama) {
-                    activeKey = result.ollamaHost || "http://localhost:11434";
-                }
-                else if (isOpenRouter) {
-                    activeKey = result.openrouterKey;
-                }
-                else if (isGoogle) {
-                    activeKey = result.geminiKey; // Fixed capitalization
-                }
-                else {
-                    activeKey = result.groqKey;
-                }
-
-                if (!activeKey) {
-                    const keyType = isOllama ? 'Ollama Host' : (isOpenRouter ? 'OpenRouter Key' : (isGoogle ? 'Google Key' : 'Groq Key'));
-                    alert(`Please set your ${keyType} in the extension popup!`);
+            // === SECURITY: Ask background.js to check provider config (keys never touch content script) ===
+            chrome.runtime.sendMessage({ action: "CHECK_PROVIDER_CONFIG" }, async (configResult) => {
+                if (chrome.runtime.lastError || !configResult?.success) {
+                    showErrorToast("Failed to check configuration. Please reload the page.");
                     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
+                    return;
+                }
+
+                const currentModel = configResult.model;
+
+                if (!configResult.isConfigured) {
+                    showErrorToast(`Please set your ${configResult.providerName} in the extension popup!`);
+                    if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
+                    chrome.runtime.sendMessage({ action: "OPEN_OPTIONS_PAGE" });
                     return;
                 }
 
@@ -274,12 +374,23 @@ async function onMouseUp(e) {
                 }, (ocrResponse) => {
 
                     if (chrome.runtime.lastError || !ocrResponse) {
-                        alert("OCR Failed: " + (chrome.runtime.lastError?.message || "Unknown error"));
+                        showErrorToast("OCR Failed: " + (chrome.runtime.lastError?.message || "Unknown error"));
                         if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
                         return;
                     }
 
+                    // Handle OCR quality failures with helpful messages
+                    if (!ocrResponse.success && ocrResponse.error) {
+                        console.warn("OCR Quality Check Failed:", ocrResponse.error);
+                        // Fall through to vision model fallback or show error
+                    }
+
                     if (ocrResponse.success && ocrResponse.text && ocrResponse.text.length > 3) {
+                        // Log if text was truncated to save tokens
+                        if (ocrResponse.wasTruncated) {
+                            console.log(`OCR text was truncated to save API tokens: ${ocrResponse.stats?.originalLength} → ${ocrResponse.stats?.cleanedLength} chars`);
+                        }
+
                         chrome.runtime.sendMessage({
                             action: "ASK_AI_TEXT",
                             // SECURITY: API keys are retrieved from storage in background.js
@@ -288,7 +399,7 @@ async function onMouseUp(e) {
                             ocrConfidence: ocrResponse.confidence
                         }, handleResponse);
                     } else {
-                        console.warn("OCR Empty or Failed.");
+                        console.warn("OCR Empty or Failed:", ocrResponse.error || 'No readable text');
                         if (isVisionModel(currentModel)) {
                             // Retry as image if OCR fails (fallback)
                             chrome.runtime.sendMessage({
@@ -332,7 +443,7 @@ async function handleResponse(apiResponse) {
     }
 }
 
-// Error toast notification
+// Error toast notification with smart action buttons
 function showErrorToast(message) {
     const existing = document.getElementById('snip-error-toast');
     if (existing) existing.remove();
@@ -346,11 +457,34 @@ function showErrorToast(message) {
         font-family: 'Segoe UI', sans-serif; font-size: 14px;
         box-shadow: 0 4px 20px rgba(0,0,0,0.5);
         animation: slideIn 0.3s ease;
+        max-width: 350px;
     `;
-    toast.textContent = '⚠️ ' + message;
+
+    // Check if this is an API key error
+    const isKeyError = message.toLowerCase().includes('api key') ||
+        message.toLowerCase().includes('invalid') ||
+        message.toLowerCase().includes('401') ||
+        message.toLowerCase().includes('unauthorized');
+
+    if (isKeyError) {
+        toast.innerHTML = `
+            <div style="margin-bottom: 8px;">⚠️ ${message}</div>
+            <div style="font-size: 12px; color: #ccc;">
+                Click the extension icon to update your API key.
+            </div>
+        `;
+    } else {
+        toast.textContent = '⚠️ ' + message;
+    }
+
     document.body.appendChild(toast);
 
-    setTimeout(() => toast.remove(), 5000);
+    // Auto-remove after 6 seconds for key errors (longer to read), 5 for others
+    setTimeout(() => toast.remove(), isKeyError ? 6000 : 5000);
+
+    // Allow clicking to dismiss
+    toast.style.cursor = 'pointer';
+    toast.addEventListener('click', () => toast.remove());
 }
 
 // 5. HELPER: Text Sanitizer
@@ -374,6 +508,7 @@ class FloatingChatUI {
         this.chatHistory = [];
         this.currentModel = null;
         this.availableModels = [];
+        this.isMinimized = false;
     }
 
     // Static factory method for async initialization
@@ -429,11 +564,148 @@ class FloatingChatUI {
     }
 
     close() {
+        // Cleanup bubble drag listeners to prevent memory leaks
+        if (this._bubbleCleanup) {
+            this._bubbleCleanup();
+            this._bubbleCleanup = null;
+        }
         if (this.host) {
             this.host.remove();
             this.host = null;
         }
         unregisterWindow(this);
+    }
+
+    minimize() {
+        if (this.isMinimized) return;
+        this.isMinimized = true;
+
+        // Store current dimensions and display states for restoration
+        const rect = this.container.getBoundingClientRect();
+        this._savedState = {
+            width: this.container.style.width,
+            height: this.container.style.height,
+            minWidth: this.container.style.minWidth,
+            minHeight: this.container.style.minHeight,
+            top: rect.top,
+            left: rect.left,
+            childDisplays: [] // Store each child's display value
+        };
+
+        // Hide all content and store original display values
+        Array.from(this.container.children).forEach(child => {
+            this._savedState.childDisplays.push(child.style.display);
+            child.style.display = 'none';
+        });
+
+        // Create minimized bubble
+        this.container.style.width = 'auto';
+        this.container.style.height = 'auto';
+        this.container.style.minWidth = 'unset';
+        this.container.style.minHeight = 'unset';
+        this.container.style.resize = 'none';
+
+        // Create bubble element
+        this.bubble = document.createElement("div");
+        this.bubble.style.cssText = `
+            padding: 10px 16px;
+            background: #2d2d2d;
+            border-radius: 10px;
+            cursor: move;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+            user-select: none;
+        `;
+        this.bubble.innerHTML = `
+            <span style="color: #f55036; font-weight: bold;">⚡</span>
+            <span style="color: #ccc; font-size: 12px;">${this._getModelDisplayName(this.currentModel)}</span>
+            <span style="color: #f55036; font-size: 14px; font-weight: bold; margin-left: 6px; padding: 2px 6px; background: #3a3a3a; border-radius: 4px; border: 1px solid #f55036;" title="Click to expand">⬆</span>
+        `;
+        this.bubble.title = "Drag to move, click ⬆ to expand";
+
+        // Make bubble draggable
+        this.makeBubbleDraggable(this.bubble);
+
+        // Click on arrow to expand
+        const expandArrow = this.bubble.querySelector('span:last-child');
+        expandArrow.style.cursor = 'pointer';
+        expandArrow.onclick = (e) => {
+            e.stopPropagation();
+            this.expand();
+        };
+
+        this.container.appendChild(this.bubble);
+    }
+
+    expand() {
+        if (!this.isMinimized) return;
+        this.isMinimized = false;
+
+        // Remove bubble first
+        if (this.bubble) {
+            this.bubble.remove();
+            this.bubble = null;
+        }
+
+        // Restore children visibility with original display values
+        const children = Array.from(this.container.children);
+        children.forEach((child, index) => {
+            if (this._savedState && this._savedState.childDisplays[index] !== undefined) {
+                child.style.display = this._savedState.childDisplays[index];
+            } else {
+                // Fallback: remove display override
+                child.style.removeProperty('display');
+            }
+        });
+
+        // Restore dimensions
+        if (this._savedState) {
+            this.container.style.width = this._savedState.width || '450px';
+            this.container.style.height = this._savedState.height || '500px';
+            this.container.style.minWidth = this._savedState.minWidth || '300px';
+            this.container.style.minHeight = this._savedState.minHeight || '200px';
+            this.container.style.resize = 'both';
+        }
+
+        this._savedState = null;
+    }
+
+    makeBubbleDraggable(bubble) {
+        let isDragging = false;
+        let offsetX, offsetY;
+
+        bubble.addEventListener('mousedown', (e) => {
+            // Don't start drag on the expand button
+            if (e.target.textContent === '⬆') return;
+            isDragging = true;
+            const rect = this.container.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            e.preventDefault();
+        });
+
+        const onMouseMove = (e) => {
+            if (isDragging) {
+                this.container.style.left = (e.clientX - offsetX) + 'px';
+                this.container.style.top = (e.clientY - offsetY) + 'px';
+                this.container.style.right = 'auto';
+            }
+        };
+
+        const onMouseUp = () => {
+            isDragging = false;
+        };
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+
+        // Store cleanup function to prevent memory leaks
+        this._bubbleCleanup = () => {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        };
     }
 
     createWindow() {
@@ -518,6 +790,18 @@ class FloatingChatUI {
         compareBtn.onclick = () => this.spawnCompareWindow();
         header.appendChild(compareBtn);
 
+        // Minimize button
+        const minimizeBtn = document.createElement("button");
+        minimizeBtn.textContent = "−";
+        minimizeBtn.title = "Minimize to bubble";
+        minimizeBtn.style.cssText = `
+            background: #3a3a3a; color: #ccc; border: 1px solid #555;
+            width: 24px; height: 24px; border-radius: 4px; cursor: pointer;
+            font-weight: bold; font-size: 18px; line-height: 1;
+        `;
+        minimizeBtn.onclick = () => this.minimize();
+        header.appendChild(minimizeBtn);
+
         const closeBtn = document.createElement("span");
         closeBtn.id = "closeBtn";
         closeBtn.textContent = "✖";
@@ -583,6 +867,14 @@ class FloatingChatUI {
         this.makeDraggable(header);
 
         this.container.addEventListener('mouseup', () => this.saveState());
+
+        // Escape key closes the focused chat window
+        this.input.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                this.close();
+            }
+        });
     }
 
     addMessage(role, content, modelName = null) {
@@ -648,11 +940,52 @@ class FloatingChatUI {
                 btn.innerText = "Copy";
                 btn.style.cssText = `position: absolute; top: 5px; right: 5px; background: #f55036; color: white; border: none; border-radius: 3px; font-size: 10px; padding: 3px 8px; cursor: pointer; opacity: 0.9;`;
                 btn.onclick = () => {
-                    const codeText = pre.querySelector("code") ? pre.querySelector("code").innerText : pre.innerText;
+                    // Use textContent from <code> element specifically (more reliable than innerText)
+                    // This avoids including button text and preserves formatting better
+                    const codeEl = pre.querySelector("code");
+                    const codeText = codeEl ? codeEl.textContent : pre.textContent.replace(/^Copy$|^Copied!$/gm, '').trim();
                     navigator.clipboard.writeText(codeText).then(() => { btn.innerText = "Copied!"; setTimeout(() => btn.innerText = "Copy", 2000); });
                 };
                 pre.appendChild(btn);
             });
+
+            // Action buttons for assistant messages (Copy Response, Regenerate)
+            const actionsDiv = document.createElement("div");
+            actionsDiv.style.cssText = "display: flex; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #3a3a3a;";
+
+            // Copy entire response button
+            const copyBtn = document.createElement("button");
+            copyBtn.innerHTML = "📋 Copy";
+            copyBtn.title = "Copy entire response";
+            copyBtn.style.cssText = "background: transparent; color: #888; border: 1px solid #444; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;";
+            copyBtn.onclick = () => {
+                const responseText = contentDiv.textContent;
+                navigator.clipboard.writeText(responseText).then(() => {
+                    copyBtn.innerHTML = "✓ Copied";
+                    setTimeout(() => copyBtn.innerHTML = "📋 Copy", 2000);
+                });
+            };
+            actionsDiv.appendChild(copyBtn);
+
+            // Regenerate button
+            const regenBtn = document.createElement("button");
+            regenBtn.innerHTML = "🔄 Regenerate";
+            regenBtn.title = "Get a new response";
+            regenBtn.style.cssText = "background: transparent; color: #888; border: 1px solid #444; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;";
+            regenBtn.onclick = () => this.regenerateLastResponse();
+            actionsDiv.appendChild(regenBtn);
+
+            // Retry button for error messages
+            if (content.includes('⚠️') || content.toLowerCase().includes('error')) {
+                const retryBtn = document.createElement("button");
+                retryBtn.innerHTML = "🔁 Retry";
+                retryBtn.title = "Retry failed request";
+                retryBtn.style.cssText = "background: #f55036; color: white; border: none; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;";
+                retryBtn.onclick = () => this.retryLastRequest();
+                actionsDiv.appendChild(retryBtn);
+            }
+
+            msgDiv.appendChild(actionsDiv);
         }
         this.chatBody.appendChild(msgDiv);
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
@@ -666,6 +999,74 @@ class FloatingChatUI {
         // Fallback: extract last part of model ID
         const parts = modelValue.split(/[/:]/);
         return parts[parts.length - 1] || 'AI';
+    }
+
+    // Regenerate the last assistant response
+    async regenerateLastResponse() {
+        // Find the last user message in history
+        let lastUserMsgIndex = -1;
+        for (let i = this.chatHistory.length - 1; i >= 0; i--) {
+            if (this.chatHistory[i].role === 'user') {
+                lastUserMsgIndex = i;
+                break;
+            }
+        }
+
+        if (lastUserMsgIndex === -1) return;
+
+        // Remove the last assistant message from history and UI
+        if (this.chatHistory.length > lastUserMsgIndex + 1) {
+            this.chatHistory.pop();
+            const lastMsgDiv = this.chatBody.lastElementChild;
+            if (lastMsgDiv) lastMsgDiv.remove();
+        }
+
+        // Re-send the last user message
+        const lastUserMsg = this.chatHistory[lastUserMsgIndex].content;
+        const historyUpToLastUser = this.chatHistory.slice(0, lastUserMsgIndex + 1);
+
+        const loadingDiv = document.createElement("div");
+        loadingDiv.innerText = `🔄 ${this._getModelDisplayName(this.currentModel)} is regenerating...`;
+        loadingDiv.style.cssText = "align-self: flex-start; color: #888; font-style: italic; font-size: 12px;";
+        this.chatBody.appendChild(loadingDiv);
+        this.chatBody.scrollTop = this.chatBody.scrollHeight;
+
+        try {
+            let response;
+
+            // Check if this is a vision model AND we have the original image
+            // For initial snip regeneration, we need to use the image
+            if (isVisionModel(this.currentModel) && this.initialBase64Image && lastUserMsgIndex === 0) {
+                // Vision model with original image - re-send the image
+                response = await chrome.runtime.sendMessage({
+                    action: "ASK_AI",
+                    model: this.currentModel,
+                    base64Image: this.initialBase64Image
+                });
+            } else {
+                // Text-based regeneration via chat history
+                response = await chrome.runtime.sendMessage({
+                    action: "CONTINUE_CHAT",
+                    model: this.currentModel,
+                    history: historyUpToLastUser.map(m => ({ role: m.role, content: m.content }))
+                });
+            }
+            loadingDiv.remove();
+            if (response && response.success) {
+                this.addMessage('assistant', response.answer, this.currentModel);
+            } else {
+                this.addMessage('assistant', "⚠️ Regenerate failed: " + (response?.error || "Unknown error"), this.currentModel);
+            }
+        } catch (e) {
+            loadingDiv.remove();
+            this.addMessage('assistant', "⚠️ Network Error: " + e.message, this.currentModel);
+        }
+    }
+
+    // Retry the last request (for error recovery)
+    async retryLastRequest() {
+        // Same as regenerate - replay the last user message
+        await this.regenerateLastResponse();
     }
 
     // === SNIP AGAIN FUNCTIONALITY ===

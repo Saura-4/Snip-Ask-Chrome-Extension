@@ -1,5 +1,94 @@
 // src/offscreen/offscreen.js
 
+// ============================================================================
+// OCR QUALITY VALIDATION CONSTANTS
+// ============================================================================
+const OCR_CONFIG = {
+    MAX_OUTPUT_CHARS: 8000,           // Max chars to send to LLM (prevents token waste)
+    MIN_CONFIDENCE: 25,                // Below this = likely garbage (Tesseract returns 0-100)
+    MIN_READABLE_RATIO: 0.3,           // At least 30% must be alphanumeric
+    MAX_REPETITION_RATIO: 0.4,         // If 40%+ is same char, it's noise
+    MAX_CONSECUTIVE_GARBAGE: 20        // Max consecutive non-printable chars
+};
+
+// ============================================================================
+// OCR TEXT QUALITY ANALYZER
+// ============================================================================
+function analyzeOCRQuality(text) {
+    if (!text || text.length === 0) {
+        return { isValid: false, reason: 'empty', cleanedText: '' };
+    }
+
+    // 1. Check readable character ratio (letters, numbers, common punctuation)
+    const readableChars = text.match(/[a-zA-Z0-9.,!?;:'"()\-\s]/g) || [];
+    const readableRatio = readableChars.length / text.length;
+    
+    if (readableRatio < OCR_CONFIG.MIN_READABLE_RATIO) {
+        return { 
+            isValid: false, 
+            reason: 'garbage_ratio', 
+            detail: `Only ${(readableRatio * 100).toFixed(1)}% readable characters`,
+            cleanedText: '' 
+        };
+    }
+
+    // 2. Check for repetitive patterns (common in noise: "||||||||" or "........")
+    const charCounts = {};
+    for (const char of text) {
+        charCounts[char] = (charCounts[char] || 0) + 1;
+    }
+    const maxCharCount = Math.max(...Object.values(charCounts));
+    const repetitionRatio = maxCharCount / text.length;
+    
+    if (repetitionRatio > OCR_CONFIG.MAX_REPETITION_RATIO && text.length > 50) {
+        return { 
+            isValid: false, 
+            reason: 'repetitive', 
+            detail: `Single character repeated ${(repetitionRatio * 100).toFixed(1)}% of text`,
+            cleanedText: '' 
+        };
+    }
+
+    // 3. Check for consecutive garbage sequences
+    const garbageMatch = text.match(/[^a-zA-Z0-9.,!?;:'"()\-\s\n]{20,}/g);
+    if (garbageMatch) {
+        return { 
+            isValid: false, 
+            reason: 'consecutive_garbage', 
+            detail: `Found ${garbageMatch.length} garbage sequences`,
+            cleanedText: '' 
+        };
+    }
+
+    // 4. Clean and truncate
+    let cleanedText = text
+        .replace(/[^\x20-\x7E\n\t]/g, ' ')  // Replace non-printable with space
+        .replace(/\s+/g, ' ')                 // Collapse whitespace
+        .trim();
+    
+    // 5. Truncate if too long (prevents token waste)
+    const wasTruncated = cleanedText.length > OCR_CONFIG.MAX_OUTPUT_CHARS;
+    if (wasTruncated) {
+        // Truncate at word boundary
+        cleanedText = cleanedText.substring(0, OCR_CONFIG.MAX_OUTPUT_CHARS);
+        const lastSpace = cleanedText.lastIndexOf(' ');
+        if (lastSpace > OCR_CONFIG.MAX_OUTPUT_CHARS - 100) {
+            cleanedText = cleanedText.substring(0, lastSpace) + '... [truncated]';
+        }
+    }
+
+    return { 
+        isValid: true, 
+        cleanedText, 
+        wasTruncated,
+        stats: {
+            originalLength: text.length,
+            cleanedLength: cleanedText.length,
+            readableRatio: (readableRatio * 100).toFixed(1) + '%'
+        }
+    };
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === 'OCR_Request') {
        // console.log("[Offscreen] 1. Received Image. Size:", msg.base64Image.length);
@@ -59,7 +148,40 @@ async function runOCR(base64Image) {
 
         //console.log(`[Offscreen] 4. Result: "${text.substring(0, 20)}..." (Confidence: ${confidence})`);
 
-        return { text: text.trim(), confidence: confidence, success: true };
+        // 5. SECURITY: Validate OCR quality to prevent garbage from wasting API tokens
+        if (confidence < OCR_CONFIG.MIN_CONFIDENCE) {
+            console.warn(`[Offscreen] Low confidence OCR (${confidence}%) - likely noise`);
+            return { 
+                success: false, 
+                error: `OCR confidence too low (${confidence.toFixed(0)}%). Image may be too noisy or not contain text.`,
+                confidence: confidence 
+            };
+        }
+
+        const qualityCheck = analyzeOCRQuality(text);
+        
+        if (!qualityCheck.isValid) {
+            console.warn(`[Offscreen] OCR quality check failed: ${qualityCheck.reason}`, qualityCheck.detail);
+            return { 
+                success: false, 
+                error: `OCR produced unusable text (${qualityCheck.reason}). Try snipping clearer content.`,
+                confidence: confidence,
+                reason: qualityCheck.reason
+            };
+        }
+
+        // Log truncation warning
+        if (qualityCheck.wasTruncated) {
+            console.log(`[Offscreen] OCR text truncated: ${qualityCheck.stats.originalLength} → ${qualityCheck.stats.cleanedLength} chars`);
+        }
+
+        return { 
+            text: qualityCheck.cleanedText, 
+            confidence: confidence, 
+            success: true,
+            wasTruncated: qualityCheck.wasTruncated,
+            stats: qualityCheck.stats
+        };
 
     } catch (err) {
         console.error("[Offscreen] ERROR:", err);

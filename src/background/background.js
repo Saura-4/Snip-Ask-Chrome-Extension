@@ -20,17 +20,41 @@ function getStorage(keys) {
 // 2. CONTEXT MENU & KEYBOARD SHORTCUTS
 // ============================================================================
 
-// Create context menu on install
-chrome.runtime.onInstalled.addListener(() => {
-    chrome.contextMenus.create({
-        id: "askAI",
-        title: "Ask AI about '%s'",
-        contexts: ["selection"]
-    });
+// Create context menu on install and show welcome page
+chrome.runtime.onInstalled.addListener(async (details) => {
+    // Check if context menu should be hidden
+    const storage = await getStorage(['hideContextMenu']);
+    if (!storage.hideContextMenu) {
+        // Create context menu (without showing selected text - user already knows what they selected)
+        chrome.contextMenus.create({
+            id: "askAI",
+            title: "Ask AI about selection",
+            contexts: ["selection"]
+        });
+    }
+
+    // Open welcome page only on first install AND if no API keys configured
+    if (details.reason === 'install') {
+        const keyCheck = await getStorage(['groqKey', 'geminiKey', 'openrouterKey']);
+        const hasKey = keyCheck.groqKey || keyCheck.geminiKey || keyCheck.openrouterKey;
+        if (!hasKey) {
+            chrome.tabs.create({
+                url: chrome.runtime.getURL('src/welcome/welcome.html')
+            });
+        }
+    }
 });
 
 // Handle context menu clicks
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+    // Prevent errors on restricted pages (Chrome store, Settings, etc.)
+    if (!tab?.url || tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://") ||
+        tab.url.startsWith("https://chrome.google.com/webstore") || tab.url.startsWith("edge://") ||
+        tab.url.startsWith("about:")) {
+        console.warn("Snip & Ask: Cannot run on this restricted page");
+        return;
+    }
+
     if (info.menuItemId === "askAI" && info.selectionText) {
         // Send selected text to content script for display
         try {
@@ -57,6 +81,14 @@ chrome.commands.onCommand.addListener(async (command) => {
     if (command === "start-snip") {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (tab) {
+            // Prevent errors on restricted pages
+            if (!tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://") ||
+                tab.url.startsWith("https://chrome.google.com/webstore") || tab.url.startsWith("edge://") ||
+                tab.url.startsWith("about:")) {
+                console.warn("Snip & Ask: Cannot run on this restricted page");
+                return;
+            }
+
             try {
                 await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP" });
             } catch (e) {
@@ -161,6 +193,78 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const answer = await aiService.chat(request.history);
                 sendResponse({ success: true, answer: answer });
 
+            } catch (err) {
+                sendResponse({ success: false, error: err.message });
+            }
+        })();
+        return true;
+    }
+
+    // --- E. CONTEXT MENU VISIBILITY TOGGLE ---
+    if (request.action === "UPDATE_CONTEXT_MENU") {
+        if (request.hide) {
+            // Remove context menu
+            chrome.contextMenus.remove("askAI", () => {
+                if (chrome.runtime.lastError) {
+                    // Menu didn't exist, ignore
+                }
+            });
+        } else {
+            // Create context menu
+            chrome.contextMenus.create({
+                id: "askAI",
+                title: "Ask AI about selection",
+                contexts: ["selection"]
+            }, () => {
+                if (chrome.runtime.lastError) {
+                    // Menu already exists, ignore
+                }
+            });
+        }
+        return false;
+    }
+
+    // --- F. OPEN OPTIONS PAGE (from content script) ---
+    if (request.action === "OPEN_OPTIONS_PAGE") {
+        chrome.action.openPopup();
+        return false;
+    }
+
+    // --- G. CHECK PROVIDER CONFIGURATION (Security: never expose keys to content script) ---
+    if (request.action === "CHECK_PROVIDER_CONFIG") {
+        (async () => {
+            try {
+                const storage = await getStorage(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'selectedModel']);
+                const modelName = request.model || storage.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+                // Determine which provider this model needs
+                const isOllama = modelName.startsWith('ollama:');
+                const isOpenRouter = modelName.startsWith('openrouter:');
+                const isGoogle = modelName.includes('gemini') || modelName.includes('gemma');
+
+                let isConfigured = false;
+                let providerName = 'Groq';
+
+                if (isOllama) {
+                    isConfigured = !!(storage.ollamaHost || 'http://localhost:11434');
+                    providerName = 'Ollama Host';
+                } else if (isOpenRouter) {
+                    isConfigured = !!storage.openrouterKey;
+                    providerName = 'OpenRouter Key';
+                } else if (isGoogle) {
+                    isConfigured = !!storage.geminiKey;
+                    providerName = 'Google Key';
+                } else {
+                    isConfigured = !!storage.groqKey;
+                    providerName = 'Groq Key';
+                }
+
+                sendResponse({
+                    success: true,
+                    isConfigured,
+                    providerName,
+                    model: modelName
+                });
             } catch (err) {
                 sendResponse({ success: false, error: err.message });
             }

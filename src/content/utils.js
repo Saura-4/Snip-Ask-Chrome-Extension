@@ -14,23 +14,35 @@ function escapeHtml(unsafe) {
 function parseMarkdown(text) {
   if (!text) return "";
   const codeBlocks = [];
-  
+
+  // SECURITY: Generate a unique token per parse to prevent placeholder injection attacks.
+  // Using crypto.randomUUID() makes it impossible for user input or AI hallucinations
+  // to accidentally or maliciously match our internal placeholders.
+  const uniqueToken = crypto.randomUUID();
+  const placeholderPrefix = `\x00CB_${uniqueToken}_`;
+
   // Extract code blocks first to avoid messing up their internal formatting
   text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
     // Note: Inline styles are used here because content scripts cannot easily load external CSS files into Shadow DOM
     codeBlocks.push(`<pre style="background: #0d0d0d; color: #cccccc; padding: 10px; border-radius: 6px; overflow-x: auto; border: 1px solid #333; font-family: 'Consolas', monospace; margin: 10px 0;"><code>${escapeHtml(code.trim())}</code></pre>`);
-    return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+    return `${placeholderPrefix}${codeBlocks.length - 1}\x00`;
   });
 
+  // Build regex pattern for this specific parse session
+  const placeholderRegex = new RegExp(`(${placeholderPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\d+\x00)|([\\s\\S]+?)(?=${placeholderPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|$)`, 'g');
+
   // SECURITY: Escape HTML in remaining text to prevent XSS attacks
-  // But preserve code block placeholders
-  text = text.replace(/(__CODE_BLOCK_\d+__)|([^_]+)/g, (match, codeBlock, normalText) => {
+  // But preserve code block placeholders (which now use unique tokens)
+  text = text.replace(placeholderRegex, (match, codeBlock, normalText) => {
     if (codeBlock) return codeBlock;
     return escapeHtml(normalText || '');
   });
 
   // Highlight the "Answer" label specifically (now safe after escaping)
   text = text.replace(/\*\*Answer:\*\*/g, '<strong style="color: #f55036; font-size: 1.1em;">✓ Answer:</strong>');
+
+  // Build restoration regex for this specific parse session
+  const restoreRegex = new RegExp(`${placeholderPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)\x00`, 'g');
 
   // Parse standard Markdown syntax
   return text
@@ -41,43 +53,73 @@ function parseMarkdown(text) {
     .replace(/\*(.*?)\*/gim, '<i>$1</i>')
     .replace(/`(.*?)`/gim, '<code style="background:#333; padding:2px 4px; border-radius:3px; color:#dcdcaa; font-family: monospace;">$1</code>')
     .replace(/\n/g, '<br>')
-    // Restore code blocks
-    .replace(/__CODE_BLOCK_(\d+)__/g, (match, index) => codeBlocks[index]);
+    // Restore code blocks using session-specific token
+    .replace(restoreRegex, (match, index) => codeBlocks[index]);
 }
 
 // --- Image Processing ---
 
+// Max dimension to prevent huge payloads on 4K monitors (APIs may reject or timeout)
+const MAX_IMAGE_DIMENSION = 1536;
+
 function cropImage(base64Full, rect, callback) {
   const img = new Image();
   img.onload = () => {
-    const canvas = document.createElement("canvas");
     // Handle High DPI (Retina) displays for crisp screenshots
     const pixelRatio = window.devicePixelRatio || 1;
-    
-    canvas.width = rect.width * pixelRatio;
-    canvas.height = rect.height * pixelRatio;
-    
+
+    let cropWidth = rect.width * pixelRatio;
+    let cropHeight = rect.height * pixelRatio;
+
+    // Calculate final output dimensions (compress if too large)
+    let outputWidth = cropWidth;
+    let outputHeight = cropHeight;
+
+    if (outputWidth > MAX_IMAGE_DIMENSION || outputHeight > MAX_IMAGE_DIMENSION) {
+      const scale = Math.min(MAX_IMAGE_DIMENSION / outputWidth, MAX_IMAGE_DIMENSION / outputHeight);
+      outputWidth = Math.round(outputWidth * scale);
+      outputHeight = Math.round(outputHeight * scale);
+      console.log(`Snip & Ask: Compressing ${cropWidth}x${cropHeight} -> ${outputWidth}x${outputHeight}`);
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = outputWidth;
+    canvas.height = outputHeight;
+
     const ctx = canvas.getContext("2d");
-    
+
     ctx.drawImage(
-      img, 
+      img,
       rect.left * pixelRatio, rect.top * pixelRatio, // Source X, Y
-      rect.width * pixelRatio, rect.height * pixelRatio, // Source W, H
+      cropWidth, cropHeight, // Source W, H
       0, 0, // Destination X, Y
-      canvas.width, canvas.height // Destination W, H
+      outputWidth, outputHeight // Destination W, H (scaled)
     );
 
     // Remove the data URL prefix so it's ready for transmission
-    callback(canvas.toDataURL("image/jpeg").replace(/^data:image\/(png|jpeg);base64,/, ""));
+    callback(canvas.toDataURL("image/jpeg", 0.85).replace(/^data:image\/(png|jpeg);base64,/, ""));
   };
   img.src = base64Full;
 }
 
 // --- Loading Indicators ---
 
+// FIX: Reference counter to handle concurrent loading operations
+// Prevents Window A finishing from hiding loader while Window B is still thinking
+let _loadingCursorCount = 0;
+
 function showLoadingCursor() {
-  // Prevent duplicate loaders
-  if (document.getElementById("groq-loader")) return;
+  _loadingCursorCount++;
+
+  // Only create DOM element if it doesn't exist
+  if (document.getElementById("groq-loader")) {
+    // Update counter display for debugging (optional, shows "thinking... (2)")
+    const el = document.getElementById("groq-loader");
+    if (_loadingCursorCount > 1) {
+      el.innerHTML = `<span>⚡  thinking... (${_loadingCursorCount})</span>`;
+    }
+    return;
+  }
 
   const el = document.createElement("div");
   el.id = "groq-loader";
@@ -87,6 +129,19 @@ function showLoadingCursor() {
 }
 
 function hideLoadingCursor() {
-  const el = document.getElementById("groq-loader");
-  if (el) el.remove();
+  _loadingCursorCount = Math.max(0, _loadingCursorCount - 1);
+
+  // Only remove DOM element when ALL operations are complete
+  if (_loadingCursorCount === 0) {
+    const el = document.getElementById("groq-loader");
+    if (el) el.remove();
+  } else {
+    // Update counter display
+    const el = document.getElementById("groq-loader");
+    if (el) {
+      el.innerHTML = _loadingCursorCount > 1
+        ? `<span>⚡  thinking... (${_loadingCursorCount})</span>`
+        : `<span>⚡  thinking...</span>`;
+    }
+  }
 }

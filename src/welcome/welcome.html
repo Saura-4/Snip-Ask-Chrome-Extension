@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to Snip & Ask</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 700px;
+            width: 100%;
+        }
+
+        .card {
+            background: rgba(30, 30, 30, 0.95);
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            border: 1px solid #333;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            color: #f55036;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .tagline {
+            color: #888;
+            font-size: 16px;
+        }
+
+        .steps {
+            margin-top: 30px;
+        }
+
+        .step {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 25px;
+            align-items: flex-start;
+        }
+
+        .step-number {
+            background: #f55036;
+            color: white;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #fff;
+        }
+
+        .step-desc {
+            color: #aaa;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .step-desc a {
+            color: #f55036;
+            text-decoration: none;
+        }
+
+        .step-desc a:hover {
+            text-decoration: underline;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #f55036;
+            color: #ffffff !important;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none !important;
+            transition: all 0.2s;
+            margin-top: 10px;
+        }
+
+        .btn:hover {
+            background: #d43d25;
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: #333;
+            color: #ccc;
+        }
+
+        .btn-secondary:hover {
+            background: #444;
+        }
+
+        .tip-box {
+            background: #252526;
+            border-left: 3px solid #4caf50;
+            padding: 15px;
+            border-radius: 0 8px 8px 0;
+            margin-top: 30px;
+        }
+
+        .tip-box strong {
+            color: #4caf50;
+        }
+
+        .tip-box p {
+            color: #aaa;
+            font-size: 13px;
+            margin-top: 5px;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #333;
+        }
+
+        .footer p {
+            color: #666;
+            font-size: 12px;
+        }
+
+        .social-links {
+            margin-top: 15px;
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        .social-links a {
+            color: #888;
+            font-size: 13px;
+            text-decoration: none;
+        }
+
+        .social-links a:hover {
+            color: #f55036;
+        }
+
+        .providers {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .provider-badge {
+            background: #333;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            color: #ccc;
+        }
+
+        @media (max-width: 600px) {
+            .card {
+                padding: 25px;
+            }
+
+            h1 {
+                font-size: 22px;
+            }
+
+            .step {
+                flex-direction: column;
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="header">
+                <div class="logo">⚡</div>
+                <h1>Welcome to Snip & Ask!</h1>
+                <p class="tagline">Instant AI analysis for any screenshot</p>
+            </div>
+
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <div class="step-title">Get Your Free API Key</div>
+                        <div class="step-desc">
+                            Create a free Groq account to get started. Groq offers the fastest AI inference for free!
+                            <br><br>
+                            <a href="https://console.groq.com/keys" target="_blank" class="btn">Get Free Groq API Key
+                                →</a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <div class="step-title">Add Your Key to the Extension</div>
+                        <div class="step-desc">
+                            Click the Snip & Ask extension icon in your toolbar, expand the <strong>🔐 API Keys</strong>
+                            section,
+                            and paste your key (starts with <code
+                                style="background:#333; padding:2px 6px; border-radius:3px;">gsk_</code>).
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <div class="step-title">Start Snipping!</div>
+                        <div class="step-desc">
+                            Click <strong>Snip Screen</strong> or set up a keyboard shortcut for instant access.
+                            Draw a box around anything — code, math, diagrams — and get AI-powered answers instantly!
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tip-box">
+                <strong>💡 Pro Tip: Set a Keyboard Shortcut</strong>
+                <p>
+                    Go to <a href="#" id="shortcutsLink">chrome://extensions/shortcuts</a> and assign a hotkey
+                    like <code style="background:#333; padding:2px 6px; border-radius:3px;">Ctrl+Shift+S</code> for
+                    instant snipping!
+                </p>
+            </div>
+
+            <div style="text-align: center; margin-top: 25px;">
+                <p style="color: #888; font-size: 13px; margin-bottom: 15px;">Supported AI Providers:</p>
+                <div class="providers" style="justify-content: center;">
+                    <span class="provider-badge">🚀 Groq</span>
+                    <span class="provider-badge">✨ Google Gemini</span>
+                    <span class="provider-badge">🌐 OpenRouter</span>
+                    <span class="provider-badge">🦙 Ollama (Local)</span>
+                </div>
+            </div>
+
+            <div class="footer">
+                <p>Built with ❤️ by Saurav Chourasia</p>
+                <div class="social-links">
+                    <a href="https://github.com/Saura-4/Snip-Ask-Chrome-Extension" target="_blank">GitHub</a>
+                    <a href="https://discord.gg/bppspgkd" target="_blank">Discord</a>
+                    <a href="https://www.linkedin.com/in/saurav-chourasia/" target="_blank">LinkedIn</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="welcome.js"></script>
+</body>
+
+</html>

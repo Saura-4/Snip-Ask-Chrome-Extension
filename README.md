@@ -1,135 +1,144 @@
-# ⚡ Snip & Ask (v4.0)
+# ⚡ Snip & Ask
 
-> **A high-performance, modular Chrome Extension that brings multimodal AI analysis to any webpage.**
-> *Now with multi-provider support: Groq, Google Gemini, OpenRouter, and Ollama.*
+> **Instant AI analysis for any screenshot. Free. Open-source. Privacy-first.**
 
-**Snip & Ask** allows users to instantly capture any region of their screen and receive an AI-powered analysis. It supports multiple AI providers including **Groq**, **Google Gemini**, **OpenRouter** (DeepSeek, Qwen, etc.), and **Ollama** for local inference.
+Snip & Ask lets you draw a box around anything on your screen and get instant AI-powered analysis. Whether it's a math problem, code bug, diagram, or text — just snip it and ask.
 
----
-
-## 🎯 The Origin Story: Why Snip & Ask?
-
-As a developer and student, I was frustrated by the slow, constant workflow interruption required to get AI feedback: capturing a screenshot, switching tabs, uploading the image to Gemini or ChatGPT, and then asking the question.
-
-I built **Snip & Ask** to eliminate this friction. The core idea was to enable instant, contextual analysis directly on the screen, without saving files or switching apps. Furthermore, since existing extensions offering this crucial productivity gain were paid, I decided to create a **superior, free, and open-source solution** for the community.
+<!-- TODO: Add hero GIF here -->
+<!-- ![Demo](assets/demo.gif) -->
 
 ---
 
-## 🚀 Key Features
+## ✨ Features
 
-* **Instant Visual Snips:** Draw a box anywhere on your screen for immediate analysis.
-* **Hybrid OCR Engine:** Automatically detects text density. Uses **Tesseract.js (v6)** for text-heavy snips and **Multimodal Vision** for diagrams/images.
-* **Multiple Intelligence Modes:**
-    * **⚡ Short Answer:** Instant, direct answers (great for quizzes).
-    * **🧠 Detailed Explanation:** Use complex logic and step-by-step thinking.
-    * **💻 Code Debugger:** Specialized prompts to fix code and explain bugs.
-    * **✍️ Custom:** Define your own prompt behavior.
-* **Privacy First:** Your API Key is stored locally (`chrome.storage`). No intermediate servers.
-* **Zero-Cost:** Designed to work with the free tier of the Groq API.
-
----
-
-## 🛠️ Installation
-
-### 1. Get Your API Key
-1.  Sign up at [Groq Console](https://console.groq.com/).
-2.  Generate a new API Key (starts with `gsk_...`).
-
-### 2. Load the Extension
-1.  Clone this repository:
-    ```bash
-    git clone [https://github.com/Saura-4/Snip-Ask-Chrome-Extension.git](https://github.com/Saura-4/Snip-Ask-Chrome-Extension.git)
-    ```
-2.  Open Chrome and navigate to `chrome://extensions`.
-3.  Enable **Developer Mode** (top right).
-4.  Click **Load unpacked**.
-5.  Select the **root folder** of this project (the folder containing `manifest.json`).
-
-### 3. Setup
-1.  Pin the extension icon to your toolbar.
-2.  Click the icon and paste your API Key.
-3.  Select your preferred model (e.g., **Llama 4 Scout**).
-
-### 4. Keyboard Shortcut (Optional)
-Configure a custom shortcut for instant snipping:
-1.  Go to `chrome://extensions/shortcuts`
-2.  Find **Snip & Ask**
-3.  Click the input next to "Start screen snip"
-4.  Press your preferred shortcut (e.g., `Ctrl+Shift+S`)
+| Feature | Description |
+|---------|-------------|
+| 🖼️ **Instant Snips** | Draw a selection box anywhere, get AI analysis in seconds |
+| 🔄 **Compare Models** | Open multiple windows to compare responses from different AI models |
+| 🤖 **4 AI Providers** | Groq, Google Gemini, OpenRouter, Ollama (local) |
+| 🧠 **Smart Modes** | Short Answer, Detailed, Code Debug, or Custom prompts |
+| 📷 **Vision + OCR** | Auto-detects: uses Vision APIs for images, Tesseract.js for text |
+| 💬 **Chat Follow-ups** | Continue the conversation in a floating chat window |
+| ⌨️ **Keyboard Shortcuts** | Set custom hotkeys for instant snipping |
+| 🔒 **Privacy First** | API keys stored locally. No servers. No telemetry. |
 
 ---
 
-## ⚡ Quick Actions
+## 🚀 Quick Start
+
+### 1. Install the Extension
+
+**Option A: Chrome Web Store** *(Coming Soon)*
+
+**Option B: Manual Install**
+```bash
+git clone https://github.com/Saura-4/Snip-Ask-Chrome-Extension.git
+```
+1. Open `chrome://extensions`
+2. Enable **Developer Mode** (top right)
+3. Click **Load unpacked** → Select the cloned folder
+
+### 2. Get Your Free API Key
+
+1. Go to [console.groq.com/keys](https://console.groq.com/keys)
+2. Create a free account and generate a key
+3. Paste it in the extension popup under **API Keys**
+
+### 3. Start Snipping!
+
+Click the extension icon → **Snip Screen** → Draw a box → Get AI response!
+
+---
+
+## 🎯 Usage
 
 | Action | How |
 |--------|-----|
-| **Snip Screen** | Click extension icon → "Snip Screen", or use your keyboard shortcut |
-| **Ask About Text** | Select text on any page → Right-click → "Ask AI about '...'" |
+| **Snip Screen** | Click extension → "Snip Screen" or use keyboard shortcut |
+| **Ask About Text** | Select text → Right-click → "Ask AI about '...'" |
+| **Compare Models** | Click **+** button in chat window to compare responses |
+| **Custom Shortcut** | Go to `chrome://extensions/shortcuts` → Set your hotkey |
 
 ---
 
-## 🏗️ Architecture & Engineering
+## 🤖 Supported Providers
 
-Unlike typical "script-kiddie" extensions, **Snip & Ask v3.1** is built on a scalable **Service-Oriented Architecture** using the **Factory Design Pattern**. This ensures the codebase is decoupled, testable, and future-proof.
+| Provider | Free Tier | Vision Support | Speed |
+|----------|:---------:|:--------------:|:-----:|
+| **Groq** | ✅ | ✅ Llama 4 | ⚡ Fastest |
+| **Google Gemini** | ✅ | ✅ Gemini/Gemma | Fast |
+| **OpenRouter** | ✅ Free models | Varies | Moderate |
+| **Ollama** | ✅ Local | LLaVA, Moondream | Depends on hardware |
 
-### The "Service" Design
-Instead of hardcoding API calls into the background script, the logic is encapsulated in an abstract service layer.
+---
 
-* **`AbstractAIService`**: Defines the contract (`askImage`, `askText`) that all AI providers must adhere to.
-* **`GroqService`**: Concrete implementation that handles Groq's specific headers, JSON structure, and "Thinking" tag parsing.
-* **`Factory` (`getAIService`)**: A central switchboard that instantiates the correct service class based on the user's selected model.
+## 💡 Why I Built This
 
-### Scalability
-This architecture allows for:
-* **Hot-Swapping APIs:** Adding `GeminiService` or `OpenAIService` requires **zero changes** to the core application logic.
-* **Unified Error Handling:** All API errors are caught and normalized before reaching the UI.
-* **Clean Code:** Follows **Allman Style** formatting for maximum readability.
+As a developer and student, I was tired of the constant workflow interruption: screenshot → switch tabs → upload to ChatGPT → ask question. 
+
+I built Snip & Ask to eliminate that friction — instant AI analysis without leaving your current context. And since similar tools were all paid, I made this one **free and open-source** for everyone.
+
+---
+
+## 🏗️ Architecture
+
+Built with a modular **Service-Oriented Architecture**:
+
+- **AbstractAIService** — Base contract for all AI providers
+- **Provider Services** — GroqService, GeminiService, OpenRouterService, OllamaService
+- **Factory Pattern** — `getAIService()` routes to the correct provider automatically
+
+This design allows adding new AI providers with zero changes to core logic.
 
 ---
 
 ## 📂 Project Structure
 
-    snip-and-ask-extension/
-    │
-    ├── manifest.json              # Extension Configuration (Manifest V3)
-    ├── lib/                       # Third-party dependencies (Tesseract.js)
-    ├── assets/                    # Static assets (Icons)
-    │
-    └── src/
-        ├── background/
-        │   ├── background.js      # The "Traffic Controller" (Event Bus)
-        │   └── ai-service.js      # The "Brain" (Factory & Service Classes)
-        │
-        ├── content/
-        │   ├── content.js         # Snipping UI & DOM Overlay logic
-        │   └── utils.js           # Image processing & Math helpers
-        │
-        └── popup/
-            ├── popup.html         # Settings UI
-            └── popup.js           # Popup Logic
+```
+Snip-Ask-Chrome-Extension/
+├── manifest.json           # Extension configuration (Manifest V3)
+├── lib/                    # Tesseract.js OCR engine
+├── assets/                 # Icons
+└── src/
+    ├── background/         # Service worker & AI service layer
+    ├── content/            # Snipping UI & floating chat
+    └── popup/              # Settings UI
+```
 
 ---
 
 ## 🗺️ Roadmap
 
-* **v4.0 (Current):** Multi-provider support (Groq, Gemini, OpenRouter, Ollama), customizable interaction modes, Chrome Web Store release.
-* **v4.1 (Planned):**
-    * **History Sync:** Local storage of past snips and solutions.
-    * **Keyboard Shortcuts:** Quick snip via hotkeys.
-* **v5.0 (Future):**
-    * **Electron Port:** Converting the modular `ai-service.js` core into a native Desktop Application for Windows/Mac.
+- ✅ **v4.0** — Multi-provider support, Compare Windows, Keyboard shortcuts
+- 🔄 **v4.1** — Snip history, improved PDF support
+- 📋 **v5.0** — Desktop app (Electron)
 
 ---
 
-## 🧩 Credits & Acknowledgments
+## 🤝 Contributing
 
-* **OCR Engine:** Powered by [Tesseract.js](https://github.com/naptha/tesseract.js) (Apache 2.0 License).
-* **LLM Provider:** Powered by [Groq Cloud](https://groq.com/).
+Contributions are welcome! Feel free to:
+- Open issues for bugs or feature requests
+- Submit pull requests
+- Share feedback on [Discord](https://discord.gg/bppspgkd)
+
+---
+
+## 🧩 Credits
+
+- **OCR Engine:** [Tesseract.js](https://github.com/naptha/tesseract.js) (Apache 2.0)
+- **AI Providers:** Groq, Google, OpenRouter, Ollama
 
 ---
 
 ## 📜 License
 
-This project is open-source and available under the **MIT License**.
+MIT License — Free to use, modify, and distribute.
 
-**Developed by Saurav Chourasia**
+---
+
+**Built with ❤️ by [Saurav Chourasia](https://github.com/Saura-4)**
+
+[![Instagram](https://img.shields.io/badge/Instagram-%23E4405F.svg?style=flat&logo=Instagram&logoColor=white)](https://www.instagram.com/saura_v_chourasia/)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-%230077B5.svg?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/saurav-chourasia/)
+[![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=flat&logo=discord&logoColor=white)](https://discord.gg/bppspgkd)

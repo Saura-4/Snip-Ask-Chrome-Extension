@@ -111,7 +111,7 @@ async function loadSettings() {
   const result = await chrome.storage.local.get([
     'customModes', 'enabledProviders', 'enabledModels', 'selectedModel', 'selectedMode',
     'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'customPrompt',
-    'providerHiddenSince'
+    'providerHiddenSince', 'hideContextMenu'
   ]);
 
   // Check and cleanup old keys
@@ -137,6 +137,12 @@ async function loadSettings() {
 
   // Show provider hint if only Groq enabled
   updateProviderHint(result.enabledProviders || DEFAULT_PROVIDERS);
+
+  // Load context menu visibility setting
+  const hideContextMenuToggle = document.getElementById('hideContextMenu');
+  if (hideContextMenuToggle) {
+    hideContextMenuToggle.checked = result.hideContextMenu === true;
+  }
 
   // Handle custom prompt visibility
   const modeSelect = document.getElementById('modeSelect');
@@ -508,7 +514,7 @@ function setupEventListeners() {
 
   document.getElementById('discordLink')?.addEventListener('click', (e) => {
     e.preventDefault();
-    chrome.tabs.create({ url: 'https://discord.gg/your_invite' });
+    chrome.tabs.create({ url: 'https://discord.gg/bppspgkd' });
   });
 
   document.getElementById('githubLink')?.addEventListener('click', (e) => {
@@ -520,6 +526,12 @@ function setupEventListeners() {
   document.getElementById('groqKeysLink')?.addEventListener('click', (e) => {
     e.preventDefault();
     chrome.tabs.create({ url: 'https://console.groq.com/keys' });
+  });
+
+  // Setup Guide / Welcome page link
+  document.getElementById('open-welcome')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: chrome.runtime.getURL('src/welcome/welcome.html') });
   });
 
   // Provider dashboard links
@@ -541,6 +553,17 @@ function setupEventListeners() {
     });
     maxCompareSelect.addEventListener('change', () => {
       chrome.storage.local.set({ maxCompareWindows: parseInt(maxCompareSelect.value) });
+    });
+  }
+
+  // Hide context menu toggle
+  const hideContextMenuToggle = document.getElementById('hideContextMenu');
+  if (hideContextMenuToggle) {
+    hideContextMenuToggle.addEventListener('change', async () => {
+      const hide = hideContextMenuToggle.checked;
+      await chrome.storage.local.set({ hideContextMenu: hide });
+      // Notify background to update context menu
+      chrome.runtime.sendMessage({ action: 'UPDATE_CONTEXT_MENU', hide });
     });
   }
 }
