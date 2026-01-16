@@ -1,6 +1,7 @@
 // src/background/background.js
 
 import { getAIService } from './ai-service.js';
+import { isDemoMode, isDemoConfigured, getDemoUsage, makeDemoRequest, DEMO_DEFAULT_MODEL, DEMO_DAILY_LIMIT } from './demo-config.js';
 
 // ============================================================================
 // 1. UTILITIES
@@ -271,6 +272,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         })();
         return true;
     }
+
+    // --- H. DEMO MODE STATUS CHECK ---
+    if (request.action === "CHECK_DEMO_STATUS") {
+        (async () => {
+            try {
+                const inDemoMode = await isDemoMode();
+                const isConfigured = isDemoConfigured();
+                const usage = await getDemoUsage();
+
+                sendResponse({
+                    success: true,
+                    isDemoMode: inDemoMode,
+                    isConfigured,
+                    usage: usage.count,
+                    remaining: usage.remaining,
+                    limit: usage.limit,
+                    defaultModel: DEMO_DEFAULT_MODEL
+                });
+            } catch (err) {
+                sendResponse({ success: false, error: err.message });
+            }
+        })();
+        return true;
+    }
 });
 
 // ============================================================================
@@ -282,9 +307,75 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
         const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'selectedMode', 'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
         const mode = storage.selectedMode || storage.interactionMode || 'short';
 
-        const modelName = explicitModel || storage.selectedModel || "meta-llama/llama-4-scout-17b-16e-instruct";
+        let modelName = explicitModel || storage.selectedModel || "meta-llama/llama-4-scout-17b-16e-instruct";
 
-        // KEY/HOST SELECTION LOGIC
+        // CHECK FOR DEMO MODE
+        const inDemoMode = await isDemoMode();
+
+        if (inDemoMode) {
+            // Demo mode: use Cloudflare Worker proxy
+            if (!isDemoConfigured()) {
+                throw new Error('Demo mode is not available. Please add your own API key in the extension popup.');
+            }
+
+            // Force Groq model in demo mode
+            if (!modelName || modelName.startsWith('openrouter:') || modelName.includes('gemini') || modelName.includes('gemma') || modelName.startsWith('ollama:')) {
+                modelName = DEMO_DEFAULT_MODEL;
+            }
+
+            // Build request body for Cloudflare Worker
+            const messages = [];
+
+            // Add system instruction
+            const customModes = storage.customModes || null;
+            let systemPrompt = 'Analyze the input and provide a helpful response.';
+            if (mode === 'short') systemPrompt = "You are a concise answer engine. Analyze the user's input. If it is a multiple-choice question, output 'Answer: <option>. <explanation>'. For follow-up chat, reply concisely.";
+            else if (mode === 'detailed') systemPrompt = "You are an expert tutor. Analyze the input. Provide a detailed, step-by-step answer. Use Markdown.";
+            else if (mode === 'code') systemPrompt = "You are a code debugger. Correct the code and explain the fix. Output a single fenced code block first.";
+            else if (customModes) {
+                const customMode = customModes.find(m => m.id === mode);
+                if (customMode) systemPrompt = customMode.prompt;
+            }
+
+            messages.push({ role: 'system', content: systemPrompt });
+
+            // Add user message
+            if (type === 'image') {
+                messages.push({
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: 'Analyze this image and provide a helpful response.' },
+                        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${inputContent}` } }
+                    ]
+                });
+            } else {
+                messages.push({ role: 'user', content: inputContent });
+            }
+
+            // Make demo request through Cloudflare Worker
+            const demoResponse = await makeDemoRequest({
+                model: modelName,
+                messages: messages,
+                temperature: 0.3,
+                max_tokens: 1024
+            });
+
+            const answer = demoResponse.choices?.[0]?.message?.content || 'No answer returned.';
+            const demoInfo = demoResponse._demo || null;
+
+            sendResponse({
+                success: true,
+                answer: answer,
+                initialUserMessage: messages[messages.length - 1],
+                usedOCR: type === 'text',
+                ocrConfidence,
+                base64Image: type === 'image' ? inputContent : null,
+                demoInfo: demoInfo
+            });
+            return;
+        }
+
+        // REGULAR MODE: KEY/HOST SELECTION LOGIC
         let activeKeyOrHost;
         if (modelName.startsWith('ollama:')) {
             activeKeyOrHost = storage.ollamaHost || "http://localhost:11434";

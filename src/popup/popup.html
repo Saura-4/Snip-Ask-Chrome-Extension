@@ -20,13 +20,44 @@
       Settings saved!
     </div>
 
+    <!-- Demo Mode Banner (shown only when no API keys configured) -->
+    <div id="demoBanner" class="demo-banner hidden">
+      <span class="demo-badge">🎁 Demo</span>
+      <span><span id="demoCount">5/5</span> free messages today</span>
+      <a href="#" id="getOwnKeyLink" class="demo-key-link">Get your own key →</a>
+    </div>
+
+    <div id="demoLimitMessage" class="demo-limit hidden">
+      ⚠️ Daily limit reached. <a href="#" id="getDemoKeyLink">Get a free API key</a> for unlimited use!
+    </div>
+
+    <!-- Primary Action - Snip Button (most important, top of fold) -->
+    <button id="snipBtn">Snip Screen</button>
+
+    <!-- Model Selection -->
+    <label for="modelSelect">AI Model</label>
+    <select id="modelSelect">
+      <!-- Dynamically populated based on enabled providers -->
+    </select>
+
+    <!-- Mode Selection -->
+    <label for="modeSelect">Interaction Mode</label>
+    <select id="modeSelect">
+      <!-- Dynamically populated from storage -->
+    </select>
+
+    <div id="customPromptContainer" class="hidden">
+      <label for="customPromptText">Your System Instruction:</label>
+      <textarea id="customPromptText" rows="3" placeholder="Ex: You are a helpful assistant..."></textarea>
+    </div>
+
     <!-- Provider Hint (shown if only Groq enabled) -->
     <div id="providerHint" class="provider-hint hidden">
       💡 <a id="enableMoreProviders">Enable more providers</a> like Google, OpenRouter, or Ollama in settings.
     </div>
 
-    <!-- API Keys (collapsed) -->
-    <details id="apiKeysSection" style="margin-bottom: 12px;">
+    <!-- API Keys (collapsed) - One-time setup, lower priority -->
+    <details id="apiKeysSection" style="margin-bottom: 12px; margin-top: 12px;">
       <summary
         style="cursor: pointer; font-weight: 600; color: #ccc; font-size: 12px; padding: 8px 0; user-select: none;">
         🔐 API Keys <span style="color: #666; font-size: 10px;">(click to expand)</span>
@@ -45,23 +76,6 @@
         </div>
       </div>
     </details>
-
-    <label for="modelSelect">AI Model</label>
-    <select id="modelSelect">
-      <!-- Dynamically populated based on enabled providers -->
-    </select>
-
-    <label for="modeSelect">Interaction Mode</label>
-    <select id="modeSelect">
-      <!-- Dynamically populated from storage -->
-    </select>
-
-    <div id="customPromptContainer" class="hidden">
-      <label for="customPromptText">Your System Instruction:</label>
-      <textarea id="customPromptText" rows="3" placeholder="Ex: You are a helpful assistant..."></textarea>
-    </div>
-
-    <button id="snipBtn">Snip Screen</button>
 
     <div class="footer">
       <div class="footer-version">v4.0 • Customizable</div>
@@ -117,25 +131,13 @@
       <button class="tab-btn active" data-tab="providers">Providers</button>
       <button class="tab-btn" data-tab="models">Models</button>
       <button class="tab-btn" data-tab="modes">Modes</button>
+      <button class="tab-btn" data-tab="general">General</button>
     </div>
 
     <!-- Providers Tab -->
     <div class="tab-content active" id="providersTab">
       <div style="font-size: 11px; color: #888; margin-bottom: 12px;">
         Enable/disable AI providers. Hidden providers' API keys are deleted after 7 days.
-      </div>
-
-      <!-- Beginner-friendly banner -->
-      <div
-        style="font-size: 11px; color: #ccc; margin-bottom: 12px; padding: 8px; background: #252526; border-radius: 4px; border-left: 2px solid #4caf50;">
-        🆕 <strong style="color: #ccc;">New here?</strong> Get your free Groq API key:
-        <a href="#" id="groqKeysLink" style="color: #4caf50;">console.groq.com/keys</a>
-      </div>
-
-      <div
-        style="font-size: 11px; color: #666; margin-bottom: 12px; padding: 8px; background: #252526; border-radius: 4px; border-left: 2px solid #f55036;">
-        ⌨️ <strong style="color: #ccc;">Tip:</strong> Set a keyboard shortcut at
-        <a href="#" id="openShortcutsLink" style="color: #f55036;">chrome://extensions/shortcuts</a>
       </div>
 
       <div class="provider-item">
@@ -186,33 +188,6 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
-
-      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #333;">
-        <div style="font-size: 11px; color: #888; margin-bottom: 8px;">Compare Windows</div>
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <span style="font-size: 12px; color: #ccc;">Max comparison windows:</span>
-          <select id="maxCompareWindows"
-            style="background: #252526; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 8px; font-size: 12px;">
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4" selected>4</option>
-          </select>
-        </div>
-      </div>
-
-      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #333;">
-        <div style="font-size: 11px; color: #888; margin-bottom: 8px;">Context Menu</div>
-        <div class="provider-item" style="padding: 0;">
-          <div class="provider-info">
-            <span style="font-size: 12px; color: #ccc;">Hide right-click menu item</span>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="hideContextMenu">
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div style="font-size: 10px; color: #666; margin-top: 4px;">Use keyboard shortcut only</div>
-      </div>
     </div>
 
     <!-- Models Tab -->
@@ -251,6 +226,57 @@
         <div class="mode-editor-actions">
           <button class="cancel-btn" id="cancelModeBtn">Cancel</button>
           <button class="save-btn" id="saveModeBtn">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- General Tab -->
+    <div class="tab-content" id="generalTab">
+      <div style="font-size: 11px; color: #888; margin-bottom: 12px;">
+        General settings for the extension.
+      </div>
+
+      <!-- Compare Windows -->
+      <div class="settings-section">
+        <div class="settings-section-title">Compare Windows</div>
+        <div
+          style="display: flex; align-items: center; gap: 10px; padding: 10px; background: #252526; border-radius: 6px;">
+          <span style="font-size: 12px; color: #ccc;">Max comparison windows:</span>
+          <select id="maxCompareWindows"
+            style="background: #1e1e1e; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 8px; font-size: 12px;">
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4" selected>4</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Context Menu -->
+      <div class="settings-section" style="margin-top: 16px;">
+        <div class="settings-section-title">Context Menu</div>
+        <div class="provider-item">
+          <div class="provider-info">
+            <span style="font-size: 12px; color: #ccc;">Hide right-click menu item</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="hideContextMenu">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div style="font-size: 10px; color: #666; margin-top: 4px; padding-left: 10px;">Use keyboard shortcut only</div>
+      </div>
+
+      <!-- Quick Links -->
+      <div class="settings-section" style="margin-top: 16px;">
+        <div class="settings-section-title">Quick Links</div>
+        <div style="padding: 10px; background: #252526; border-radius: 6px;">
+          <a href="#" id="openShortcutsLinkGeneral"
+            style="color: #f55036; font-size: 12px; display: block; margin-bottom: 8px;">
+            ⌨️ Set keyboard shortcut
+          </a>
+          <a href="#" id="groqKeysLinkGeneral" style="color: #4caf50; font-size: 12px; display: block;">
+            🆕 Get free Groq API key
+          </a>
         </div>
       </div>
     </div>

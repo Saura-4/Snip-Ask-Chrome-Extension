@@ -75,6 +75,8 @@ const API_KEY_CONFIG = {
 // STATE
 // ============================================================================
 let editingModeId = null;
+let isDemoModeActive = false;
+let demoRemaining = 5;
 const MIN_PANEL_WIDTH = 480;
 const MIN_PANEL_HEIGHT = 600;
 
@@ -83,10 +85,57 @@ const MIN_PANEL_HEIGHT = 600;
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
   await initializeDefaults();
+  await checkDemoStatus(); // Check demo mode first
   await loadSettings();
   setupEventListeners();
   setupDynamicResize();
 });
+
+// ============================================================================
+// DEMO MODE CHECK
+// ============================================================================
+async function checkDemoStatus() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'CHECK_DEMO_STATUS' });
+    if (response && response.success) {
+      isDemoModeActive = response.isDemoMode;
+      demoRemaining = response.remaining;
+      updateDemoBanner(response);
+    }
+  } catch (e) {
+    console.error('Failed to check demo status:', e);
+  }
+}
+
+function updateDemoBanner(demoStatus) {
+  const banner = document.getElementById('demoBanner');
+  const demoCount = document.getElementById('demoCount');
+  const demoLimitMessage = document.getElementById('demoLimitMessage');
+
+  if (!banner || !demoStatus) return;
+
+  if (demoStatus.isDemoMode && demoStatus.isConfigured) {
+    // Show demo banner
+    banner.classList.remove('hidden');
+    demoCount.textContent = `${demoStatus.remaining}/${demoStatus.limit}`;
+
+    // Update styling based on remaining
+    banner.classList.remove('demo-warning', 'demo-critical');
+    if (demoStatus.remaining === 0) {
+      banner.classList.add('demo-critical');
+      if (demoLimitMessage) demoLimitMessage.classList.remove('hidden');
+    } else if (demoStatus.remaining <= 2) {
+      banner.classList.add('demo-warning');
+      if (demoLimitMessage) demoLimitMessage.classList.add('hidden');
+    } else {
+      if (demoLimitMessage) demoLimitMessage.classList.add('hidden');
+    }
+  } else {
+    // Hide demo banner (user has API keys or demo not configured)
+    banner.classList.add('hidden');
+    if (demoLimitMessage) demoLimitMessage.classList.add('hidden');
+  }
+}
 
 async function initializeDefaults() {
   const result = await chrome.storage.local.get(['customModes', 'enabledProviders', 'enabledModels']);
@@ -168,13 +217,23 @@ function loadModels(enabledProviders, enabledModels, selectedModel) {
   const modelSelect = document.getElementById('modelSelect');
   modelSelect.innerHTML = '';
 
+  // In demo mode, only show Groq models
+  const providersToShow = isDemoModeActive
+    ? { groq: true, google: false, openrouter: false, ollama: false }
+    : enabledProviders;
+
   for (const [provider, models] of Object.entries(ALL_MODELS)) {
-    if (enabledProviders[provider]) {
+    if (providersToShow[provider]) {
       const enabledModelsInProvider = models.filter(model => enabledModels[model.value] !== false);
 
       if (enabledModelsInProvider.length > 0) {
         const optgroup = document.createElement('optgroup');
         optgroup.label = PROVIDER_LABELS[provider];
+
+        // Add demo mode indication
+        if (isDemoModeActive && provider === 'groq') {
+          optgroup.label = '🎁 ' + PROVIDER_LABELS[provider] + ' (Demo)';
+        }
 
         enabledModelsInProvider.forEach(model => {
           const option = document.createElement('option');
@@ -190,6 +249,9 @@ function loadModels(enabledProviders, enabledModels, selectedModel) {
 
   if (selectedModel && modelSelect.querySelector(`option[value="${selectedModel}"]`)) {
     modelSelect.value = selectedModel;
+  } else if (isDemoModeActive && modelSelect.options.length > 0) {
+    // In demo mode, auto-select first Groq model if current selection is invalid
+    modelSelect.selectedIndex = 0;
   }
 }
 
@@ -522,10 +584,24 @@ function setupEventListeners() {
     chrome.tabs.create({ url: 'https://github.com/Saura-4' });
   });
 
-  // Groq API keys link (for beginners)
+  // Groq API keys links (Providers tab and General tab)
   document.getElementById('groqKeysLink')?.addEventListener('click', (e) => {
     e.preventDefault();
     chrome.tabs.create({ url: 'https://console.groq.com/keys' });
+  });
+  document.getElementById('groqKeysLinkGeneral')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'https://console.groq.com/keys' });
+  });
+
+  // Keyboard shortcuts links (Providers tab and General tab)
+  document.getElementById('openShortcutsLink')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  });
+  document.getElementById('openShortcutsLinkGeneral')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
   });
 
   // Setup Guide / Welcome page link
@@ -566,6 +642,16 @@ function setupEventListeners() {
       chrome.runtime.sendMessage({ action: 'UPDATE_CONTEXT_MENU', hide });
     });
   }
+
+  // Demo mode key links
+  document.getElementById('getOwnKeyLink')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'https://console.groq.com/keys' });
+  });
+  document.getElementById('getDemoKeyLink')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'https://console.groq.com/keys' });
+  });
 }
 
 // ============================================================================
@@ -661,26 +747,36 @@ async function startSnip() {
   const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
   const model = result.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
 
-  // Validate API key based on model
-  if (model.startsWith('ollama')) {
-    if (!result.ollamaHost) {
-      alert('Please set Ollama URL in API Keys');
+  // In demo mode, skip API key validation (background.js handles it)
+  if (isDemoModeActive) {
+    if (demoRemaining <= 0) {
+      alert('🎁 Demo limit reached! Get your own free API key at console.groq.com for unlimited use.');
+      chrome.tabs.create({ url: 'https://console.groq.com/keys' });
       return;
     }
-  } else if (model.includes('gemini') || model.includes('gemma')) {
-    if (!result.geminiKey) {
-      alert('Please set Google API Key');
-      return;
-    }
-  } else if (model.startsWith('openrouter')) {
-    if (!result.openrouterKey) {
-      alert('Please set OpenRouter API Key');
-      return;
-    }
+    // Proceed with demo mode - background will handle the request
   } else {
-    if (!result.groqKey) {
-      alert('Please set Groq API Key');
-      return;
+    // Validate API key based on model
+    if (model.startsWith('ollama')) {
+      if (!result.ollamaHost) {
+        alert('Please set Ollama URL in API Keys');
+        return;
+      }
+    } else if (model.includes('gemini') || model.includes('gemma')) {
+      if (!result.geminiKey) {
+        alert('Please set Google API Key');
+        return;
+      }
+    } else if (model.startsWith('openrouter')) {
+      if (!result.openrouterKey) {
+        alert('Please set OpenRouter API Key');
+        return;
+      }
+    } else {
+      if (!result.groqKey) {
+        alert('Please set Groq API Key');
+        return;
+      }
     }
   }
 
