@@ -1,7 +1,7 @@
 // src/background/background.js
 
 import { getAIService } from './ai-service.js';
-import { isDemoMode, isDemoConfigured, getDemoUsage, makeDemoRequest, DEMO_DEFAULT_MODEL, DEMO_DAILY_LIMIT } from './demo-config.js';
+import { isGuestMode, isGuestConfigured, getGuestUsage, makeGuestRequest, GUEST_DEFAULT_MODEL, GUEST_DAILY_LIMIT } from './guest-config.js';
 
 // ============================================================================
 // 1. UTILITIES
@@ -34,11 +34,14 @@ chrome.runtime.onInstalled.addListener(async (details) => {
         });
     }
 
-    // Open welcome page only on first install AND if no API keys configured
+    // Open welcome page only on first install AND if no API keys configured AND demo mode not available
     if (details.reason === 'install') {
         const keyCheck = await getStorage(['groqKey', 'geminiKey', 'openrouterKey']);
         const hasKey = keyCheck.groqKey || keyCheck.geminiKey || keyCheck.openrouterKey;
-        if (!hasKey) {
+        const guestAvailable = isGuestConfigured();
+
+        // Don't open welcome page if user has keys OR guest mode is available
+        if (!hasKey && !guestAvailable) {
             chrome.tabs.create({
                 url: chrome.runtime.getURL('src/welcome/welcome.html')
             });
@@ -180,13 +183,43 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             try {
                 const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'selectedMode', 'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
 
-                const modelName = request.model || storage.selectedModel;
+                let modelName = request.model || storage.selectedModel;
 
+                // Check if this is a Groq model and if we need demo mode
+                const isOllama = modelName && modelName.startsWith('ollama:');
+                const isOpenRouter = modelName && modelName.startsWith('openrouter:');
+                const isGoogle = modelName && (modelName.includes('gemini') || modelName.includes('gemma'));
+                const isGroq = !isOllama && !isOpenRouter && !isGoogle;
+
+                // Check if we should use demo mode for this request
+                if (isGroq && !storage.groqKey && isGuestConfigured()) {
+                    // Demo mode: use Cloudflare Worker for follow-up chat
+                    const guestResponse = await makeGuestRequest({
+                        model: modelName || GUEST_DEFAULT_MODEL,
+                        messages: request.history,
+                        temperature: 0.3,
+                        max_tokens: 1024
+                    });
+
+                    let answer = guestResponse.choices?.[0]?.message?.content || 'No answer returned.';
+
+                    // Strip thinking tags from Qwen models
+                    answer = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+                    sendResponse({ success: true, answer: answer, demoInfo: guestResponse._demo });
+                    return;
+                }
+
+                // Regular mode with user API keys
                 let activeKeyOrHost;
-                if (modelName.startsWith('ollama:')) activeKeyOrHost = storage.ollamaHost || "http://localhost:11434";
-                else if (modelName.startsWith('openrouter:')) activeKeyOrHost = storage.openrouterKey;
-                else if (modelName.includes('gemini') || modelName.includes('gemma')) activeKeyOrHost = storage.geminiKey;
+                if (isOllama) activeKeyOrHost = storage.ollamaHost || "http://localhost:11434";
+                else if (isOpenRouter) activeKeyOrHost = storage.openrouterKey;
+                else if (isGoogle) activeKeyOrHost = storage.geminiKey;
                 else activeKeyOrHost = storage.groqKey;
+
+                if (!activeKeyOrHost) {
+                    throw new Error('Missing API key. Please configure your API keys in the extension popup.');
+                }
 
                 const mode = storage.selectedMode || storage.interactionMode || 'short';
                 const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
@@ -236,12 +269,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         (async () => {
             try {
                 const storage = await getStorage(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'selectedModel']);
-                const modelName = request.model || storage.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
+                let modelName = request.model || storage.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
 
                 // Determine which provider this model needs
                 const isOllama = modelName.startsWith('ollama:');
                 const isOpenRouter = modelName.startsWith('openrouter:');
                 const isGoogle = modelName.includes('gemini') || modelName.includes('gemma');
+                const isGroq = !isOllama && !isOpenRouter && !isGoogle;
 
                 let isConfigured = false;
                 let providerName = 'Groq';
@@ -256,7 +290,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     isConfigured = !!storage.geminiKey;
                     providerName = 'Google Key';
                 } else {
-                    isConfigured = !!storage.groqKey;
+                    // Groq - check for user key OR demo mode
+                    if (storage.groqKey) {
+                        isConfigured = true;
+                    } else if (isGuestConfigured()) {
+                        // Guest Mode mode is available - user can use Groq without their own key
+                        isConfigured = true;
+                        // Force model to Groq-compatible in Guest Mode mode
+                        modelName = GUEST_DEFAULT_MODEL;
+                    }
                     providerName = 'Groq Key';
                 }
 
@@ -274,21 +316,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     // --- H. DEMO MODE STATUS CHECK ---
-    if (request.action === "CHECK_DEMO_STATUS") {
+    if (request.action === "CHECK_GUEST_STATUS") {
         (async () => {
             try {
-                const inDemoMode = await isDemoMode();
-                const isConfigured = isDemoConfigured();
-                const usage = await getDemoUsage();
+                const inGuestMode = await isGuestMode();
+                const isConfigured = isGuestConfigured();
+                const usage = await getGuestUsage();
 
                 sendResponse({
                     success: true,
-                    isDemoMode: inDemoMode,
+                    isDemoMode: inGuestMode,
                     isConfigured,
                     usage: usage.count,
                     remaining: usage.remaining,
                     limit: usage.limit,
-                    defaultModel: DEMO_DEFAULT_MODEL
+                    defaultModel: GUEST_DEFAULT_MODEL
                 });
             } catch (err) {
                 sendResponse({ success: false, error: err.message });
@@ -309,18 +351,18 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
 
         let modelName = explicitModel || storage.selectedModel || "meta-llama/llama-4-scout-17b-16e-instruct";
 
-        // CHECK FOR DEMO MODE
-        const inDemoMode = await isDemoMode();
+        // CHECK FOR FREE TRIAL MODE
+        const inGuestMode = await isGuestMode();
 
-        if (inDemoMode) {
-            // Demo mode: use Cloudflare Worker proxy
-            if (!isDemoConfigured()) {
-                throw new Error('Demo mode is not available. Please add your own API key in the extension popup.');
+        if (inGuestMode) {
+            // Guest Mode: use Cloudflare Worker proxy
+            if (!isGuestConfigured()) {
+                throw new Error('Guest Mode is not available. Please add your own API key in the extension popup.');
             }
 
             // Force Groq model in demo mode
             if (!modelName || modelName.startsWith('openrouter:') || modelName.includes('gemini') || modelName.includes('gemma') || modelName.startsWith('ollama:')) {
-                modelName = DEMO_DEFAULT_MODEL;
+                modelName = GUEST_DEFAULT_MODEL;
             }
 
             // Build request body for Cloudflare Worker
@@ -353,15 +395,19 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
             }
 
             // Make demo request through Cloudflare Worker
-            const demoResponse = await makeDemoRequest({
+            const guestResponse = await makeGuestRequest({
                 model: modelName,
                 messages: messages,
                 temperature: 0.3,
                 max_tokens: 1024
             });
 
-            const answer = demoResponse.choices?.[0]?.message?.content || 'No answer returned.';
-            const demoInfo = demoResponse._demo || null;
+            let answer = guestResponse.choices?.[0]?.message?.content || 'No answer returned.';
+
+            // Strip thinking tags from Qwen models
+            answer = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+            const demoInfo = guestResponse._demo || null;
 
             sendResponse({
                 success: true,

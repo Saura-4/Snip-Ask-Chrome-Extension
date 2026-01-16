@@ -1,4 +1,4 @@
-// Snip & Ask Demo Mode - Cloudflare Worker
+// Snip & Ask Guest Mode - Cloudflare Worker
 // Deploy this to Cloudflare Workers to proxy Groq API requests with rate limiting
 
 export default {
@@ -24,22 +24,22 @@ export default {
         }
 
         try {
-            // Get instance ID from header (extension generates this once and stores it)
-            // Fallback to IP-based ID if header missing (for backwards compatibility)
-            let instanceId = request.headers.get('X-Instance-ID');
+            // Use IP-based tracking only - cannot be bypassed by resetting extension
+            // Cloudflare provides the real client IP in CF-Connecting-IP header
+            const clientIP = request.headers.get('CF-Connecting-IP') || 'anonymous';
 
-            if (!instanceId || instanceId.length < 10) {
-                // Fallback: use client IP as instance ID (Cloudflare provides this)
-                const clientIP = request.headers.get('CF-Connecting-IP') || 'anonymous';
-                // Simple hash to anonymize IP
-                instanceId = 'ip-' + btoa(clientIP).slice(0, 16);
-            }
+            // Hash the IP for privacy (don't store raw IPs)
+            const encoder = new TextEncoder();
+            const data = encoder.encode(clientIP + 'snip-ask-salt');
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const ipHash = hashArray.slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
 
             // Check rate limit using KV storage
             const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-            const usageKey = `usage:${instanceId}:${today}`;
-            const currentUsage = parseInt(await env.DEMO_USAGE.get(usageKey) || '0');
-            const dailyLimit = parseInt(env.DAILY_LIMIT || '5');
+            const usageKey = `usage:${ipHash}:${today}`;
+            const currentUsage = parseInt(await env.GUEST_USAGE.get(usageKey) || '0');
+            const dailyLimit = parseInt(env.DAILY_LIMIT || '15');
 
             if (currentUsage >= dailyLimit) {
                 return new Response(JSON.stringify({
@@ -47,7 +47,7 @@ export default {
                     code: 'LIMIT_EXCEEDED',
                     usage: currentUsage,
                     limit: dailyLimit,
-                    message: 'You have used all your free demo messages today. Get your own free API key at console.groq.com for unlimited use!'
+                    message: 'You have used all your free Guest Mode messages today. Get your own free API key at console.groq.com for unlimited use!'
                 }), {
                     status: 429,
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -69,7 +69,7 @@ export default {
 
             // If Groq request was successful, increment usage
             if (groqResponse.ok) {
-                await env.DEMO_USAGE.put(usageKey, String(currentUsage + 1), {
+                await env.GUEST_USAGE.put(usageKey, String(currentUsage + 1), {
                     expirationTtl: 86400 // Auto-expire after 24 hours
                 });
             }

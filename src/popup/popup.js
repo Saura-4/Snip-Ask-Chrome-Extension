@@ -96,7 +96,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ============================================================================
 async function checkDemoStatus() {
   try {
-    const response = await chrome.runtime.sendMessage({ action: 'CHECK_DEMO_STATUS' });
+    const response = await chrome.runtime.sendMessage({ action: 'CHECK_GUEST_STATUS' });
     if (response && response.success) {
       isDemoModeActive = response.isDemoMode;
       demoRemaining = response.remaining;
@@ -115,8 +115,9 @@ function updateDemoBanner(demoStatus) {
   if (!banner || !demoStatus) return;
 
   if (demoStatus.isDemoMode && demoStatus.isConfigured) {
-    // Show demo banner
+    // Show demo banner (informational only - real limit is enforced server-side)
     banner.classList.remove('hidden');
+    // Note: This is a local cache and may be slightly out of sync with server
     demoCount.textContent = `${demoStatus.remaining}/${demoStatus.limit}`;
 
     // Update styling based on remaining
@@ -230,9 +231,9 @@ function loadModels(enabledProviders, enabledModels, selectedModel) {
         const optgroup = document.createElement('optgroup');
         optgroup.label = PROVIDER_LABELS[provider];
 
-        // Add demo mode indication
+        // Add Free Trial mode indication
         if (isDemoModeActive && provider === 'groq') {
-          optgroup.label = '🎁 ' + PROVIDER_LABELS[provider] + ' (Demo)';
+          optgroup.label = '🎁 ' + PROVIDER_LABELS[provider] + ' (Guest Mode)';
         }
 
         enabledModelsInProvider.forEach(model => {
@@ -252,6 +253,11 @@ function loadModels(enabledProviders, enabledModels, selectedModel) {
   } else if (isDemoModeActive && modelSelect.options.length > 0) {
     // In demo mode, auto-select first Groq model if current selection is invalid
     modelSelect.selectedIndex = 0;
+    // IMPORTANT: Save the auto-selected model to storage so startSnip uses it
+    const autoSelectedModel = modelSelect.value;
+    if (autoSelectedModel) {
+      chrome.storage.local.set({ selectedModel: autoSelectedModel });
+    }
   }
 }
 
@@ -748,13 +754,10 @@ async function startSnip() {
   const model = result.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
 
   // In demo mode, skip API key validation (background.js handles it)
+  // Server-side rate limiting is the real gate - cannot be bypassed via devtools
   if (isDemoModeActive) {
-    if (demoRemaining <= 0) {
-      alert('🎁 Demo limit reached! Get your own free API key at console.groq.com for unlimited use.');
-      chrome.tabs.create({ url: 'https://console.groq.com/keys' });
-      return;
-    }
-    // Proceed with demo mode - background will handle the request
+    // Just proceed - if limit is exceeded, server will return 429 error
+    // DO NOT check local demoRemaining here - it can be bypassed via devtools
   } else {
     // Validate API key based on model
     if (model.startsWith('ollama')) {
