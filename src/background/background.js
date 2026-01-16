@@ -194,11 +194,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 // Check if we should use demo mode for this request
                 if (isGroq && !storage.groqKey && isGuestConfigured()) {
                     // Demo mode: use Cloudflare Worker for follow-up chat
+                    // parallelCount: how many requests to count (for comparison mode)
+                    // 0 means don't count this request (companion in parallel batch)
+                    const parallelCount = request.parallelCount ?? 1;
+                    
                     const guestResponse = await makeGuestRequest({
                         model: modelName || GUEST_DEFAULT_MODEL,
                         messages: request.history,
                         temperature: 0.3,
-                        max_tokens: 1024
+                        max_tokens: 1024,
+                        _meta: { parallelCount } // Pass to worker for proper counting
                     });
 
                     let answer = guestResponse.choices?.[0]?.message?.content || 'No answer returned.';

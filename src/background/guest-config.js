@@ -1,6 +1,8 @@
 // src/background/guest-config.js
 // Guest Mode: Allows users without API keys to try the extension with limited daily usage
 
+import { getDeviceFingerprint } from './fingerprint.js';
+
 // =============================================================================
 // CONFIGURATION - Update this URL after deploying your Cloudflare Worker
 // =============================================================================
@@ -109,24 +111,40 @@ async function makeGuestRequest(requestBody) {
         throw new Error('Guest Mode is not configured. Please add your own API key in the extension popup.');
     }
 
-    const instanceId = await getInstanceId();
+    // Get both identifiers for anti-cheat
+    const clientUuid = await getInstanceId();
+    const deviceFingerprint = await getDeviceFingerprint();
+
+    // Inject identifiers into _meta
+    const enrichedBody = {
+        ...requestBody,
+        _meta: {
+            ...requestBody._meta,
+            clientUuid,
+            deviceFingerprint
+        }
+    };
 
     const response = await fetch(GUEST_WORKER_URL, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json',
-            'X-Instance-ID': instanceId
+            'Content-Type': 'application/json'
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify(enrichedBody)
     });
 
     const data = await response.json();
 
-    // Handle rate limit exceeded
-    if (response.status === 429 || data.code === 'LIMIT_EXCEEDED') {
+    // Handle rate limit exceeded (both regular limit and device limit)
+    if (response.status === 429 || data.code === 'LIMIT_EXCEEDED' || data.code === 'DEVICE_LIMIT_EXCEEDED') {
         // Update local cache
         await updateGuestUsage({ usage: data.limit || GUEST_DAILY_LIMIT });
         throw new Error(data.message || 'Guest Mode daily limit reached. Get your own free API key at console.groq.com for unlimited use!');
+    }
+
+    // Handle missing ID error (old extension version)
+    if (data.code === 'MISSING_ID') {
+        throw new Error('Please update your extension to the latest version.');
     }
 
     // Handle other errors

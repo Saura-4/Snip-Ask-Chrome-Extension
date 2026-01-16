@@ -81,9 +81,16 @@ function broadcastFollowUp(text, senderUI) {
         return;
     }
     // Multi-window mode - sync all
-    pendingResponses = chatWindows.length;
+    // Mark the total window count for rate limiting purposes
+    const windowCount = chatWindows.length;
+    pendingResponses = windowCount;
     chatWindows.forEach(w => w.setInputDisabled(true));
-    chatWindows.forEach(w => w.sendMessageDirect(text));
+    
+    // First window is the "primary" and counts for all windows
+    // Other windows are "companions" and don't increment the counter
+    chatWindows.forEach((w, index) => {
+        w.sendMessageDirect(text, index === 0 ? windowCount : 0);
+    });
 }
 
 function onResponseReceived() {
@@ -93,6 +100,17 @@ function onResponseReceived() {
         pendingResponses = 0;
         chatWindows.forEach(w => w.setInputDisabled(false));
     }
+}
+
+// Helper to update local demo usage cache from server response
+// This keeps the frontend counter in sync with server-side usage
+function updateLocalDemoCache(demoInfo) {
+    if (!demoInfo) return;
+    const today = new Date().toISOString().split('T')[0];
+    chrome.storage.local.set({
+        guestUsageCount: demoInfo.usage,
+        guestUsageDate: today
+    });
 }
 
 // Load max windows setting
@@ -437,6 +455,11 @@ async function handleResponse(apiResponse) {
         ui.initialUserMessage = apiResponse.initialUserMessage;
         // Store base64 image for compare windows (vision models need this)
         ui.initialBase64Image = apiResponse.base64Image || null;
+        
+        // Update local demo usage cache if demoInfo is returned
+        if (apiResponse.demoInfo) {
+            updateLocalDemoCache(apiResponse.demoInfo);
+        }
     } else {
         // Show error in a styled toast instead of native alert
         showErrorToast(apiResponse ? apiResponse.error : "Unknown error");
@@ -1054,6 +1077,10 @@ class FloatingChatUI {
             loadingDiv.remove();
             if (response && response.success) {
                 this.addMessage('assistant', response.answer, this.currentModel);
+                // Update local demo usage cache if demoInfo is returned
+                if (response.demoInfo) {
+                    updateLocalDemoCache(response.demoInfo);
+                }
             } else {
                 this.addMessage('assistant', "⚠️ Regenerate failed: " + (response?.error || "Unknown error"), this.currentModel);
             }
@@ -1123,6 +1150,10 @@ class FloatingChatUI {
                 loadingDiv.remove();
                 if (response && response.success) {
                     this.addMessage('assistant', response.answer, this.currentModel);
+                    // Update local demo usage cache if demoInfo is returned
+                    if (response.demoInfo) {
+                        updateLocalDemoCache(response.demoInfo);
+                    }
                 } else {
                     this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), this.currentModel);
                 }
@@ -1142,6 +1173,10 @@ class FloatingChatUI {
                         loadingDiv.remove();
                         if (response && response.success) {
                             this.addMessage('assistant', response.answer, this.currentModel);
+                            // Update local demo usage cache if demoInfo is returned
+                            if (response.demoInfo) {
+                                updateLocalDemoCache(response.demoInfo);
+                            }
                         } else {
                             this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), this.currentModel);
                         }
@@ -1232,6 +1267,10 @@ class FloatingChatUI {
                 loadingDiv.remove();
                 if (response && response.success) {
                     newUI.addMessage('assistant', response.answer, newUI.currentModel);
+                    // Update local demo usage cache if demoInfo is returned
+                    if (response.demoInfo) {
+                        updateLocalDemoCache(response.demoInfo);
+                    }
                 } else {
                     newUI.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), newUI.currentModel);
                 }
@@ -1261,7 +1300,7 @@ class FloatingChatUI {
         }
     }
 
-    async sendMessageDirect(text) {
+    async sendMessageDirect(text, parallelCount = 1) {
         this.addMessage('user', text);
 
         const loadingDiv = document.createElement("div");
@@ -1283,11 +1322,16 @@ class FloatingChatUI {
             const response = await chrome.runtime.sendMessage({
                 action: "CONTINUE_CHAT",
                 model: modelToUse,
-                history: formattedHistory
+                history: formattedHistory,
+                parallelCount: parallelCount // How many parallel requests (0 = don't count this one)
             });
             loadingDiv.remove();
             if (response && response.success) {
                 this.addMessage('assistant', response.answer, modelToUse);
+                // Update local demo usage cache if demoInfo is returned
+                if (response.demoInfo) {
+                    updateLocalDemoCache(response.demoInfo);
+                }
             } else {
                 this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), modelToUse);
             }

@@ -1,13 +1,13 @@
-// Snip & Ask Guest Mode - Cloudflare Worker
-// Deploy this to Cloudflare Workers to proxy Groq API requests with rate limiting
+// Snip & Ask Guest Mode - Cloudflare Worker with D1 Anti-Cheat
+// Deploy: wrangler deploy
 
 export default {
     async fetch(request, env) {
-        // CORS headers for browser requests
+        // CORS headers
         const corsHeaders = {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, X-Instance-ID',
+            'Access-Control-Allow-Headers': 'Content-Type',
         };
 
         // Handle preflight
@@ -24,24 +24,106 @@ export default {
         }
 
         try {
-            // Use IP-based tracking only - cannot be bypassed by resetting extension
-            // Cloudflare provides the real client IP in CF-Connecting-IP header
-            const clientIP = request.headers.get('CF-Connecting-IP') || 'anonymous';
+            // Check D1 database is bound
+            if (!env.DB) {
+                console.error('D1 database not bound!');
+                return new Response(JSON.stringify({
+                    error: 'Server configuration error',
+                    code: 'CONFIG_ERROR'
+                }), {
+                    status: 500,
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+                });
+            }
 
-            // Hash the IP for privacy (don't store raw IPs)
-            const encoder = new TextEncoder();
-            const data = encoder.encode(clientIP + 'snip-ask-salt');
-            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const ipHash = hashArray.slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
+            // Parse request body
+            const body = await request.json();
 
-            // Check rate limit using KV storage
-            const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-            const usageKey = `usage:${ipHash}:${today}`;
-            const currentUsage = parseInt(await env.GUEST_USAGE.get(usageKey) || '0');
+            // Extract client identifiers
+            const clientUuid = body._meta?.clientUuid;
+            const deviceFingerprint = body._meta?.deviceFingerprint;
+            const parallelCount = body._meta?.parallelCount ?? 1;
+            const shouldCount = parallelCount > 0;
+            const incrementBy = shouldCount ? parallelCount : 0;
+
+            // Validate required identifiers
+            if (!clientUuid || !deviceFingerprint) {
+                return new Response(JSON.stringify({
+                    error: 'Missing client identification',
+                    code: 'MISSING_ID',
+                    message: 'Please update your extension to the latest version.'
+                }), {
+                    status: 400,
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+                });
+            }
+
+            const today = new Date().toISOString().split('T')[0];
             const dailyLimit = parseInt(env.DAILY_LIMIT || '15');
 
-            if (currentUsage >= dailyLimit) {
+            // =========================================================
+            // STEP A: Check if client_uuid exists in database
+            // =========================================================
+            const existingUser = await env.DB.prepare(
+                'SELECT * FROM users WHERE client_uuid = ?'
+            ).bind(clientUuid).first();
+
+            let currentUsage = 0;
+            let userFingerprint = deviceFingerprint;
+
+            if (existingUser) {
+                // User exists - use their registered fingerprint
+                userFingerprint = existingUser.device_fingerprint;
+
+                // Get current usage for this fingerprint
+                const usageRecord = await env.DB.prepare(
+                    'SELECT usage_count FROM daily_usage WHERE device_fingerprint = ? AND usage_date = ?'
+                ).bind(userFingerprint, today).first();
+
+                currentUsage = usageRecord?.usage_count || 0;
+
+                console.log(`Existing user: ${clientUuid.substring(0, 8)}..., Usage: ${currentUsage}/${dailyLimit}`);
+            } else {
+                // =========================================================
+                // STEP B: New UUID - Check if fingerprint is in database
+                // =========================================================
+                const fingerprintUsage = await env.DB.prepare(
+                    'SELECT usage_count FROM daily_usage WHERE device_fingerprint = ? AND usage_date = ?'
+                ).bind(deviceFingerprint, today).first();
+
+                currentUsage = fingerprintUsage?.usage_count || 0;
+
+                // =========================================================
+                // STEP C: Check if fingerprint has exceeded limit
+                // =========================================================
+                const requiredQuota = shouldCount ? parallelCount : 1;
+                if (currentUsage + requiredQuota > dailyLimit) {
+                    console.log(`Device limit exceeded for fingerprint: ${deviceFingerprint.substring(0, 8)}...`);
+                    return new Response(JSON.stringify({
+                        error: 'Device limit reached',
+                        code: 'DEVICE_LIMIT_EXCEEDED',
+                        usage: currentUsage,
+                        limit: dailyLimit,
+                        message: 'This device has reached its daily limit. Get your own free API key at console.groq.com for unlimited use!'
+                    }), {
+                        status: 429,
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+                    });
+                }
+
+                // =========================================================
+                // STEP D: Clean fingerprint - Create new user
+                // =========================================================
+                await env.DB.prepare(
+                    'INSERT INTO users (client_uuid, device_fingerprint) VALUES (?, ?)'
+                ).bind(clientUuid, deviceFingerprint).run();
+
+                console.log(`New user created: ${clientUuid.substring(0, 8)}... with fingerprint ${deviceFingerprint.substring(0, 8)}...`);
+            }
+
+            // Check quota before making request
+            const requiredQuota = shouldCount ? parallelCount : 1;
+            if (currentUsage + requiredQuota > dailyLimit) {
                 return new Response(JSON.stringify({
                     error: 'Daily limit reached',
                     code: 'LIMIT_EXCEEDED',
@@ -54,8 +136,9 @@ export default {
                 });
             }
 
-            // Parse the incoming request
-            const body = await request.json();
+            // Remove _meta before forwarding to Groq
+            const groqBody = { ...body };
+            delete groqBody._meta;
 
             // Proxy to Groq API
             const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -64,26 +147,34 @@ export default {
                     'Authorization': `Bearer ${env.GROQ_API_KEY}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(body)
+                body: JSON.stringify(groqBody)
             });
 
-            // If Groq request was successful, increment usage
-            if (groqResponse.ok) {
-                await env.GUEST_USAGE.put(usageKey, String(currentUsage + 1), {
-                    expirationTtl: 86400 // Auto-expire after 24 hours
-                });
+            // If successful and should count, increment usage
+            if (groqResponse.ok && shouldCount) {
+                // Upsert daily usage
+                await env.DB.prepare(`
+                    INSERT INTO daily_usage (device_fingerprint, usage_date, usage_count, last_used_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(device_fingerprint, usage_date) 
+                    DO UPDATE SET usage_count = usage_count + ?, last_used_at = CURRENT_TIMESTAMP
+                `).bind(userFingerprint, today, incrementBy, incrementBy).run();
+
+                currentUsage += incrementBy;
+                console.log(`Usage incremented: ${userFingerprint.substring(0, 8)}... = ${currentUsage} (+${incrementBy})`);
             }
 
             // Get response data
             const responseData = await groqResponse.json();
 
-            // Add usage info to response for the extension to display
+            // Add usage info to response
             const enrichedResponse = {
                 ...responseData,
                 _demo: {
-                    usage: currentUsage + 1,
+                    usage: currentUsage,
                     limit: dailyLimit,
-                    remaining: dailyLimit - currentUsage - 1
+                    remaining: dailyLimit - currentUsage,
+                    deviceId: userFingerprint.substring(0, 4) + '...'
                 }
             };
 
@@ -93,7 +184,11 @@ export default {
             });
 
         } catch (error) {
-            return new Response(JSON.stringify({ error: error.message || 'Internal error' }), {
+            console.error('Worker error:', error);
+            return new Response(JSON.stringify({
+                error: error.message || 'Internal error',
+                code: 'INTERNAL_ERROR'
+            }), {
                 status: 500,
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
