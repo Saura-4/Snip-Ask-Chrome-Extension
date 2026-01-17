@@ -575,6 +575,18 @@ body.settings-open {
     margin-bottom: 12px;
     font-size: 12px;
     color: #8bc99a;
+    transition: opacity 0.3s ease, max-height 0.3s ease, margin-bottom 0.3s ease, padding 0.3s ease;
+    opacity: 1;
+    max-height: 100px;
+    overflow: hidden;
+}
+
+.demo-banner.hidden {
+    opacity: 0;
+    max-height: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
 }
 
 .demo-badge {

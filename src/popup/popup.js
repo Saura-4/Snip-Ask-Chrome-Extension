@@ -96,45 +96,47 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ============================================================================
 async function checkDemoStatus() {
   try {
-    const response = await chrome.runtime.sendMessage({ action: 'CHECK_GUEST_STATUS' });
-    if (response && response.success) {
-      isDemoModeActive = response.isDemoMode;
-      demoRemaining = response.remaining;
-      updateDemoBanner(response);
-    }
+    // Check storage DIRECTLY instead of relying on background script
+    // This prevents banner from being stuck when background doesn't respond
+    const storage = await chrome.storage.local.get(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
+
+    // Check if any key has actual content (even if invalid)
+    const hasGroqKey = storage.groqKey && storage.groqKey.trim().length > 0;
+    const hasGeminiKey = storage.geminiKey && storage.geminiKey.trim().length > 0;
+    const hasOpenRouterKey = storage.openrouterKey && storage.openrouterKey.trim().length > 0;
+    const hasOllamaHost = storage.ollamaHost && storage.ollamaHost.trim().length > 0;
+
+    // User is in guest mode ONLY if NO keys are entered
+    const inGuestMode = !hasGroqKey && !hasGeminiKey && !hasOpenRouterKey && !hasOllamaHost;
+
+    // Update state
+    isDemoModeActive = inGuestMode;
+
+    // Update banner immediately based on storage
+    updateDemoBanner({
+      isDemoMode: inGuestMode,
+      isConfigured: true // Assume configured if GUEST_WORKER_URL is set in guest-config.js
+    });
+
   } catch (e) {
     console.error('Failed to check demo status:', e);
+    // On error, hide the banner to be safe
+    const banner = document.getElementById('demoBanner');
+    if (banner) banner.classList.add('hidden');
   }
 }
 
 function updateDemoBanner(demoStatus) {
   const banner = document.getElementById('demoBanner');
-  const demoCount = document.getElementById('demoCount');
-  const demoLimitMessage = document.getElementById('demoLimitMessage');
 
   if (!banner || !demoStatus) return;
 
   if (demoStatus.isDemoMode && demoStatus.isConfigured) {
-    // Show demo banner (informational only - real limit is enforced server-side)
+    // Show guest mode banner (backend is source of truth for limits)
     banner.classList.remove('hidden');
-    // Note: This is a local cache and may be slightly out of sync with server
-    demoCount.textContent = `${demoStatus.remaining}/${demoStatus.limit}`;
-
-    // Update styling based on remaining
-    banner.classList.remove('demo-warning', 'demo-critical');
-    if (demoStatus.remaining === 0) {
-      banner.classList.add('demo-critical');
-      if (demoLimitMessage) demoLimitMessage.classList.remove('hidden');
-    } else if (demoStatus.remaining <= 2) {
-      banner.classList.add('demo-warning');
-      if (demoLimitMessage) demoLimitMessage.classList.add('hidden');
-    } else {
-      if (demoLimitMessage) demoLimitMessage.classList.add('hidden');
-    }
   } else {
-    // Hide demo banner (user has API keys or demo not configured)
+    // Hide banner (user has API keys or guest mode not configured)
     banner.classList.add('hidden');
-    if (demoLimitMessage) demoLimitMessage.classList.add('hidden');
   }
 }
 
@@ -233,7 +235,7 @@ function loadModels(enabledProviders, enabledModels, selectedModel) {
 
         // Add Free Trial mode indication
         if (isDemoModeActive && provider === 'groq') {
-          optgroup.label = '🎁 ' + PROVIDER_LABELS[provider] + ' (Guest Mode)';
+          optgroup.label = PROVIDER_LABELS[provider] + ' (Guest Mode)';
         }
 
         enabledModelsInProvider.forEach(model => {
@@ -322,9 +324,18 @@ function loadApiKeyInputs(enabledProviders, savedValues) {
       input.style.marginBottom = '6px';
       input.value = savedValues[config.storageKey] || '';
 
-      input.addEventListener('change', () => {
-        chrome.storage.local.set({ [config.storageKey]: input.value.trim() });
-      });
+      // Use both 'input' (real-time) and 'change' (on blur) events
+      const handleApiKeyUpdate = async () => {
+        const value = input.value.trim();
+        // Save the trimmed value (empty string if only whitespace)
+        await chrome.storage.local.set({ [config.storageKey]: value });
+
+        // Re-check guest status immediately to update banner visibility
+        await checkDemoStatus();
+      };
+
+      input.addEventListener('input', handleApiKeyUpdate);
+      input.addEventListener('change', handleApiKeyUpdate);
 
       container.appendChild(input);
     }
@@ -495,11 +506,14 @@ function setupEventListeners() {
       }
     } else if (model === 'openrouter:custom') {
       const slug = prompt("Enter OpenRouter model slug (e.g., openai/gpt-4):", "openai/gpt-4");
-      // Validate slug format: provider/model-name[:version]
-      if (slug && /^[a-zA-Z0-9\-_]+\/[a-zA-Z0-9\-_.]+(:free)?$/.test(slug)) {
+      // Validate slug format: provider/model-name with optional :variant suffix
+      // Examples: openai/gpt-4, deepseek/deepseek-r1-0528:free, meta-llama/llama-4
+      // More restrictive: only allows alphanumeric, hyphen, underscore for provider
+      // Model name allows dots for versions (e.g., gpt-4.0)
+      if (slug && /^[a-zA-Z][a-zA-Z0-9_-]*\/[a-zA-Z][a-zA-Z0-9._-]*(:[a-zA-Z0-9_-]+)?$/.test(slug)) {
         await chrome.storage.local.set({ selectedModel: 'openrouter:' + slug });
       } else if (slug) {
-        alert('Invalid model slug format. Use format: provider/model-name (e.g., openai/gpt-4)');
+        alert('Invalid model slug format. Use format: provider/model-name (e.g., openai/gpt-4, deepseek/deepseek-r1:free)');
       }
     } else {
       await chrome.storage.local.set({ selectedModel: model });

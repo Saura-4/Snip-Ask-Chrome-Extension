@@ -1,0 +1,27 @@
+name = "snip-ask-guest"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# Anti-abuse configuration
+[vars]
+VELOCITY_LIMIT = "10"      # Requests per minute before auto-ban
+VELOCITY_WINDOW = "60"     # Seconds for velocity check
+HARD_CAP_DAILY = "100"     # Max requests per day per device
+
+# D1 Database binding
+# Create your database: wrangler d1 create snip-ask-guest-db
+# Then update the database_id with your actual ID
+[[d1_databases]]
+binding = "DB"
+database_name = "snip-ask-guest-db"
+database_id = "YOUR_DATABASE_ID_HERE"
+
+# Scheduled cleanup - cleans old request logs every hour
+[triggers]
+crons = ["0 * * * *"]
+
+# Environment Variables - Set in Cloudflare Dashboard > Workers > Settings > Variables
+# GROQ_API_KEY = Primary API key (encrypted)
+# GROQ_API_KEY_2 = Backup key (optional, encrypted)
+# GROQ_API_KEY_3 = Third backup (optional, encrypted)
+# ALLOWED_EXTENSION_ID = Your Chrome extension ID after publishing

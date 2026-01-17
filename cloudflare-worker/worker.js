@@ -1,197 +1,251 @@
-// Snip & Ask Guest Mode - Cloudflare Worker with D1 Anti-Cheat
+// Snip & Ask Guest Mode - Anti-Abuse Worker with API Key Rotation
 // Deploy: wrangler deploy
+//
+// SECURITY: Never log API keys or secrets! Keep console.log statements generic.
 
 export default {
     async fetch(request, env) {
-        // CORS headers
         const corsHeaders = {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Allow-Headers': 'Content-Type, X-Extension-Id',
         };
 
-        // Handle preflight
         if (request.method === 'OPTIONS') {
             return new Response(null, { headers: corsHeaders });
         }
 
-        // Only allow POST
         if (request.method !== 'POST') {
-            return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-                status: 405,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
+            return jsonResponse({ error: 'Method not allowed' }, 405, corsHeaders);
+        }
+
+        // =================================================================
+        // SECURITY: Origin Validation via Extension ID
+        // After publishing your extension, set ALLOWED_EXTENSION_ID in
+        // Cloudflare Dashboard > Workers > Settings > Variables
+        // to your Chrome extension ID (e.g., "abcdefghijklmnopqrstuvwxyz123456")
+        // =================================================================
+        if (env.ALLOWED_EXTENSION_ID) {
+            const providedExtId = request.headers.get('X-Extension-Id');
+            if (providedExtId !== env.ALLOWED_EXTENSION_ID) {
+                return jsonResponse({
+                    error: 'Unauthorized',
+                    code: 'INVALID_ORIGIN'
+                }, 403, corsHeaders);
+            }
         }
 
         try {
-            // Check D1 database is bound
             if (!env.DB) {
-                console.error('D1 database not bound!');
-                return new Response(JSON.stringify({
-                    error: 'Server configuration error',
-                    code: 'CONFIG_ERROR'
-                }), {
-                    status: 500,
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-                });
+                return jsonResponse({ error: 'Database not configured', code: 'CONFIG_ERROR' }, 500, corsHeaders);
             }
 
-            // Parse request body
             const body = await request.json();
-
-            // Extract client identifiers
             const clientUuid = body._meta?.clientUuid;
             const deviceFingerprint = body._meta?.deviceFingerprint;
             const parallelCount = body._meta?.parallelCount ?? 1;
-            const shouldCount = parallelCount > 0;
-            const incrementBy = shouldCount ? parallelCount : 0;
 
-            // Validate required identifiers
             if (!clientUuid || !deviceFingerprint) {
-                return new Response(JSON.stringify({
+                return jsonResponse({
                     error: 'Missing client identification',
-                    code: 'MISSING_ID',
-                    message: 'Please update your extension to the latest version.'
-                }), {
-                    status: 400,
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-                });
+                    code: 'MISSING_ID'
+                }, 400, corsHeaders);
             }
 
-            const today = new Date().toISOString().split('T')[0];
-            const dailyLimit = parseInt(env.DAILY_LIMIT || '15');
+            // Configuration
+            const VELOCITY_LIMIT = parseInt(env.VELOCITY_LIMIT || '10');
+            const VELOCITY_WINDOW_SECONDS = parseInt(env.VELOCITY_WINDOW || '60');
+            const HARD_CAP_DAILY = parseInt(env.HARD_CAP_DAILY || '100');
 
-            // =========================================================
-            // STEP A: Check if client_uuid exists in database
-            // =========================================================
-            const existingUser = await env.DB.prepare(
+            // =================================================================
+            // STEP 0: Ensure user exists, get or create
+            // =================================================================
+            let user = await env.DB.prepare(
                 'SELECT * FROM users WHERE client_uuid = ?'
             ).bind(clientUuid).first();
 
-            let currentUsage = 0;
-            let userFingerprint = deviceFingerprint;
+            if (!user) {
+                // Check if fingerprint already has a user (different UUID, same device)
+                const existingByFingerprint = await env.DB.prepare(
+                    'SELECT * FROM users WHERE device_fingerprint = ? LIMIT 1'
+                ).bind(deviceFingerprint).first();
 
-            if (existingUser) {
-                // User exists - use their registered fingerprint
-                userFingerprint = existingUser.device_fingerprint;
-
-                // Get current usage for this fingerprint
-                const usageRecord = await env.DB.prepare(
-                    'SELECT usage_count FROM daily_usage WHERE device_fingerprint = ? AND usage_date = ?'
-                ).bind(userFingerprint, today).first();
-
-                currentUsage = usageRecord?.usage_count || 0;
-
-                console.log(`Existing user: ${clientUuid.substring(0, 8)}..., Usage: ${currentUsage}/${dailyLimit}`);
-            } else {
-                // =========================================================
-                // STEP B: New UUID - Check if fingerprint is in database
-                // =========================================================
-                const fingerprintUsage = await env.DB.prepare(
-                    'SELECT usage_count FROM daily_usage WHERE device_fingerprint = ? AND usage_date = ?'
-                ).bind(deviceFingerprint, today).first();
-
-                currentUsage = fingerprintUsage?.usage_count || 0;
-
-                // =========================================================
-                // STEP C: Check if fingerprint has exceeded limit
-                // =========================================================
-                const requiredQuota = shouldCount ? parallelCount : 1;
-                if (currentUsage + requiredQuota > dailyLimit) {
-                    console.log(`Device limit exceeded for fingerprint: ${deviceFingerprint.substring(0, 8)}...`);
-                    return new Response(JSON.stringify({
-                        error: 'Device limit reached',
-                        code: 'DEVICE_LIMIT_EXCEEDED',
-                        usage: currentUsage,
-                        limit: dailyLimit,
-                        message: 'This device has reached its daily limit. Get your own free API key at console.groq.com for unlimited use!'
-                    }), {
-                        status: 429,
-                        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-                    });
+                if (existingByFingerprint?.is_banned) {
+                    // Device is banned under different UUID
+                    return jsonResponse({
+                        error: 'Access denied',
+                        code: 'BANNED',
+                        message: existingByFingerprint.ban_reason || 'This device has been suspended.'
+                    }, 403, corsHeaders);
                 }
 
-                // =========================================================
-                // STEP D: Clean fingerprint - Create new user
-                // =========================================================
+                // Create new user
                 await env.DB.prepare(
                     'INSERT INTO users (client_uuid, device_fingerprint) VALUES (?, ?)'
                 ).bind(clientUuid, deviceFingerprint).run();
 
-                console.log(`New user created: ${clientUuid.substring(0, 8)}... with fingerprint ${deviceFingerprint.substring(0, 8)}...`);
+                user = { client_uuid: clientUuid, device_fingerprint: deviceFingerprint, is_banned: 0 };
             }
 
-            // Check quota before making request
-            const requiredQuota = shouldCount ? parallelCount : 1;
-            if (currentUsage + requiredQuota > dailyLimit) {
-                return new Response(JSON.stringify({
+            const fingerprint = user.device_fingerprint;
+
+            // =================================================================
+            // CHECK 1: Global Ban
+            // =================================================================
+            if (user.is_banned) {
+                return jsonResponse({
+                    error: 'Access denied',
+                    code: 'BANNED',
+                    message: user.ban_reason || 'This account has been suspended.'
+                }, 403, corsHeaders);
+            }
+
+            // =================================================================
+            // CHECK 2: Velocity (Speed) Detection
+            // =================================================================
+            const velocityWindow = new Date(Date.now() - VELOCITY_WINDOW_SECONDS * 1000).toISOString();
+            const recentRequests = await env.DB.prepare(
+                'SELECT COUNT(*) as count FROM request_log WHERE device_fingerprint = ? AND requested_at > ?'
+            ).bind(fingerprint, velocityWindow).first();
+
+            if (recentRequests?.count >= VELOCITY_LIMIT) {
+                // AUTO-BAN for velocity abuse
+                await env.DB.prepare(
+                    'UPDATE users SET is_banned = 1, ban_reason = ? WHERE device_fingerprint = ?'
+                ).bind('Automated: Too many requests per minute', fingerprint).run();
+
+                console.log(`AUTO-BAN: ${fingerprint.substring(0, 8)}... for velocity abuse`);
+
+                return jsonResponse({
+                    error: 'Rate limit exceeded',
+                    code: 'VELOCITY_BAN',
+                    message: 'Too many requests. Please slow down.'
+                }, 429, corsHeaders);
+            }
+
+            // =================================================================
+            // CHECK 3: Hard Cap (Daily Limit for Wallet Safety)
+            // =================================================================
+            const today = new Date().toISOString().split('T')[0];
+            const dailyUsage = await env.DB.prepare(
+                'SELECT usage_count FROM daily_usage WHERE device_fingerprint = ? AND usage_date = ?'
+            ).bind(fingerprint, today).first();
+
+            const currentUsage = dailyUsage?.usage_count || 0;
+            const incrementBy = parallelCount > 0 ? parallelCount : 1;
+
+            if (currentUsage + incrementBy > HARD_CAP_DAILY) {
+                return jsonResponse({
                     error: 'Daily limit reached',
-                    code: 'LIMIT_EXCEEDED',
-                    usage: currentUsage,
-                    limit: dailyLimit,
-                    message: 'You have used all your free Guest Mode messages today. Get your own free API key at console.groq.com for unlimited use!'
-                }), {
-                    status: 429,
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-                });
+                    code: 'HARD_CAP',
+                    message: 'You\'ve reached the daily limit. Please try again tomorrow or get your own free API key at console.groq.com!'
+                }, 429, corsHeaders);
             }
 
-            // Remove _meta before forwarding to Groq
+            // =================================================================
+            // EXECUTION: Call LLM API with Key Rotation
+            // =================================================================
+
+            // Log this request for velocity tracking
+            await env.DB.prepare(
+                'INSERT INTO request_log (device_fingerprint) VALUES (?)'
+            ).bind(fingerprint).run();
+
+            // Prepare request body (remove _meta)
             const groqBody = { ...body };
             delete groqBody._meta;
 
-            // Proxy to Groq API
-            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${env.GROQ_API_KEY}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(groqBody)
-            });
+            // Get all available API keys
+            const apiKeys = [
+                env.GROQ_API_KEY,
+                env.GROQ_API_KEY_2,
+                env.GROQ_API_KEY_3
+            ].filter(Boolean);
 
-            // If successful and should count, increment usage
-            if (groqResponse.ok && shouldCount) {
-                // Upsert daily usage
-                await env.DB.prepare(`
-                    INSERT INTO daily_usage (device_fingerprint, usage_date, usage_count, last_used_at)
-                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(device_fingerprint, usage_date) 
-                    DO UPDATE SET usage_count = usage_count + ?, last_used_at = CURRENT_TIMESTAMP
-                `).bind(userFingerprint, today, incrementBy, incrementBy).run();
-
-                currentUsage += incrementBy;
-                console.log(`Usage incremented: ${userFingerprint.substring(0, 8)}... = ${currentUsage} (+${incrementBy})`);
+            if (apiKeys.length === 0) {
+                return jsonResponse({ error: 'No API keys configured', code: 'CONFIG_ERROR' }, 500, corsHeaders);
             }
 
-            // Get response data
+            let lastError = null;
+            let groqResponse = null;
+
+            // Try each key until one works
+            for (const apiKey of apiKeys) {
+                try {
+                    groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${apiKey}`,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(groqBody)
+                    });
+
+                    // If not rate limited, use this response
+                    if (groqResponse.status !== 429) {
+                        break;
+                    }
+
+                    console.log(`API key exhausted, trying next...`);
+                    lastError = 'API rate limit';
+                } catch (e) {
+                    lastError = e.message;
+                    console.log(`API key failed: ${e.message}, trying next...`);
+                }
+            }
+
+            if (!groqResponse || groqResponse.status === 429) {
+                return jsonResponse({
+                    error: 'Service temporarily unavailable',
+                    code: 'API_EXHAUSTED',
+                    message: 'All servers are busy. Please try again in a few minutes.'
+                }, 503, corsHeaders);
+            }
+
+            // Update usage on success
+            if (groqResponse.ok && parallelCount > 0) {
+                await env.DB.prepare(`
+                    INSERT INTO daily_usage (device_fingerprint, usage_date, usage_count)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(device_fingerprint, usage_date) 
+                    DO UPDATE SET usage_count = usage_count + ?
+                `).bind(fingerprint, today, incrementBy, incrementBy).run();
+
+                // Update last seen
+                await env.DB.prepare(
+                    'UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE device_fingerprint = ?'
+                ).bind(fingerprint).run();
+            }
+
             const responseData = await groqResponse.json();
 
-            // Add usage info to response
-            const enrichedResponse = {
+            // Add minimal metadata (no limits shown to user)
+            return jsonResponse({
                 ...responseData,
-                _demo: {
-                    usage: currentUsage,
-                    limit: dailyLimit,
-                    remaining: dailyLimit - currentUsage,
-                    deviceId: userFingerprint.substring(0, 4) + '...'
-                }
-            };
-
-            return new Response(JSON.stringify(enrichedResponse), {
-                status: groqResponse.status,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
+                _guest: { ok: true }
+            }, groqResponse.status, corsHeaders);
 
         } catch (error) {
             console.error('Worker error:', error);
-            return new Response(JSON.stringify({
-                error: error.message || 'Internal error',
-                code: 'INTERNAL_ERROR'
-            }), {
-                status: 500,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
+            return jsonResponse({ error: 'Internal error', code: 'INTERNAL_ERROR' }, 500, corsHeaders);
         }
     }
 };
+
+function jsonResponse(data, status, corsHeaders) {
+    return new Response(JSON.stringify(data), {
+        status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+}
+
+// Cleanup old request logs (run periodically via cron trigger)
+export async function scheduled(event, env, ctx) {
+    // Delete request logs older than 1 hour
+    const cutoff = new Date(Date.now() - 3600 * 1000).toISOString();
+    await env.DB.prepare(
+        'DELETE FROM request_log WHERE requested_at < ?'
+    ).bind(cutoff).run();
+
+    console.log('Cleaned up old request logs');
+}

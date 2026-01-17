@@ -1,20 +1,16 @@
 // src/background/guest-config.js
-// Guest Mode: Allows users without API keys to try the extension with limited daily usage
+// Guest Mode: Allows users without API keys to use the extension
+// Backend (Cloudflare Worker) is the sole authority for rate limiting
 
 import { getDeviceFingerprint } from './fingerprint.js';
 
 // =============================================================================
-// CONFIGURATION - Update this URL after deploying your Cloudflare Worker
+// CONFIGURATION
+// Build-time configurable. For custom builds, modify these values.
 // =============================================================================
 
-// Placeholder URL - replace with your actual Cloudflare Worker URL
 const GUEST_WORKER_URL = 'https://snip-ask-guest.saurav04042004.workers.dev/';
-
-// Default Groq model for Guest Mode mode (vision-capable)
 const GUEST_DEFAULT_MODEL = 'meta-llama/llama-4-maverick-17b-128e-instruct';
-
-// Daily limit for Guest Mode (should match Cloudflare Worker setting)
-const GUEST_DAILY_LIMIT = 15;
 
 // =============================================================================
 // INSTANCE ID MANAGEMENT
@@ -22,7 +18,6 @@ const GUEST_DAILY_LIMIT = 15;
 
 /**
  * Get or create a unique instance ID for this extension installation.
- * This ID is used by the Cloudflare Worker to track usage per user.
  */
 async function getInstanceId() {
     const storage = await chrome.storage.local.get(['guestInstanceId']);
@@ -31,87 +26,55 @@ async function getInstanceId() {
         return storage.guestInstanceId;
     }
 
-    // Generate a new unique ID
     const instanceId = 'snip-' + crypto.randomUUID();
     await chrome.storage.local.set({ guestInstanceId: instanceId });
     return instanceId;
 }
 
 // =============================================================================
-// DEMO MODE DETECTION
+// GUEST MODE DETECTION
 // =============================================================================
 
 /**
- * Check if the extension is in Guest Mode mode (no user API keys configured)
+ * Check if the extension is in Guest Mode (no user API keys configured)
+ * Returns true only if ALL API key fields are empty or contain only whitespace
  */
 async function isGuestMode() {
     const storage = await chrome.storage.local.get(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
-    // Guest Mode only if NO keys/hosts are configured at all
-    return !storage.groqKey && !storage.geminiKey && !storage.openrouterKey && !storage.ollamaHost;
+
+    // Check if any key has actual content (even if it's invalid)
+    // If user enters ANY text, we consider them NOT in guest mode
+    const hasGroqKey = storage.groqKey && storage.groqKey.trim().length > 0;
+    const hasGeminiKey = storage.geminiKey && storage.geminiKey.trim().length > 0;
+    const hasOpenRouterKey = storage.openrouterKey && storage.openrouterKey.trim().length > 0;
+    const hasOllamaHost = storage.ollamaHost && storage.ollamaHost.trim().length > 0;
+
+    // Guest mode = NO keys entered at all
+    return !hasGroqKey && !hasGeminiKey && !hasOpenRouterKey && !hasOllamaHost;
 }
 
 /**
- * Check if Guest Mode mode is properly configured (worker URL is set)
+ * Check if Guest Mode is properly configured (worker URL is set)
  */
 function isGuestConfigured() {
     return GUEST_WORKER_URL && !GUEST_WORKER_URL.includes('YOUR_SUBDOMAIN');
 }
 
 // =============================================================================
-// USAGE TRACKING (Local mirror of server-side tracking)
+// GUEST API REQUEST
 // =============================================================================
 
 /**
- * Get current demo usage from local storage
- * This is a local cache - the server is the source of truth
- */
-async function getGuestUsage() {
-    const today = new Date().toISOString().split('T')[0];
-    const storage = await chrome.storage.local.get(['guestUsageCount', 'guestUsageDate']);
-
-    // Reset if it's a new day
-    if (storage.guestUsageDate !== today) {
-        await chrome.storage.local.set({
-            guestUsageCount: 0,
-            guestUsageDate: today
-        });
-        return { count: 0, remaining: GUEST_DAILY_LIMIT, limit: GUEST_DAILY_LIMIT };
-    }
-
-    const count = storage.guestUsageCount || 0;
-    return {
-        count,
-        remaining: Math.max(0, GUEST_DAILY_LIMIT - count),
-        limit: GUEST_DAILY_LIMIT
-    };
-}
-
-/**
- * Update local usage cache based on server response
- */
-async function updateGuestUsage(serverUsage) {
-    const today = new Date().toISOString().split('T')[0];
-    await chrome.storage.local.set({
-        guestUsageCount: serverUsage.usage,
-        guestUsageDate: today
-    });
-}
-
-// =============================================================================
-// DEMO API REQUEST
-// =============================================================================
-
-/**
- * Make a demo mode API request through the Cloudflare Worker proxy
+ * Make a Guest Mode API request through the Cloudflare Worker proxy
  * @param {Object} requestBody - The request body to send to Groq API
- * @returns {Promise<Object>} - The API response with usage info
+ * @returns {Promise<Object>} - The API response
  */
 async function makeGuestRequest(requestBody) {
     if (!isGuestConfigured()) {
-        throw new Error('Guest Mode is not configured. Please add your own API key in the extension popup.');
+        throw new Error('Guest Mode is not configured. Please add your own API key.');
     }
 
-    // Get both identifiers for anti-cheat
+    // Get identifiers for anti-abuse tracking
     const clientUuid = await getInstanceId();
     const deviceFingerprint = await getDeviceFingerprint();
 
@@ -125,36 +88,45 @@ async function makeGuestRequest(requestBody) {
         }
     };
 
+    // Use chrome.runtime.id as origin validation token
+    // This is dynamic - no hardcoding needed
+    // After publishing, this will be your consistent extension ID
+    const extensionId = chrome.runtime.id;
+
     const response = await fetch(GUEST_WORKER_URL, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'X-Extension-Id': extensionId  // Dynamic origin validation
         },
         body: JSON.stringify(enrichedBody)
     });
 
     const data = await response.json();
 
-    // Handle rate limit exceeded (both regular limit and device limit)
-    if (response.status === 429 || data.code === 'LIMIT_EXCEEDED' || data.code === 'DEVICE_LIMIT_EXCEEDED') {
-        // Update local cache
-        await updateGuestUsage({ usage: data.limit || GUEST_DAILY_LIMIT });
-        throw new Error(data.message || 'Guest Mode daily limit reached. Get your own free API key at console.groq.com for unlimited use!');
+    // Handle errors from anti-abuse system
+    if (data.code === 'BANNED') {
+        throw new Error(data.message || 'Access denied. Please contact support.');
     }
 
-    // Handle missing ID error (old extension version)
+    if (data.code === 'VELOCITY_BAN') {
+        throw new Error('Too many requests. Please slow down and try again later.');
+    }
+
+    if (data.code === 'HARD_CAP') {
+        throw new Error(data.message || 'Daily limit reached. Get your own free API key at console.groq.com!');
+    }
+
+    if (data.code === 'API_EXHAUSTED') {
+        throw new Error('Service temporarily unavailable. Please try again in a few minutes.');
+    }
+
     if (data.code === 'MISSING_ID') {
         throw new Error('Please update your extension to the latest version.');
     }
 
-    // Handle other errors
     if (!response.ok) {
         throw new Error(data.error || 'Guest Mode service error. Please try again later.');
-    }
-
-    // Update local usage cache from server response
-    if (data._demo) {
-        await updateGuestUsage(data._demo);
     }
 
     return data;
@@ -167,11 +139,8 @@ async function makeGuestRequest(requestBody) {
 export {
     GUEST_WORKER_URL,
     GUEST_DEFAULT_MODEL,
-    GUEST_DAILY_LIMIT,
     getInstanceId,
     isGuestMode,
     isGuestConfigured,
-    getGuestUsage,
-    updateGuestUsage,
     makeGuestRequest
 };

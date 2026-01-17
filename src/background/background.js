@@ -1,7 +1,7 @@
 // src/background/background.js
 
 import { getAIService } from './ai-service.js';
-import { isGuestMode, isGuestConfigured, getGuestUsage, makeGuestRequest, GUEST_DEFAULT_MODEL, GUEST_DAILY_LIMIT } from './guest-config.js';
+import { isGuestMode, isGuestConfigured, makeGuestRequest, GUEST_DEFAULT_MODEL } from './guest-config.js';
 
 // ============================================================================
 // 1. UTILITIES
@@ -197,7 +197,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     // parallelCount: how many requests to count (for comparison mode)
                     // 0 means don't count this request (companion in parallel batch)
                     const parallelCount = request.parallelCount ?? 1;
-                    
+
                     const guestResponse = await makeGuestRequest({
                         model: modelName || GUEST_DEFAULT_MODEL,
                         messages: request.history,
@@ -320,21 +320,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
-    // --- H. DEMO MODE STATUS CHECK ---
+    // --- H. GUEST MODE STATUS CHECK ---
     if (request.action === "CHECK_GUEST_STATUS") {
         (async () => {
             try {
                 const inGuestMode = await isGuestMode();
                 const isConfigured = isGuestConfigured();
-                const usage = await getGuestUsage();
 
                 sendResponse({
                     success: true,
                     isDemoMode: inGuestMode,
                     isConfigured,
-                    usage: usage.count,
-                    remaining: usage.remaining,
-                    limit: usage.limit,
                     defaultModel: GUEST_DEFAULT_MODEL
                 });
             } catch (err) {

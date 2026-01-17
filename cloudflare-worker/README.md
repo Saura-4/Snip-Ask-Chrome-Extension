@@ -1,78 +1,50 @@
-# Cloudflare Worker Setup Guide
+# Cloudflare Worker - Anti-Abuse System
 
-This worker proxies Groq API requests for Guest Mode users with **anti-cheat rate limiting** using UUID + device fingerprint tracking.
+Proxies Groq API requests for Guest Mode with **3-check anti-abuse** and **API key rotation**.
 
-## Quick Setup (10 minutes)
+## Quick Setup
 
-### Prerequisites
-- [Node.js](https://nodejs.org/) installed
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/): `npm install -g wrangler`
-- A Cloudflare account (free tier is sufficient)
-
-### 1. Login to Cloudflare
 ```bash
+# 1. Login
 wrangler login
-```
 
-### 2. Create D1 Database
-```bash
-cd cloudflare-worker
-wrangler d1 create snip-ask-guest-db
-```
-
-Copy the `database_id` from the output and replace `YOUR_D1_DATABASE_ID` in `wrangler.toml`.
-
-### 3. Initialize Database Schema
-```bash
+# 2. Initialize schema (already done if upgrading)
 wrangler d1 execute snip-ask-guest-db --file=./schema.sql
-```
 
-### 4. Set Environment Variables
-In [Cloudflare Dashboard](https://dash.cloudflare.com) → Workers → Your Worker → Settings → Variables:
-- Add `GROQ_API_KEY` (encrypted) - Get from [console.groq.com](https://console.groq.com)
-
-### 5. Deploy
-```bash
+# 3. Deploy
 wrangler deploy
 ```
 
-Your worker URL: `https://snip-ask-guest.YOUR_SUBDOMAIN.workers.dev`
+## Add API Keys (Required)
 
----
+In [Cloudflare Dashboard](https://dash.cloudflare.com) → Workers → Settings → Variables:
 
-## How Anti-Cheat Works
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GROQ_API_KEY` | Yes | Primary Groq key (encrypted) |
+| `GROQ_API_KEY_2` | No | Backup key for rotation |
+| `GROQ_API_KEY_3` | No | Third backup |
+
+## Anti-Abuse Flow
 
 ```
-Request → Check UUID → Check Fingerprint → Allow/Block
-         ↓                ↓
-      Registered?     Same device?
-         ↓                ↓
-      Use quota      Link or reject
+Request → Banned? → Velocity? → Hard Cap? → LLM API
+            ↓           ↓           ↓
+         REJECT     AUTO-BAN     REJECT
 ```
 
-1. **UUID**: Stored in extension, identifies installation
-2. **Fingerprint**: Hardware-based, survives reinstalls
-3. **Double check**: Reinstalling extension doesn't reset quota
+- **Velocity**: 10+ requests/minute = auto-ban
+- **Hard Cap**: 100 requests/day max
 
----
-
-## Testing
+## Admin Commands
 
 ```bash
-curl -X POST https://snip-ask-guest.YOUR_SUBDOMAIN.workers.dev \
-  -H "Content-Type: application/json" \
-  -d '{"_meta":{"clientUuid":"test-123","deviceFingerprint":"abc123"},"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":"Hello"}]}'
+# View banned users
+wrangler d1 execute snip-ask-guest-db --command="SELECT * FROM users WHERE is_banned=1"
+
+# Unban a user
+wrangler d1 execute snip-ask-guest-db --command="UPDATE users SET is_banned=0 WHERE device_fingerprint='xxx'"
+
+# View top users today
+wrangler d1 execute snip-ask-guest-db --command="SELECT * FROM daily_usage WHERE usage_date=date('now') ORDER BY usage_count DESC LIMIT 10"
 ```
-
-## Monitoring Usage
-
-View database entries:
-```bash
-wrangler d1 execute snip-ask-guest-db --command="SELECT * FROM daily_usage ORDER BY usage_date DESC LIMIT 10"
-```
-
-## Rotating Your Groq Key
-
-1. Create new key at [console.groq.com](https://console.groq.com)
-2. Update `GROQ_API_KEY` in Cloudflare Dashboard → Worker → Settings → Variables
-3. Changes take effect immediately

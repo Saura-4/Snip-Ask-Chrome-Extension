@@ -175,7 +175,13 @@ async function generateFingerprint() {
 
 /**
  * Get or generate the device fingerprint.
- * Cached in chrome.storage.sync for persistence.
+ * Cached in chrome.storage.local for persistence.
+ * 
+ * NOTE: We use local (not sync) storage because:
+ * 1. sync would share the fingerprint across all Chrome instances on same Google account
+ * 2. This defeats device-specific rate limiting
+ * 3. While local storage can be cleared via DevTools, the server-side device_fingerprint
+ *    tracking will catch repeat offenders when they generate similar fingerprints
  */
 async function getDeviceFingerprint() {
     // Check memory cache first
@@ -183,8 +189,8 @@ async function getDeviceFingerprint() {
         return cachedFingerprint;
     }
 
-    // Check storage cache
-    const storage = await chrome.storage.sync.get(['deviceFingerprint', 'fingerprintTimestamp']);
+    // Check storage cache (using local, not sync)
+    const storage = await chrome.storage.local.get(['deviceFingerprint', 'fingerprintTimestamp']);
 
     // Fingerprint expires after 7 days (in case hardware changes)
     const sevenDays = 7 * 24 * 60 * 60 * 1000;
@@ -199,8 +205,8 @@ async function getDeviceFingerprint() {
     // Generate new fingerprint
     cachedFingerprint = await generateFingerprint();
 
-    // Store in sync storage (persists across reinstalls if user is signed into Chrome)
-    await chrome.storage.sync.set({
+    // Store in local storage
+    await chrome.storage.local.set({
         deviceFingerprint: cachedFingerprint,
         fingerprintTimestamp: Date.now()
     });
@@ -213,7 +219,7 @@ async function getDeviceFingerprint() {
  */
 async function regenerateFingerprint() {
     cachedFingerprint = null;
-    await chrome.storage.sync.remove(['deviceFingerprint', 'fingerprintTimestamp']);
+    await chrome.storage.local.remove(['deviceFingerprint', 'fingerprintTimestamp']);
     return await getDeviceFingerprint();
 }
 
