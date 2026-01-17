@@ -1,0 +1,11 @@
+# Cloudflare & Wrangler
+.wrangler/
+.dev.vars
+wrangler.toml
+
+# Node modules
+node_modules/
+package-lock.json
+
+# Logs
+npm-debug.log
