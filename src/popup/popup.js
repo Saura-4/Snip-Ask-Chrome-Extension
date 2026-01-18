@@ -212,6 +212,13 @@ function loadProviderToggles(enabledProviders) {
   document.getElementById('providerOllama').checked = enabledProviders.ollama === true;
 }
 
+// Lightweight refresh that only updates models dropdown without recreating inputs
+// Used when guest mode status changes during typing to avoid losing input focus
+async function refreshModelsOnly() {
+  const result = await chrome.storage.local.get(['enabledProviders', 'enabledModels', 'selectedModel']);
+  loadModels(result.enabledProviders || DEFAULT_PROVIDERS, result.enabledModels || getDefaultEnabledModels(), result.selectedModel);
+}
+
 function loadModels(enabledProviders, enabledModels, selectedModel) {
   const modelSelect = document.getElementById('modelSelect');
   modelSelect.innerHTML = '';
@@ -346,10 +353,10 @@ function loadApiKeyInputs(enabledProviders, savedValues) {
         await checkGuestStatus();
 
         // Only refresh models if guest mode status changed
-        // Debounce to prevent focus loss during fast typing
+        // Use refreshModelsOnly() instead of loadSettings() to avoid recreating inputs and losing focus
         if (wasGuestMode !== isGuestModeActive) {
           clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(() => loadSettings(), 300);
+          debounceTimer = setTimeout(() => refreshModelsOnly(), 300);
         }
       };
 
@@ -610,11 +617,6 @@ function setupEventListeners() {
   });
 
   // Contact links
-  document.getElementById('instagramLink')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    chrome.tabs.create({ url: 'https://www.instagram.com/saura_v_chourasia/' });
-  });
-
   document.getElementById('linkedinLink')?.addEventListener('click', (e) => {
     e.preventDefault();
     chrome.tabs.create({ url: 'https://www.linkedin.com/in/saurav-chourasia/' });
@@ -841,11 +843,31 @@ async function startSnip() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tabs.length === 0) return;
 
+  const tab = tabs[0];
+
+  // Prevent errors on restricted pages
+  if (!tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://") ||
+    tab.url.startsWith("https://chrome.google.com/webstore") || tab.url.startsWith("edge://") ||
+    tab.url.startsWith("about:")) {
+    alert("⚠️ Cannot run on this restricted page.");
+    return;
+  }
+
   try {
-    await chrome.tabs.sendMessage(tabs[0].id, { action: "START_SNIP" });
+    await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP" });
     window.close();
   } catch (err) {
-    alert("⚠️ Could not start snip. Please refresh the page!");
+    // Content script not loaded, inject it first
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['src/content/utils.js', 'src/content/content.js']
+      });
+      await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP" });
+      window.close();
+    } catch (injectErr) {
+      alert("⚠️ Could not start snip. Please refresh the page!");
+    }
   }
 }
 
