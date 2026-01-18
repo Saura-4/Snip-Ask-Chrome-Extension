@@ -1,8 +1,6 @@
 // src/background/ai-service.js
 
-// ============================================================================
-// 1. PROMPT DEFINITIONS
-// ============================================================================
+// --- PROMPT DEFINITIONS ---
 const PROMPTS =
 {
     short:
@@ -27,9 +25,7 @@ const PROMPTS =
     }
 };
 
-// ============================================================================
-// REQUEST TIMEOUT HELPER
-// ============================================================================
+// --- REQUEST TIMEOUT HELPER ---
 const CLOUD_TIMEOUT_MS = 30000;  // 30 seconds for Groq/Gemini
 const OPENROUTER_TIMEOUT_MS = 90000; // 90 seconds for OpenRouter free tier (slow)
 const LOCAL_TIMEOUT_MS = 120000; // 2 minutes for Ollama (cold start can be slow)
@@ -54,9 +50,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = CLOUD_TIMEOUT_MS)
     }
 }
 
-// ============================================================================
-// 2. ABSTRACT SERVICE
-// ============================================================================
+// --- ABSTRACT SERVICE ---
 class AbstractAIService {
     constructor(apiKey, modelName, interactionMode, customPrompt, customModes = null) {
         this.apiKey = apiKey;
@@ -113,9 +107,7 @@ class AbstractAIService {
     async chat(messages) { throw new Error("Method 'chat' must be implemented."); }
 }
 
-// ============================================================================
-// 3. GROQ IMPLEMENTATION
-// ============================================================================
+// --- GROQ ---
 
 // Helper to strip Qwen/DeepSeek thinking tags from responses
 function stripThinkingTags(text) {
@@ -198,7 +190,7 @@ class GroqService extends AbstractAIService {
     }
 
     async askText(rawText) {
-        // SECURITY: Sanitize user input to prevent prompt injection
+        // Sanitize user input to prevent prompt injection
         const sanitized = rawText
             .replace(/</g, "\\<")
             .replace(/>/g, "\\>");
@@ -208,9 +200,7 @@ class GroqService extends AbstractAIService {
     }
 }
 
-// ============================================================================
-// 4. GEMINI & GEMMA IMPLEMENTATION
-// ============================================================================
+// --- GEMINI & GEMMA ---
 class GeminiService extends AbstractAIService {
     constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
         super(apiKey, modelName, interactionMode, customPrompt, customModes);
@@ -271,7 +261,7 @@ class GeminiService extends AbstractAIService {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "x-goog-api-key": this.apiKey  // SECURITY: Use header instead of URL param
+                "x-goog-api-key": this.apiKey
             },
             body: JSON.stringify(payload)
         });
@@ -296,7 +286,7 @@ class GeminiService extends AbstractAIService {
     }
 
     async askText(rawText) {
-        // SECURITY: Sanitize user input to prevent prompt injection
+        // Sanitize user input to prevent prompt injection
         const sanitized = rawText
             .replace(/</g, "\\<")
             .replace(/>/g, "\\>");
@@ -306,9 +296,7 @@ class GeminiService extends AbstractAIService {
     }
 }
 
-// ============================================================================
-// 5. OPENROUTER IMPLEMENTATION (OpenAI-compatible API)
-// ============================================================================
+// --- OPENROUTER ---
 class OpenRouterService extends AbstractAIService {
     constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
         super(apiKey, modelName, interactionMode, customPrompt, customModes);
@@ -420,9 +408,7 @@ class OpenRouterService extends AbstractAIService {
     }
 }
 
-// ============================================================================
-// SECURITY HELPER: SSRF Protection for Ollama Host
-// ============================================================================
+// --- SSRF Protection for Ollama Host ---
 function isValidOllamaHost(url) {
     try {
         const parsed = new URL(url);
@@ -465,15 +451,13 @@ function isValidOllamaHost(url) {
     }
 }
 
-// ============================================================================
-// 6. OLLAMA IMPLEMENTATION
-// ============================================================================
+// --- OLLAMA ---
 class OllamaService extends AbstractAIService {
     constructor(host, modelName, interactionMode, customPrompt, customModes) {
         super(null, modelName, interactionMode, customPrompt, customModes);
         this.actualModel = modelName.replace('ollama:', '');
 
-        // SECURITY: Validate Ollama host to prevent SSRF attacks
+        // Validate Ollama host to prevent SSRF
         const hostUrl = host || "http://localhost:11434";
         const validation = isValidOllamaHost(hostUrl);
         if (!validation.valid) {
@@ -545,7 +529,7 @@ class OllamaService extends AbstractAIService {
     }
 
     async askText(rawText) {
-        // SECURITY: Sanitize user input to prevent prompt injection
+        // Sanitize user input to prevent prompt injection
         const sanitized = rawText
             .replace(/</g, "\\<")
             .replace(/>/g, "\\>");
@@ -555,9 +539,7 @@ class OllamaService extends AbstractAIService {
     }
 }
 
-// ============================================================================
-// 7. FACTORY (FIXED ORDERING)
-// ============================================================================
+// --- FACTORY ---
 export function getAIService(apiKeyOrHost, modelName, interactionMode, customPrompt, customModes = null) {
     // Check Ollama FIRST to catch 'ollama:gemma3' before Gemma check
     if (modelName && modelName.startsWith('ollama:')) {

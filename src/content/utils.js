@@ -15,9 +15,7 @@ function parseMarkdown(text) {
   if (!text) return "";
   const codeBlocks = [];
 
-  // SECURITY: Generate a unique token per parse to prevent placeholder injection attacks.
-  // Using crypto.randomUUID() makes it impossible for user input or AI hallucinations
-  // to accidentally or maliciously match our internal placeholders.
+  // Unique token per parse prevents placeholder collision attacks
   const uniqueToken = crypto.randomUUID();
   const placeholderPrefix = `\x00CB_${uniqueToken}_`;
 
@@ -31,7 +29,7 @@ function parseMarkdown(text) {
   // Build regex pattern for this specific parse session
   const placeholderRegex = new RegExp(`(${placeholderPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\d+\x00)|([\\s\\S]+?)(?=${placeholderPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|$)`, 'g');
 
-  // SECURITY: Escape HTML in remaining text to prevent XSS attacks
+  // Escape HTML in remaining text to prevent XSS
   // But preserve code block placeholders (which now use unique tokens)
   text = text.replace(placeholderRegex, (match, codeBlock, normalText) => {
     if (codeBlock) return codeBlock;
@@ -79,7 +77,6 @@ function cropImage(base64Full, rect, callback) {
       const scale = Math.min(MAX_IMAGE_DIMENSION / outputWidth, MAX_IMAGE_DIMENSION / outputHeight);
       outputWidth = Math.round(outputWidth * scale);
       outputHeight = Math.round(outputHeight * scale);
-      console.log(`Snip & Ask: Compressing ${cropWidth}x${cropHeight} -> ${outputWidth}x${outputHeight}`);
     }
 
     const canvas = document.createElement("canvas");
@@ -104,8 +101,7 @@ function cropImage(base64Full, rect, callback) {
 
 // --- Loading Indicators ---
 
-// FIX: Reference counter to handle concurrent loading operations
-// Prevents Window A finishing from hiding loader while Window B is still thinking
+// Reference counter for concurrent loading operations
 let _loadingCursorCount = 0;
 
 function showLoadingCursor() {
@@ -113,7 +109,6 @@ function showLoadingCursor() {
 
   // Only create DOM element if it doesn't exist
   if (document.getElementById("groq-loader")) {
-    // Update counter display for debugging (optional, shows "thinking... (2)")
     const el = document.getElementById("groq-loader");
     if (_loadingCursorCount > 1) {
       el.innerHTML = `<span>⚡  thinking... (${_loadingCursorCount})</span>`;
@@ -136,7 +131,6 @@ function hideLoadingCursor() {
     const el = document.getElementById("groq-loader");
     if (el) el.remove();
   } else {
-    // Update counter display
     const el = document.getElementById("groq-loader");
     if (el) {
       el.innerHTML = _loadingCursorCount > 1

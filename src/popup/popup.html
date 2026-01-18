@@ -21,9 +21,9 @@
     </div>
 
     <!-- Guest Mode Banner (shown only when no API keys configured) -->
-    <div id="demoBanner" class="demo-banner hidden">
-      <span class="demo-badge">Guest Mode</span>
-      <a href="#" id="getOwnKeyLink" class="demo-key-link">Get your own key →</a>
+    <div id="guestBanner" class="guest-banner hidden">
+      <span class="guest-badge">Guest Mode</span>
+      <a href="#" id="getOwnKeyLink" class="guest-key-link">Get your own key →</a>
     </div>
 
     <!-- Primary Action - Snip Button (most important, top of fold) -->
@@ -73,7 +73,7 @@
     </details>
 
     <div class="footer">
-      <div class="footer-version">v4.0 • Customizable</div>
+      <div class="footer-version"><span id="versionDisplay">v--</span> • Customizable</div>
       <div class="footer-icons">
         <a href="#" id="open-welcome" class="icon-btn" title="Setup Guide">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">

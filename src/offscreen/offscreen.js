@@ -1,8 +1,6 @@
 // src/offscreen/offscreen.js
 
-// ============================================================================
-// OCR QUALITY VALIDATION CONSTANTS
-// ============================================================================
+// --- OCR QUALITY VALIDATION CONSTANTS ---
 const OCR_CONFIG = {
     MAX_OUTPUT_CHARS: 8000,           // Max chars to send to LLM (prevents token waste)
     MIN_CONFIDENCE: 25,                // Below this = likely garbage (Tesseract returns 0-100)
@@ -11,9 +9,7 @@ const OCR_CONFIG = {
     MAX_CONSECUTIVE_GARBAGE: 20        // Max consecutive non-printable chars
 };
 
-// ============================================================================
-// OCR TEXT QUALITY ANALYZER
-// ============================================================================
+// --- OCR TEXT QUALITY ANALYZER ---
 function analyzeOCRQuality(text) {
     if (!text || text.length === 0) {
         return { isValid: false, reason: 'empty', cleanedText: '' };
@@ -22,13 +18,13 @@ function analyzeOCRQuality(text) {
     // 1. Check readable character ratio (letters, numbers, common punctuation)
     const readableChars = text.match(/[a-zA-Z0-9.,!?;:'"()\-\s]/g) || [];
     const readableRatio = readableChars.length / text.length;
-    
+
     if (readableRatio < OCR_CONFIG.MIN_READABLE_RATIO) {
-        return { 
-            isValid: false, 
-            reason: 'garbage_ratio', 
+        return {
+            isValid: false,
+            reason: 'garbage_ratio',
             detail: `Only ${(readableRatio * 100).toFixed(1)}% readable characters`,
-            cleanedText: '' 
+            cleanedText: ''
         };
     }
 
@@ -39,24 +35,24 @@ function analyzeOCRQuality(text) {
     }
     const maxCharCount = Math.max(...Object.values(charCounts));
     const repetitionRatio = maxCharCount / text.length;
-    
+
     if (repetitionRatio > OCR_CONFIG.MAX_REPETITION_RATIO && text.length > 50) {
-        return { 
-            isValid: false, 
-            reason: 'repetitive', 
+        return {
+            isValid: false,
+            reason: 'repetitive',
             detail: `Single character repeated ${(repetitionRatio * 100).toFixed(1)}% of text`,
-            cleanedText: '' 
+            cleanedText: ''
         };
     }
 
     // 3. Check for consecutive garbage sequences
     const garbageMatch = text.match(/[^a-zA-Z0-9.,!?;:'"()\-\s\n]{20,}/g);
     if (garbageMatch) {
-        return { 
-            isValid: false, 
-            reason: 'consecutive_garbage', 
+        return {
+            isValid: false,
+            reason: 'consecutive_garbage',
             detail: `Found ${garbageMatch.length} garbage sequences`,
-            cleanedText: '' 
+            cleanedText: ''
         };
     }
 
@@ -65,7 +61,7 @@ function analyzeOCRQuality(text) {
         .replace(/[^\x20-\x7E\n\t]/g, ' ')  // Replace non-printable with space
         .replace(/\s+/g, ' ')                 // Collapse whitespace
         .trim();
-    
+
     // 5. Truncate if too long (prevents token waste)
     const wasTruncated = cleanedText.length > OCR_CONFIG.MAX_OUTPUT_CHARS;
     if (wasTruncated) {
@@ -77,9 +73,9 @@ function analyzeOCRQuality(text) {
         }
     }
 
-    return { 
-        isValid: true, 
-        cleanedText, 
+    return {
+        isValid: true,
+        cleanedText,
         wasTruncated,
         stats: {
             originalLength: text.length,
@@ -91,7 +87,6 @@ function analyzeOCRQuality(text) {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === 'OCR_Request') {
-       // console.log("[Offscreen] 1. Received Image. Size:", msg.base64Image.length);
         runOCR(msg.base64Image).then(sendResponse);
         return true; // Keep channel open
     }
@@ -99,20 +94,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function runOCR(base64Image) {
     try {
-        // SECURITY: Validate input
+        // Validate input
         if (!base64Image || typeof base64Image !== 'string') {
             throw new Error("Invalid image data provided");
         }
 
         // 1. Prepare Image Data
         const base64Data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
-        
-        // SECURITY: Validate base64 format
+
+        // Validate base64 format
         if (!/^[A-Za-z0-9+/=]+$/.test(base64Data)) {
             throw new Error("Invalid base64 encoding detected");
         }
-        
-        // SECURITY: Check reasonable size (10MB limit to prevent memory attacks)
+
+        // Check reasonable size (10MB limit)
         if (base64Data.length > 10 * 1024 * 1024) {
             throw new Error("Image too large for processing (max 10MB)");
         }
@@ -127,8 +122,6 @@ async function runOCR(base64Image) {
         const corePath = chrome.runtime.getURL('lib/tesseract-core.wasm.js');
         const langPath = chrome.runtime.getURL('lib/');
 
-       // console.log("[Offscreen] 2. Initializing Worker...");
-        
         // 3. Initialize Tesseract
         const worker = await Tesseract.createWorker('eng', 1, {
             workerPath: workerPath,
@@ -140,44 +133,35 @@ async function runOCR(base64Image) {
             errorHandler: e => console.error('[Offscreen] Worker Error:', e)
         });
 
-        //console.log("[Offscreen] 3. Worker Ready. Recognizing...");
-
         // 4. Recognize
         const { data: { text, confidence } } = await worker.recognize(bytes);
         await worker.terminate();
 
-        //console.log(`[Offscreen] 4. Result: "${text.substring(0, 20)}..." (Confidence: ${confidence})`);
-
-        // 5. SECURITY: Validate OCR quality to prevent garbage from wasting API tokens
+        // 5. Validate OCR quality
         if (confidence < OCR_CONFIG.MIN_CONFIDENCE) {
             console.warn(`[Offscreen] Low confidence OCR (${confidence}%) - likely noise`);
-            return { 
-                success: false, 
+            return {
+                success: false,
                 error: `OCR confidence too low (${confidence.toFixed(0)}%). Image may be too noisy or not contain text.`,
-                confidence: confidence 
+                confidence: confidence
             };
         }
 
         const qualityCheck = analyzeOCRQuality(text);
-        
+
         if (!qualityCheck.isValid) {
             console.warn(`[Offscreen] OCR quality check failed: ${qualityCheck.reason}`, qualityCheck.detail);
-            return { 
-                success: false, 
+            return {
+                success: false,
                 error: `OCR produced unusable text (${qualityCheck.reason}). Try snipping clearer content.`,
                 confidence: confidence,
                 reason: qualityCheck.reason
             };
         }
 
-        // Log truncation warning
-        if (qualityCheck.wasTruncated) {
-            console.log(`[Offscreen] OCR text truncated: ${qualityCheck.stats.originalLength} → ${qualityCheck.stats.cleanedLength} chars`);
-        }
-
-        return { 
-            text: qualityCheck.cleanedText, 
-            confidence: confidence, 
+        return {
+            text: qualityCheck.cleanedText,
+            confidence: confidence,
             success: true,
             wasTruncated: qualityCheck.wasTruncated,
             stats: qualityCheck.stats

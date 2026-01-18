@@ -1,8 +1,6 @@
 // popup.js - Custom Modes & Provider Selection
 
-// ============================================================================
-// DEFAULT DATA
-// ============================================================================
+// --- DEFAULT DATA ---
 const DEFAULT_MODES = [
   { id: 'short', name: '⚡ Short Answer', prompt: "You are a concise answer engine. 1. Analyze the user's input. 2. If it is a multiple-choice question, Output in this format: 'Answer: <option>. <explanation>'. 3. For follow-up chat or non-questions, reply naturally but concisely.", isDefault: true },
   { id: 'detailed', name: '🧠 Detailed', prompt: "You are an expert tutor. Analyze the input. Provide a detailed, step-by-step answer. Use Markdown.", isDefault: true },
@@ -71,30 +69,30 @@ const API_KEY_CONFIG = {
   ollama: { id: 'ollamaHost', placeholder: 'Ollama URL (http://localhost:11434)', type: 'text', storageKey: 'ollamaHost' }
 };
 
-// ============================================================================
-// STATE
-// ============================================================================
+// --- STATE ---
 let editingModeId = null;
-let isDemoModeActive = false;
-let demoRemaining = 5;
+let isGuestModeActive = false;
 const MIN_PANEL_WIDTH = 480;
 const MIN_PANEL_HEIGHT = 600;
 
-// ============================================================================
-// INITIALIZATION
-// ============================================================================
+// --- INITIALIZATION ---
 document.addEventListener('DOMContentLoaded', async () => {
   await initializeDefaults();
-  await checkDemoStatus(); // Check demo mode first
+  await checkGuestStatus(); // Check guest mode first
   await loadSettings();
   setupEventListeners();
   setupDynamicResize();
+
+  // Load version dynamically from manifest.json
+  const versionEl = document.getElementById('versionDisplay');
+  if (versionEl) {
+    const manifest = chrome.runtime.getManifest();
+    versionEl.textContent = `v${manifest.version}`;
+  }
 });
 
-// ============================================================================
-// DEMO MODE CHECK
-// ============================================================================
-async function checkDemoStatus() {
+// --- GUEST MODE CHECK ---
+async function checkGuestStatus() {
   try {
     // Check storage DIRECTLY instead of relying on background script
     // This prevents banner from being stuck when background doesn't respond
@@ -110,28 +108,28 @@ async function checkDemoStatus() {
     const inGuestMode = !hasGroqKey && !hasGeminiKey && !hasOpenRouterKey && !hasOllamaHost;
 
     // Update state
-    isDemoModeActive = inGuestMode;
+    isGuestModeActive = inGuestMode;
 
     // Update banner immediately based on storage
-    updateDemoBanner({
-      isDemoMode: inGuestMode,
+    updateGuestBanner({
+      isGuestMode: inGuestMode,
       isConfigured: true // Assume configured if GUEST_WORKER_URL is set in guest-config.js
     });
 
   } catch (e) {
-    console.error('Failed to check demo status:', e);
+    console.error('Failed to check guest status:', e);
     // On error, hide the banner to be safe
-    const banner = document.getElementById('demoBanner');
+    const banner = document.getElementById('guestBanner');
     if (banner) banner.classList.add('hidden');
   }
 }
 
-function updateDemoBanner(demoStatus) {
-  const banner = document.getElementById('demoBanner');
+function updateGuestBanner(guestStatus) {
+  const banner = document.getElementById('guestBanner');
 
-  if (!banner || !demoStatus) return;
+  if (!banner || !guestStatus) return;
 
-  if (demoStatus.isDemoMode && demoStatus.isConfigured) {
+  if (guestStatus.isGuestMode && guestStatus.isConfigured) {
     // Show guest mode banner (backend is source of truth for limits)
     banner.classList.remove('hidden');
   } else {
@@ -156,9 +154,7 @@ async function initializeDefaults() {
   }
 }
 
-// ============================================================================
-// LOAD SETTINGS
-// ============================================================================
+// --- LOAD SETTINGS ---
 async function loadSettings() {
   const result = await chrome.storage.local.get([
     'customModes', 'enabledProviders', 'enabledModels', 'selectedModel', 'selectedMode',
@@ -220,21 +216,24 @@ function loadModels(enabledProviders, enabledModels, selectedModel) {
   const modelSelect = document.getElementById('modelSelect');
   modelSelect.innerHTML = '';
 
-  // In demo mode, only show Groq models
-  const providersToShow = isDemoModeActive
+  // In guest mode, only show Groq models (ignore user's provider settings)
+  const providersToShow = isGuestModeActive
     ? { groq: true, google: false, openrouter: false, ollama: false }
     : enabledProviders;
 
   for (const [provider, models] of Object.entries(ALL_MODELS)) {
     if (providersToShow[provider]) {
-      const enabledModelsInProvider = models.filter(model => enabledModels[model.value] !== false);
+      // In guest mode, show ALL Groq models regardless of user's model settings
+      const enabledModelsInProvider = isGuestModeActive && provider === 'groq'
+        ? models
+        : models.filter(model => enabledModels[model.value] !== false);
 
       if (enabledModelsInProvider.length > 0) {
         const optgroup = document.createElement('optgroup');
         optgroup.label = PROVIDER_LABELS[provider];
 
-        // Add Free Trial mode indication
-        if (isDemoModeActive && provider === 'groq') {
+        // Add Guest Mode indication
+        if (isGuestModeActive && provider === 'groq') {
           optgroup.label = PROVIDER_LABELS[provider] + ' (Guest Mode)';
         }
 
@@ -250,16 +249,25 @@ function loadModels(enabledProviders, enabledModels, selectedModel) {
     }
   }
 
-  if (selectedModel && modelSelect.querySelector(`option[value="${selectedModel}"]`)) {
+  if (selectedModel && [...modelSelect.options].some(opt => opt.value === selectedModel)) {
     modelSelect.value = selectedModel;
-  } else if (isDemoModeActive && modelSelect.options.length > 0) {
-    // In demo mode, auto-select first Groq model if current selection is invalid
+  } else if (modelSelect.options.length > 0) {
+    // Saved model not available in dropdown - auto-select first available model
+    // This happens when: switching providers, disabling providers, or guest mode
     modelSelect.selectedIndex = 0;
     // IMPORTANT: Save the auto-selected model to storage so startSnip uses it
     const autoSelectedModel = modelSelect.value;
     if (autoSelectedModel) {
       chrome.storage.local.set({ selectedModel: autoSelectedModel });
     }
+  } else {
+    // No models available - all providers disabled
+    const emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = '⚠️ Enable a provider in Settings';
+    emptyOption.disabled = true;
+    modelSelect.appendChild(emptyOption);
+    modelSelect.selectedIndex = 0;
   }
 }
 
@@ -325,13 +333,24 @@ function loadApiKeyInputs(enabledProviders, savedValues) {
       input.value = savedValues[config.storageKey] || '';
 
       // Use both 'input' (real-time) and 'change' (on blur) events
+      let debounceTimer = null;
       const handleApiKeyUpdate = async () => {
         const value = input.value.trim();
         // Save the trimmed value (empty string if only whitespace)
         await chrome.storage.local.set({ [config.storageKey]: value });
 
+        // Track whether guest mode status changed
+        const wasGuestMode = isGuestModeActive;
+
         // Re-check guest status immediately to update banner visibility
-        await checkDemoStatus();
+        await checkGuestStatus();
+
+        // Only refresh models if guest mode status changed
+        // Debounce to prevent focus loss during fast typing
+        if (wasGuestMode !== isGuestModeActive) {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => loadSettings(), 300);
+        }
       };
 
       input.addEventListener('input', handleApiKeyUpdate);
@@ -406,9 +425,7 @@ function updateProviderHint(enabledProviders) {
   }
 }
 
-// ============================================================================
-// KEY CLEANUP (Delete keys after 7 days of provider being hidden)
-// ============================================================================
+// --- KEY CLEANUP ---
 async function checkKeyCleanup(enabledProviders, hiddenSince) {
   const now = Date.now();
   const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
@@ -444,9 +461,7 @@ async function trackProviderHidden(provider, isEnabled) {
   await chrome.storage.local.set({ providerHiddenSince: hiddenSince });
 }
 
-// ============================================================================
-// EVENT LISTENERS
-// ============================================================================
+// --- EVENT LISTENERS ---
 function setupEventListeners() {
   // Settings panel toggle
   document.getElementById('openSettingsBtn').addEventListener('click', () => {
@@ -503,6 +518,10 @@ function setupEventListeners() {
       const name = prompt("Enter your Ollama model name:", "llama3");
       if (name && /^[a-zA-Z0-9\-_:.]+$/.test(name)) {
         await chrome.storage.local.set({ selectedModel: 'ollama:' + name });
+      } else {
+        // User cancelled or invalid input - refresh to show actual saved model
+        await loadSettings();
+        return;
       }
     } else if (model === 'openrouter:custom') {
       const slug = prompt("Enter OpenRouter model slug (e.g., openai/gpt-4):", "openai/gpt-4");
@@ -514,6 +533,13 @@ function setupEventListeners() {
         await chrome.storage.local.set({ selectedModel: 'openrouter:' + slug });
       } else if (slug) {
         alert('Invalid model slug format. Use format: provider/model-name (e.g., openai/gpt-4, deepseek/deepseek-r1:free)');
+        // Refresh to show actual saved model
+        await loadSettings();
+        return;
+      } else {
+        // User cancelled - refresh to show actual saved model
+        await loadSettings();
+        return;
       }
     } else {
       await chrome.storage.local.set({ selectedModel: model });
@@ -614,20 +640,16 @@ function setupEventListeners() {
     chrome.tabs.create({ url: 'https://console.groq.com/keys' });
   });
 
-  // Keyboard shortcuts links (Providers tab and General tab)
-  document.getElementById('openShortcutsLink')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
-  });
+  // Keyboard shortcuts link (General tab - different element from Providers tab)
   document.getElementById('openShortcutsLinkGeneral')?.addEventListener('click', (e) => {
     e.preventDefault();
     chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
   });
 
-  // Setup Guide / Welcome page link
+  // Setup Guide link
   document.getElementById('open-welcome')?.addEventListener('click', (e) => {
     e.preventDefault();
-    chrome.tabs.create({ url: chrome.runtime.getURL('src/welcome/welcome.html') });
+    chrome.tabs.create({ url: chrome.runtime.getURL('src/setupguide/setupguide.html') });
   });
 
   // Provider dashboard links
@@ -663,7 +685,7 @@ function setupEventListeners() {
     });
   }
 
-  // Demo mode key links
+  // Guest mode key links
   document.getElementById('getOwnKeyLink')?.addEventListener('click', (e) => {
     e.preventDefault();
     chrome.tabs.create({ url: 'https://console.groq.com/keys' });
@@ -674,9 +696,7 @@ function setupEventListeners() {
   });
 }
 
-// ============================================================================
-// MODE MANAGEMENT
-// ============================================================================
+// --- MODE MANAGEMENT ---
 async function editMode(modeId) {
   const result = await chrome.storage.local.get(['customModes']);
   const modes = result.customModes || DEFAULT_MODES;
@@ -760,18 +780,39 @@ async function deleteMode(modeId) {
   await loadSettings();
 }
 
-// ============================================================================
-// SNIP FUNCTIONALITY
-// ============================================================================
+// --- SNIP FUNCTIONALITY ---
 async function startSnip() {
   const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
-  const model = result.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
+  let model = result.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
 
-  // In demo mode, skip API key validation (background.js handles it)
+  // Handle custom model selection - prompt user for model name
+  if (model === 'ollama:custom') {
+    const name = prompt("Enter your Ollama model name:", "llama3");
+    if (name && /^[a-zA-Z0-9\-_:.]+$/.test(name)) {
+      model = 'ollama:' + name;
+      await chrome.storage.local.set({ selectedModel: model });
+    } else {
+      // User cancelled or invalid input
+      return;
+    }
+  } else if (model === 'openrouter:custom') {
+    const slug = prompt("Enter OpenRouter model slug (e.g., openai/gpt-4):", "openai/gpt-4");
+    if (slug && /^[a-zA-Z][a-zA-Z0-9_-]*\/[a-zA-Z][a-zA-Z0-9._-]*(:[a-zA-Z0-9_-]+)?$/.test(slug)) {
+      model = 'openrouter:' + slug;
+      await chrome.storage.local.set({ selectedModel: model });
+    } else if (slug) {
+      alert('Invalid model slug format. Use format: provider/model-name (e.g., openai/gpt-4)');
+      return;
+    } else {
+      // User cancelled
+      return;
+    }
+  }
+
+  // In guest mode, skip API key validation (background.js handles it)
   // Server-side rate limiting is the real gate - cannot be bypassed via devtools
-  if (isDemoModeActive) {
+  if (isGuestModeActive) {
     // Just proceed - if limit is exceeded, server will return 429 error
-    // DO NOT check local demoRemaining here - it can be bypassed via devtools
   } else {
     // Validate API key based on model
     if (model.startsWith('ollama')) {
@@ -808,9 +849,7 @@ async function startSnip() {
   }
 }
 
-// ============================================================================
-// DYNAMIC PANEL RESIZE
-// ============================================================================
+// --- DYNAMIC PANEL RESIZE ---
 function setupDynamicResize() {
   const textarea = document.getElementById('modePromptInput');
   const settingsPanel = document.getElementById('settingsPanel');

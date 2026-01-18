@@ -563,7 +563,7 @@ body.settings-open {
 }
 
 /* Guest Mode Styles */
-.demo-banner {
+.guest-banner {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -581,7 +581,7 @@ body.settings-open {
     overflow: hidden;
 }
 
-.demo-banner.hidden {
+.guest-banner.hidden {
     opacity: 0;
     max-height: 0;
     margin-bottom: 0;
@@ -589,7 +589,7 @@ body.settings-open {
     padding-bottom: 0;
 }
 
-.demo-badge {
+.guest-badge {
     background: #2d5a3d;
     color: #a8e6b8;
     padding: 2px 8px;
@@ -598,54 +598,54 @@ body.settings-open {
     font-weight: 600;
 }
 
-.demo-banner #demoCount {
+.guest-banner #guestCount {
     font-weight: 700;
     color: #4caf50;
 }
 
-.demo-key-link {
+.guest-key-link {
     color: #4caf50;
     text-decoration: none;
     font-size: 11px;
     margin-left: auto;
 }
 
-.demo-key-link:hover {
+.guest-key-link:hover {
     text-decoration: underline;
 }
 
 /* Warning state (2 or less remaining) */
-.demo-banner.demo-warning {
+.guest-banner.guest-warning {
     background: linear-gradient(135deg, #3a3a1a 0%, #2a2a0f 100%);
     border-color: #5a5a2d;
 }
 
-.demo-banner.demo-warning #demoCount {
+.guest-banner.guest-warning #guestCount {
     color: #f5a036;
 }
 
-.demo-banner.demo-warning .demo-badge {
+.guest-banner.guest-warning .guest-badge {
     background: #5a5a2d;
     color: #e6d8a8;
 }
 
 /* Critical state (limit reached) */
-.demo-banner.demo-critical {
+.guest-banner.guest-critical {
     background: linear-gradient(135deg, #3a1a1a 0%, #2a0f0f 100%);
     border-color: #5a2d2d;
 }
 
-.demo-banner.demo-critical #demoCount {
+.guest-banner.guest-critical #guestCount {
     color: #f55036;
 }
 
-.demo-banner.demo-critical .demo-badge {
+.guest-banner.guest-critical .guest-badge {
     background: #5a2d2d;
     color: #e6a8a8;
 }
 
 /* Limit reached message */
-.demo-limit {
+.guest-limit {
     padding: 10px 12px;
     background: linear-gradient(135deg, #3a1a1a 0%, #2a0f0f 100%);
     border: 1px solid #5a2d2d;
@@ -656,12 +656,12 @@ body.settings-open {
     text-align: center;
 }
 
-.demo-limit a {
+.guest-limit a {
     color: #f55036;
     text-decoration: none;
     font-weight: 600;
 }
 
-.demo-limit a:hover {
+.guest-limit a:hover {
     text-decoration: underline;
 }
