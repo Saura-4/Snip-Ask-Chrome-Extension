@@ -51,7 +51,27 @@ export default {
             const VELOCITY_WINDOW_SECONDS = parseInt(env.VELOCITY_WINDOW || '60');
 
             // =================================================================
-            // STEP 0: Get or create user with role info
+            // STEP 0: Check if fingerprint is banned (BEFORE anything else)
+            // This runs for EVERY request to catch reinstalls/new UUIDs
+            // =================================================================
+            const bannedByFingerprint = await env.DB.prepare(`
+                SELECT u.ban_reason 
+                FROM users u 
+                JOIN roles r ON u.role_id = r.id 
+                WHERE u.device_fingerprint = ? AND r.name = 'banned'
+                LIMIT 1
+            `).bind(deviceFingerprint).first();
+
+            if (bannedByFingerprint) {
+                return jsonResponse({
+                    error: 'Access denied',
+                    code: 'BANNED',
+                    message: bannedByFingerprint.ban_reason || 'This device has been suspended.'
+                }, 403, corsHeaders);
+            }
+
+            // =================================================================
+            // STEP 1: Get or create user with role info
             // =================================================================
             let user = await env.DB.prepare(`
                 SELECT u.*, r.name as role_name, r.daily_limit, r.velocity_limit 
@@ -61,22 +81,6 @@ export default {
             `).bind(clientUuid).first();
 
             if (!user) {
-                // Check if fingerprint is banned under different UUID
-                const existingByFingerprint = await env.DB.prepare(`
-                    SELECT u.*, r.name as role_name 
-                    FROM users u 
-                    JOIN roles r ON u.role_id = r.id 
-                    WHERE u.device_fingerprint = ? LIMIT 1
-                `).bind(deviceFingerprint).first();
-
-                if (existingByFingerprint?.role_name === 'banned') {
-                    return jsonResponse({
-                        error: 'Access denied',
-                        code: 'BANNED',
-                        message: existingByFingerprint.ban_reason || 'This device has been suspended.'
-                    }, 403, corsHeaders);
-                }
-
                 // Create new user with default guest role (id = 1)
                 await env.DB.prepare(
                     'INSERT INTO users (client_uuid, device_fingerprint, role_id) VALUES (?, ?, 1)'

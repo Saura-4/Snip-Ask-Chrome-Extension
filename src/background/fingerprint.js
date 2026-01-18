@@ -31,31 +31,57 @@ async function hashString(str) {
 }
 
 /**
- * Get canvas fingerprint - renders text and shapes, then hashes the result.
- * Different GPUs/drivers produce slightly different renderings.
+ * Get canvas fingerprint - renders text with multiple fonts and shapes.
+ * Different GPUs/drivers/font-configs produce slightly different renderings.
+ * Enhanced with multiple fonts to catch system-level differences.
  */
 async function getCanvasFingerprint() {
     try {
-        const canvas = new OffscreenCanvas(200, 50);
+        const canvas = new OffscreenCanvas(300, 100);
         const ctx = canvas.getContext('2d');
 
-        // Draw text with specific font
-        ctx.textBaseline = 'top';
-        ctx.font = '14px Arial';
-        ctx.fillStyle = '#f60';
-        ctx.fillRect(125, 1, 62, 20);
-        ctx.fillStyle = '#069';
-        ctx.fillText('Snip&Ask!🎨', 2, 15);
-        ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
-        ctx.fillText('Snip&Ask!🎨', 4, 17);
+        // Background gradient (reveals gradient rendering differences)
+        const gradient = ctx.createLinearGradient(0, 0, 300, 100);
+        gradient.addColorStop(0, '#ff6600');
+        gradient.addColorStop(0.5, '#0066ff');
+        gradient.addColorStop(1, '#00ff66');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 300, 100);
 
-        // Draw some shapes
+        ctx.textBaseline = 'top';
+
+        // Test multiple fonts (font rendering varies by system config)
+        const fonts = ['14px Arial', '16px Georgia', '12px Courier New', '15px Impact', '13px Times New Roman'];
+        fonts.forEach((font, i) => {
+            ctx.font = font;
+            ctx.fillStyle = `rgba(${i * 50}, ${100 - i * 20}, ${i * 30 + 50}, 0.7)`;
+            ctx.fillText('SnipAsk!@#$%🎨', 5, i * 18 + 5);
+        });
+
+        // Complex shapes with different blend modes
+        ctx.globalCompositeOperation = 'multiply';
         ctx.beginPath();
-        ctx.arc(50, 25, 20, 0, Math.PI * 2);
+        ctx.arc(150, 50, 30, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+        ctx.fill();
+
+        ctx.globalCompositeOperation = 'screen';
+        ctx.beginPath();
+        ctx.arc(170, 50, 30, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+        ctx.fill();
+
+        // Bezier curves (anti-aliasing differences)
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = '#000033';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(10, 90);
+        ctx.bezierCurveTo(50, 10, 150, 90, 290, 10);
         ctx.stroke();
 
         // Get image data and hash it
-        const imageData = ctx.getImageData(0, 0, 200, 50);
+        const imageData = ctx.getImageData(0, 0, 300, 100);
         const dataString = Array.from(imageData.data).join(',');
         return await hashString(dataString);
     } catch (e) {
@@ -63,8 +89,10 @@ async function getCanvasFingerprint() {
     }
 }
 
+
 /**
- * Get WebGL fingerprint - GPU vendor and renderer info
+ * Get WebGL fingerprint - GPU vendor, renderer, and detailed parameters
+ * Extended with more parameters that vary even on identical hardware
  */
 function getWebGLFingerprint() {
     try {
@@ -73,15 +101,74 @@ function getWebGLFingerprint() {
         if (!gl) return 'webgl-unavailable';
 
         const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-        if (!debugInfo) return 'webgl-no-debug';
+        const vendor = debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : 'unknown';
+        const renderer = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : 'unknown';
 
-        const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
-        const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-        return `${vendor}|${renderer}`;
+        // Additional WebGL parameters that vary per driver/installation
+        const params = {
+            vendor,
+            renderer,
+            // Max values often differ slightly between driver versions
+            maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+            maxViewportDims: gl.getParameter(gl.MAX_VIEWPORT_DIMS)?.join(','),
+            maxVertexAttribs: gl.getParameter(gl.MAX_VERTEX_ATTRIBS),
+            maxCubeMapTextureSize: gl.getParameter(gl.MAX_CUBE_MAP_TEXTURE_SIZE),
+            maxRenderbufferSize: gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+            // Shader precision (varies by GPU/driver)
+            vertexShaderPrecision: getShaderPrecision(gl, gl.VERTEX_SHADER),
+            fragmentShaderPrecision: getShaderPrecision(gl, gl.FRAGMENT_SHADER),
+            // Extensions (set varies by driver version and config)
+            extensions: (gl.getSupportedExtensions() || []).sort().join(','),
+            // Aliased values
+            aliasedLineWidthRange: gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE)?.join(','),
+            aliasedPointSizeRange: gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)?.join(','),
+            // Depth/stencil bits
+            redBits: gl.getParameter(gl.RED_BITS),
+            greenBits: gl.getParameter(gl.GREEN_BITS),
+            blueBits: gl.getParameter(gl.BLUE_BITS),
+            alphaBits: gl.getParameter(gl.ALPHA_BITS),
+            depthBits: gl.getParameter(gl.DEPTH_BITS),
+            stencilBits: gl.getParameter(gl.STENCIL_BITS),
+        };
+
+        return Object.entries(params).map(([k, v]) => `${k}:${v}`).join('|');
     } catch (e) {
         return 'webgl-error';
     }
 }
+
+/**
+ * Get shader precision for high/medium/low float
+ */
+function getShaderPrecision(gl, shaderType) {
+    try {
+        const high = gl.getShaderPrecisionFormat(shaderType, gl.HIGH_FLOAT);
+        const medium = gl.getShaderPrecisionFormat(shaderType, gl.MEDIUM_FLOAT);
+        const low = gl.getShaderPrecisionFormat(shaderType, gl.LOW_FLOAT);
+        return `h:${high?.precision},m:${medium?.precision},l:${low?.precision}`;
+    } catch {
+        return 'unknown';
+    }
+}
+
+/**
+ * Get storage quota estimate - unique per user based on disk usage
+ * Different users have different available storage quotas
+ */
+async function getStorageQuota() {
+    try {
+        if (navigator.storage && navigator.storage.estimate) {
+            const estimate = await navigator.storage.estimate();
+            // Round quota to nearest GB to reduce volatility while keeping uniqueness
+            const quotaGB = Math.round((estimate.quota || 0) / (1024 * 1024 * 1024));
+            return `q:${quotaGB}GB`;
+        }
+        return 'storage-unavailable';
+    } catch {
+        return 'storage-error';
+    }
+}
+
 
 /**
  * Get audio fingerprint - AudioContext properties
@@ -157,8 +244,15 @@ async function generateFingerprint() {
         // Touch support (available in SW)
         touchSupport: navigator.maxTouchPoints || 0,
 
-        // Additional entropy
-        connectionType: navigator.connection?.effectiveType || 'unknown',
+        // Storage quota - unique per user based on disk usage patterns
+        storageQuota: await getStorageQuota(),
+
+        // Additional Intl details (locale-specific formatting)
+        numberFormat: new Intl.NumberFormat().resolvedOptions().locale,
+        dateTimeOptions: JSON.stringify(Intl.DateTimeFormat().resolvedOptions()),
+
+        // PDF viewer support (varies by browser config)
+        pdfViewerEnabled: navigator.pdfViewerEnabled ?? 'unknown',
     };
 
     // Combine all components into a single string

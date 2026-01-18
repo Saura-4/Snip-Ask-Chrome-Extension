@@ -1,144 +1,112 @@
 # ⚡ Snip & Ask
 
-> **Instant AI analysis for any screenshot. Free. Open-source. Privacy-first.**
+> **Your AI Screen Assistant. Snip anything, ask anything.**
+>
+> *No subscriptions. No data mining. Just instant intelligence.*
 
-Snip & Ask lets you draw a box around anything on your screen and get instant AI-powered analysis. Whether it's a math problem, code bug, diagram, or text — just snip it and ask.
 
-<!-- TODO: Add hero GIF here -->
-<!-- ![Demo](assets/demo.gif) -->
 
----
+**Snip & Ask** is the open-source Chrome extension that eliminates the context-switching tax. Stop saving screenshots, switching tabs, and uploading files just to get an answer.
 
-## ✨ Features
-
-| Feature | Description |
-|---------|-------------|
-| 🖼️ **Instant Snips** | Draw a selection box anywhere, get AI analysis in seconds |
-| 🔄 **Compare Models** | Open multiple windows to compare responses from different AI models |
-| 🤖 **4 AI Providers** | Groq, Google Gemini, OpenRouter, Ollama (local) |
-| 🧠 **Smart Modes** | Short Answer, Detailed, Code Debug, or Custom prompts |
-| 📷 **Vision + OCR** | Auto-detects: uses Vision APIs for images, Tesseract.js for text |
-| 💬 **Chat Follow-ups** | Continue the conversation in a floating chat window |
-| ⌨️ **Keyboard Shortcuts** | Set custom hotkeys for instant snipping |
-| 🔒 **Privacy First** | API keys stored locally. No servers. No telemetry. |
+Simply **draw a box** around code, text, diagrams, or math problems, and get an instant AI analysis floating right on your screen.
 
 ---
 
-## 🚀 Quick Start
+## ✨ Why You'll Love It
 
-### 1. Install the Extension
-
-**Option A: Chrome Web Store** *(Coming Soon)*
-
-**Option B: Manual Install**
-```bash
-git clone https://github.com/Saura-4/Snip-Ask-Chrome-Extension.git
-```
-1. Open `chrome://extensions`
-2. Enable **Developer Mode** (top right)
-3. Click **Load unpacked** → Select the cloned folder
-
-### 2. Get Your Free API Key
-
-1. Go to [console.groq.com/keys](https://console.groq.com/keys)
-2. Create a free account and generate a key
-3. Paste it in the extension popup under **API Keys**
-
-### 3. Start Snipping!
-
-Click the extension icon → **Snip Screen** → Draw a box → Get AI response!
+| 🚀 **Zero Friction** | 🔒 **Privacy First** | 💸 **100% Free** |
+|-------------------|-------------------|-------------------|
+| Snip > Ask > Done. No file uploads. No tab switching. | Your API keys stay on your device. No middleman servers tracking your queries. | Open source. Bring your own free keys (Groq, Gemini, etc.) or run local models. |
 
 ---
 
-## 🎯 Usage
+## ⚡ Key Features
 
-| Action | How |
-|--------|-----|
-| **Snip Screen** | Click extension → "Snip Screen" or use keyboard shortcut |
-| **Ask About Text** | Select text → Right-click → "Ask AI about '...'" |
-| **Compare Models** | Click **+** button in chat window to compare responses |
-| **Custom Shortcut** | Go to `chrome://extensions/shortcuts` → Set your hotkey |
-
----
-
-## 🤖 Supported Providers
-
-| Provider | Free Tier | Vision Support | Speed |
-|----------|:---------:|:--------------:|:-----:|
-| **Groq** | ✅ | ✅ Llama 4 | ⚡ Fastest |
-| **Google Gemini** | ✅ | ✅ Gemini/Gemma | Fast |
-| **OpenRouter** | ✅ Free models | Varies | Moderate |
-| **Ollama** | ✅ Local | LLaVA, Moondream | Depends on hardware |
+*   **🎁 Guest Mode:** Try it immediately without any setup or API keys. 
+*   **🖼️ Instant Visual Analysis:** Powered by Llama 3.2 Vision, Gemini 1.5, and more. It sees what you see.
+*   **🤖 Multi-Model Chat:** Compare answers side-by-side. Is GPT-4o stuck? Ask Llama 3 or DeepSeek instantly.
+*   **🧠 Intelligent Modes:**
+    *   *Code Debugger:* Fixes undefined variables & logic errors.
+    *   *Short Answer:* Concise facts for quick research.
+    *   *Detailed Explainer:* Deep dives for complex topics.
+*   **🏠 Local AI Support:** Full **Ollama** integration. Run privacy-focused models like Llama 3 or Mistral directly on your machine.
+*   **⌨️ Power User Ready:** Custom keyboard shortcuts & right-click context menu integrations.
 
 ---
 
-## 💡 Why I Built This
+## 🚀 Get Started in 30 Seconds
 
-As a developer and student, I was tired of the constant workflow interruption: screenshot → switch tabs → upload to ChatGPT → ask question. 
+### Option 1: Chrome Web Store (Recommended)
+*[Link coming soon - Pending Review]*
 
-I built Snip & Ask to eliminate that friction — instant AI analysis without leaving your current context. And since similar tools were all paid, I made this one **free and open-source** for everyone.
+### Option 2: Developer Install (Latest Features)
+1.  Clone this repo:
+    ```bash
+    git clone https://github.com/Saura-4/Snip-Ask-Chrome-Extension.git
+    ```
+2.  Open Chrome and navigate to `chrome://extensions`
+3.  Toggle **Developer mode** (top right corner).
+4.  Click **Load unpacked** and select the folder you just cloned.
 
----
-
-## 🏗️ Architecture
-
-Built with a modular **Service-Oriented Architecture**:
-
-- **AbstractAIService** — Base contract for all AI providers
-- **Provider Services** — GroqService, GeminiService, OpenRouterService, OllamaService
-- **Factory Pattern** — `getAIService()` routes to the correct provider automatically
-
-This design allows adding new AI providers with zero changes to core logic.
-
----
-
-## 📂 Project Structure
-
-```
-Snip-Ask-Chrome-Extension/
-├── manifest.json           # Extension configuration (Manifest V3)
-├── lib/                    # Tesseract.js OCR engine
-├── assets/                 # Icons
-└── src/
-    ├── background/         # Service worker & AI service layer
-    ├── content/            # Snipping UI & floating chat
-    └── popup/              # Settings UI
-```
+### 🔌 Connect Your Brain
+1.  Click the **Snip & Ask** icon in your toolbar.
+2.  **No Key Needed:** Just start snipping immediately in **Guest Mode** (limited free usage).
+3.  **Power Up:** Open **Settings** (⚙️) to add your own keys for unlimited usage:
+    *   [Groq Console](https://console.groq.com/keys) (Fastest, Recommended)
+    *   [Google AI Studio](https://aistudio.google.com/app/apikey) (Gemini Models)
+    *   [OpenRouter](https://openrouter.ai/keys) (Access to Claude, GPT-4, etc.)
+4.  **Done!** Hit `Alt+Shift+S` (or your set shortcut) to start snipping.
 
 ---
 
-## 🗺️ Roadmap
+## � Supported Providers
 
-- ✅ **v4.0** — Multi-provider support, Compare Windows, Keyboard shortcuts
-- 🔄 **v4.1** — Snip history, improved PDF support
-- 📋 **v5.0** — Desktop app (Electron)
+We support the fastest and most capable models available today:
 
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Feel free to:
-- Open issues for bugs or feature requests
-- Submit pull requests
-- Share feedback on [Discord](https://discord.gg/bppspgkd)
+| Provider | Best For | Vision? | Cost |
+| :--- | :--- | :---: | :---: |
+| **Groq** | ⚡ **Speed.** Near-instant answers. | ✅ | Free Tier |
+| **Google Gemini** | 🧠 **Reasoning.** Great for multimodal tasks. | ✅ | Free Tier |
+| **OpenRouter** | 🌐 **Variety.** Access DeepSeek R1, Claude 3.5, etc. | Varies | Varies |
+| **Ollama** | 🛡️ **Privacy.** Run completely offline. | ✅ | **Free** |
 
 ---
 
-## 🧩 Credits
+## 🏗️ For Developers
 
-- **OCR Engine:** [Tesseract.js](https://github.com/naptha/tesseract.js) (Apache 2.0)
-- **AI Providers:** Groq, Google, OpenRouter, Ollama
+Snip & Ask is built with a modular, maintainable **Service-Oriented Architecture** using Vanilla JS (no heavy frameworks).
+
+*   **`AbstractAIService`**: The interface that all providers implement. Want to add Anthropic directly? Just extend this class.
+*   **`Standard Factory Pattern`**: `getAIService()` dynamically loads the user's preferred brain.
+*   **`Tesseract.js`**: Client-side OCR for extracting text when Vision models are overkill.
+
+**Roadmap (v2.0 Goals):**
+- [ ] ☁️ Sync history across devices (optional encrypted sync)
+- [ ] � PDF Analysis support
+- [ ] �️ Native Desktop App (Electron)
 
 ---
 
-## 📜 License
+## 🤝 Join the Mission
 
-MIT License — Free to use, modify, and distribute.
+We believe AI tools should be **invisible utilities**, not walled gardens.
+
+*   **Found a bug?** [Open an Issue](https://github.com/Saura-4/Snip-Ask-Chrome-Extension/issues)
+*   **Have an idea?** [Start a Discussion](https://github.com/Saura-4/Snip-Ask-Chrome-Extension/discussions)
+*   **Want to chat?** [Join our Discord](https://discord.gg/bppspgkd)
+
+**License:** MIT. Hack away.
 
 ---
+
+<div align="center">
 
 **Built with ❤️ by [Saurav Chourasia](https://github.com/Saura-4)**
 
-[![Instagram](https://img.shields.io/badge/Instagram-%23E4405F.svg?style=flat&logo=Instagram&logoColor=white)](https://www.instagram.com/saura_v_chourasia/)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-%230077B5.svg?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/saurav-chourasia/)
-[![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=flat&logo=discord&logoColor=white)](https://discord.gg/bppspgkd)
+[![Instagram](https://img.shields.io/badge/Instagram-E4405F?style=for-the-badge&logo=instagram&logoColor=white)](https://www.instagram.com/saura_v_chourasia/)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/saurav-chourasia/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Chrome Web Store](https://img.shields.io/badge/Chrome-Web%20Store-blue.svg)](https://chrome.google.com/webstore)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2)](https://discord.gg/bppspgkd)
+
+</div>
