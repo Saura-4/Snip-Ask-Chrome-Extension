@@ -4,17 +4,12 @@
 
 import { getDeviceFingerprint } from './fingerprint.js';
 
-// =============================================================================
-// CONFIGURATION
-// Build-time configurable. For custom builds, modify these values.
-// =============================================================================
+// --- CONFIGURATION ---
 
 const GUEST_WORKER_URL = 'https://snip-ask-guest.saurav04042004.workers.dev/';
 const GUEST_DEFAULT_MODEL = 'meta-llama/llama-4-maverick-17b-128e-instruct';
 
-// =============================================================================
-// INSTANCE ID MANAGEMENT
-// =============================================================================
+// --- INSTANCE ID MANAGEMENT ---
 
 /**
  * Get or create a unique instance ID for this extension installation.
@@ -31,9 +26,7 @@ async function getInstanceId() {
     return instanceId;
 }
 
-// =============================================================================
-// GUEST MODE DETECTION
-// =============================================================================
+// --- GUEST MODE DETECTION ---
 
 /**
  * Check if the extension is in Guest Mode (no user API keys configured)
@@ -60,9 +53,7 @@ function isGuestConfigured() {
     return GUEST_WORKER_URL && !GUEST_WORKER_URL.includes('YOUR_SUBDOMAIN');
 }
 
-// =============================================================================
-// GUEST API REQUEST
-// =============================================================================
+// --- GUEST API REQUEST ---
 
 /**
  * Make a Guest Mode API request through the Cloudflare Worker proxy
@@ -93,14 +84,29 @@ async function makeGuestRequest(requestBody) {
     // After publishing, this will be your consistent extension ID
     const extensionId = chrome.runtime.id;
 
-    const response = await fetch(GUEST_WORKER_URL, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-Extension-Id': extensionId  // Dynamic origin validation
-        },
-        body: JSON.stringify(enrichedBody)
-    });
+    // Add timeout to prevent hanging requests (30 seconds, matching ai-service.js)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    let response;
+    try {
+        response = await fetch(GUEST_WORKER_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Extension-Id': extensionId  // Dynamic origin validation
+            },
+            body: JSON.stringify(enrichedBody),
+            signal: controller.signal
+        });
+    } catch (error) {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+            throw new Error('Request timed out. Please try again.');
+        }
+        throw error;
+    }
+    clearTimeout(timeoutId);
 
     const data = await response.json();
 
@@ -132,9 +138,7 @@ async function makeGuestRequest(requestBody) {
     return data;
 }
 
-// =============================================================================
-// EXPORTS
-// =============================================================================
+// --- EXPORTS ---
 
 export {
     GUEST_WORKER_URL,

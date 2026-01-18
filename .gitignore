@@ -9,3 +9,6 @@ package-lock.json
 
 # Logs
 npm-debug.log
+
+# Personal notes
+POST_PUBLISHING.md

@@ -1,22 +1,16 @@
 @echo off
-title Snip & Ask - Enable Offline Mode
+title Snip & Ask - Disable Offline Mode
 echo.
-echo [OPT-IN] Enabling Offline AI Support...
+echo [OPT-OUT] Disabling Offline AI Support...
 echo.
-echo This will allow the 'Snip & Ask' extension (and ONLY this extension)
-echo to communicate with your local Ollama instance.
+echo This will remove the Ollama CORS configuration for the extension.
 echo.
 
-:: REPLACE THIS with your actual ID after publishing!
-set "EXTENSION_ID=YOUR_EXTENSION_ID_HERE"
-
-:: If you are still testing locally, uncomment the line below:
-:: set "EXTENSION_ID=*"
-
-setx OLLAMA_ORIGINS "chrome-extension://%EXTENSION_ID%"
+:: Clear the OLLAMA_ORIGINS environment variable
+setx OLLAMA_ORIGINS ""
 
 echo.
-echo [DONE] Configuration saved.
+echo [DONE] Configuration cleared.
 echo Please RESTART Ollama for changes to take effect.
 echo.
 pause

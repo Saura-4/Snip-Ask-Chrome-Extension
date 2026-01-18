@@ -3,9 +3,7 @@
 import { getAIService } from './ai-service.js';
 import { isGuestMode, isGuestConfigured, makeGuestRequest, GUEST_DEFAULT_MODEL } from './guest-config.js';
 
-// ============================================================================
-// 1. UTILITIES
-// ============================================================================
+// --- UTILITIES ---
 
 function getStorage(keys) {
     return new Promise((resolve) => {
@@ -17,11 +15,9 @@ function getStorage(keys) {
     });
 }
 
-// ============================================================================
-// 2. CONTEXT MENU & KEYBOARD SHORTCUTS
-// ============================================================================
+// --- CONTEXT MENU & KEYBOARD SHORTCUTS ---
 
-// Create context menu on install and show welcome page
+// Create context menu on install
 chrome.runtime.onInstalled.addListener(async (details) => {
     // Check if context menu should be hidden
     const storage = await getStorage(['hideContextMenu']);
@@ -32,20 +28,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
             title: "Ask AI about selection",
             contexts: ["selection"]
         });
-    }
-
-    // Open welcome page only on first install AND if no API keys configured AND demo mode not available
-    if (details.reason === 'install') {
-        const keyCheck = await getStorage(['groqKey', 'geminiKey', 'openrouterKey']);
-        const hasKey = keyCheck.groqKey || keyCheck.geminiKey || keyCheck.openrouterKey;
-        const guestAvailable = isGuestConfigured();
-
-        // Don't open welcome page if user has keys OR guest mode is available
-        if (!hasKey && !guestAvailable) {
-            chrome.tabs.create({
-                url: chrome.runtime.getURL('src/welcome/welcome.html')
-            });
-        }
     }
 });
 
@@ -107,9 +89,7 @@ chrome.commands.onCommand.addListener(async (command) => {
     }
 });
 
-// ============================================================================
-// 3. OFFSCREEN DOCUMENT MANAGER
-// ============================================================================
+// --- OFFSCREEN DOCUMENT MANAGER ---
 
 let creating;
 
@@ -133,9 +113,7 @@ async function setupOffscreenDocument(path) {
     }
 }
 
-// ============================================================================
-// 4. MESSAGE LISTENER
-// ============================================================================
+// --- MESSAGE LISTENER ---
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
@@ -269,7 +247,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return false;
     }
 
-    // --- G. CHECK PROVIDER CONFIGURATION (Security: never expose keys to content script) ---
+    // --- G. CHECK PROVIDER CONFIG (keys never touch content script) ---
     if (request.action === "CHECK_PROVIDER_CONFIG") {
         (async () => {
             try {
@@ -286,7 +264,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 let providerName = 'Groq';
 
                 if (isOllama) {
-                    isConfigured = !!(storage.ollamaHost || 'http://localhost:11434');
+                    isConfigured = !!storage.ollamaHost;
                     providerName = 'Ollama Host';
                 } else if (isOpenRouter) {
                     isConfigured = !!storage.openrouterKey;
@@ -341,9 +319,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 });
 
-// ============================================================================
-// 5. AI REQUEST HANDLER
-// ============================================================================
+// --- AI REQUEST HANDLER ---
 
 async function handleAIRequest(inputContent, type, explicitModel, sendResponse, ocrConfidence) {
     try {

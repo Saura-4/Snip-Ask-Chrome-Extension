@@ -85,7 +85,7 @@ function broadcastFollowUp(text, senderUI) {
     const windowCount = chatWindows.length;
     pendingResponses = windowCount;
     chatWindows.forEach(w => w.setInputDisabled(true));
-    
+
     // First window is the "primary" and counts for all windows
     // Other windows are "companions" and don't increment the counter
     chatWindows.forEach((w, index) => {
@@ -208,6 +208,8 @@ function createGlassPane() {
         if (glassPane && isSelecting) {
             console.warn("Snip & Ask: Safety timeout triggered - cancelling snip mode");
             cancelSnipping();
+            // Show toast to explain why snip mode was cancelled
+            showErrorToast("Snip mode timed out after 30 seconds. Click the extension icon to try again.");
         }
     }, 30000);
 }
@@ -356,7 +358,7 @@ async function onMouseUp(e) {
                 return;
             }
 
-            // === SECURITY: Ask background.js to check provider config (keys never touch content script) ===
+            // Ask background.js to check provider config (keys never touch content script)
             chrome.runtime.sendMessage({ action: "CHECK_PROVIDER_CONFIG" }, async (configResult) => {
                 if (chrome.runtime.lastError || !configResult?.success) {
                     showErrorToast("Failed to check configuration. Please reload the page.");
@@ -373,11 +375,9 @@ async function onMouseUp(e) {
                     return;
                 }
 
-                // === PATH A: VISION MODEL (Direct Image) ===
                 if (isVisionModel(currentModel)) {
                     chrome.runtime.sendMessage({
                         action: "ASK_AI",
-                        // SECURITY: API keys are retrieved from storage in background.js
                         model: currentModel,
                         base64Image: croppedBase64
                     }, handleResponse);
@@ -404,14 +404,8 @@ async function onMouseUp(e) {
                     }
 
                     if (ocrResponse.success && ocrResponse.text && ocrResponse.text.length > 3) {
-                        // Log if text was truncated to save tokens
-                        if (ocrResponse.wasTruncated) {
-                            console.log(`OCR text was truncated to save API tokens: ${ocrResponse.stats?.originalLength} → ${ocrResponse.stats?.cleanedLength} chars`);
-                        }
-
                         chrome.runtime.sendMessage({
                             action: "ASK_AI_TEXT",
-                            // SECURITY: API keys are retrieved from storage in background.js
                             model: currentModel,
                             text: ocrResponse.text,
                             ocrConfidence: ocrResponse.confidence
@@ -419,10 +413,8 @@ async function onMouseUp(e) {
                     } else {
                         console.warn("OCR Empty or Failed:", ocrResponse.error || 'No readable text');
                         if (isVisionModel(currentModel)) {
-                            // Retry as image if OCR fails (fallback)
                             chrome.runtime.sendMessage({
                                 action: "ASK_AI",
-                                // SECURITY: API keys are retrieved from storage in background.js
                                 model: currentModel,
                                 base64Image: croppedBase64
                             }, handleResponse);
@@ -455,7 +447,7 @@ async function handleResponse(apiResponse) {
         ui.initialUserMessage = apiResponse.initialUserMessage;
         // Store base64 image for compare windows (vision models need this)
         ui.initialBase64Image = apiResponse.base64Image || null;
-        
+
         // Update local demo usage cache if demoInfo is returned
         if (apiResponse.demoInfo) {
             updateLocalDemoCache(apiResponse.demoInfo);
@@ -587,7 +579,11 @@ class FloatingChatUI {
     }
 
     close() {
-        // Cleanup bubble drag listeners to prevent memory leaks
+        // Cleanup drag listeners to prevent memory leaks
+        if (this._dragCleanup) {
+            this._dragCleanup();
+            this._dragCleanup = null;
+        }
         if (this._bubbleCleanup) {
             this._bubbleCleanup();
             this._bubbleCleanup = null;
@@ -900,7 +896,7 @@ class FloatingChatUI {
         });
     }
 
-    addMessage(role, content, modelName = null) {
+    addMessage(role, content, modelName = null, isError = false) {
         // Track model name for assistant messages
         const msgModel = role === 'assistant' ? (modelName || this.currentModel) : null;
 
@@ -933,7 +929,7 @@ class FloatingChatUI {
             msgDiv.style.alignSelf = "flex-end"; msgDiv.style.background = "#3a3a3a"; msgDiv.style.color = "#ececec";
             if (typeof content === 'object' && content.content) {
                 const textPart = Array.isArray(content.content) ? content.content.find(c => c.type === 'text') : { text: content.content };
-                // SECURITY: Use DOM methods instead of innerHTML to prevent XSS
+                // Use DOM methods instead of innerHTML to prevent XSS
                 const em = document.createElement('em');
                 em.textContent = '(Snippet)';
                 msgDiv.appendChild(em);
@@ -998,8 +994,8 @@ class FloatingChatUI {
             regenBtn.onclick = () => this.regenerateLastResponse();
             actionsDiv.appendChild(regenBtn);
 
-            // Retry button for error messages
-            if (content.includes('⚠️') || content.toLowerCase().includes('error')) {
+            // Retry button for error messages (only show if explicitly marked as error)
+            if (isError) {
                 const retryBtn = document.createElement("button");
                 retryBtn.innerHTML = "🔁 Retry";
                 retryBtn.title = "Retry failed request";
@@ -1082,11 +1078,11 @@ class FloatingChatUI {
                     updateLocalDemoCache(response.demoInfo);
                 }
             } else {
-                this.addMessage('assistant', "⚠️ Regenerate failed: " + (response?.error || "Unknown error"), this.currentModel);
+                this.addMessage('assistant', "⚠️ Regenerate failed: " + (response?.error || "Unknown error"), this.currentModel, true);
             }
         } catch (e) {
             loadingDiv.remove();
-            this.addMessage('assistant', "⚠️ Network Error: " + e.message, this.currentModel);
+            this.addMessage('assistant', "⚠️ Network Error: " + e.message, this.currentModel, true);
         }
     }
 
@@ -1155,7 +1151,7 @@ class FloatingChatUI {
                         updateLocalDemoCache(response.demoInfo);
                     }
                 } else {
-                    this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), this.currentModel);
+                    this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), this.currentModel, true);
                 }
             });
         } else {
@@ -1178,12 +1174,12 @@ class FloatingChatUI {
                                 updateLocalDemoCache(response.demoInfo);
                             }
                         } else {
-                            this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), this.currentModel);
+                            this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), this.currentModel, true);
                         }
                     });
                 } else {
                     loadingDiv.remove();
-                    this.addMessage('assistant', "⚠️ OCR failed - no text extracted from image", this.currentModel);
+                    this.addMessage('assistant', "⚠️ OCR failed - no text extracted from image", this.currentModel, true);
                 }
             });
         }
@@ -1272,11 +1268,11 @@ class FloatingChatUI {
                         updateLocalDemoCache(response.demoInfo);
                     }
                 } else {
-                    newUI.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), newUI.currentModel);
+                    newUI.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), newUI.currentModel, true);
                 }
             } catch (e) {
                 loadingDiv.remove();
-                newUI.addMessage('assistant', "⚠️ Network Error: " + e.message, newUI.currentModel);
+                newUI.addMessage('assistant', "⚠️ Network Error: " + e.message, newUI.currentModel, true);
             }
         }
     }
@@ -1333,11 +1329,11 @@ class FloatingChatUI {
                     updateLocalDemoCache(response.demoInfo);
                 }
             } else {
-                this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), modelToUse);
+                this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), modelToUse, true);
             }
         } catch (e) {
             loadingDiv.remove();
-            this.addMessage('assistant', "⚠️ Network Error: " + e.message, modelToUse);
+            this.addMessage('assistant', "⚠️ Network Error: " + e.message, modelToUse, true);
         }
         onResponseReceived();
     }
@@ -1361,20 +1357,30 @@ class FloatingChatUI {
             offsetY = e.clientY - rect.top;
         });
 
-        document.addEventListener('mousemove', (e) => {
+        // Use named functions for proper cleanup
+        const onMouseMove = (e) => {
             if (isDragging) {
                 e.preventDefault();
                 this.container.style.left = (e.clientX - offsetX) + "px";
                 this.container.style.top = (e.clientY - offsetY) + "px";
             }
-        });
+        };
 
-        document.addEventListener('mouseup', () => {
+        const onMouseUp = () => {
             if (isDragging) {
                 isDragging = false;
                 this.saveState();
             }
-        });
+        };
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+
+        // Store cleanup function to prevent memory leaks
+        this._dragCleanup = () => {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        };
     }
 
     saveState() {
@@ -1390,6 +1396,10 @@ class FloatingChatUI {
     }
 
     loadState() {
+        // Set flag immediately to prevent autoPositionWindow race condition
+        // (autoPositionWindow uses setTimeout(50ms) which may fire before async callback)
+        this.hasSavedPosition = true; // Assume saved until proven otherwise
+
         chrome.storage.local.get(['chatWinState'], (res) => {
             if (res.chatWinState) {
                 const s = res.chatWinState;
@@ -1402,14 +1412,12 @@ class FloatingChatUI {
 
                 if (s.width) this.container.style.width = s.width + "px";
                 if (s.height) this.container.style.height = s.height + "px";
-
-                this.hasSavedPosition = true;
             } else {
-                // Default to top-right corner
+                // No saved state - mark as false and set default position
+                this.hasSavedPosition = false;
                 this.container.style.top = "50px";
                 this.container.style.right = "50px";
                 this.container.style.left = "auto";
-                this.hasSavedPosition = false;
             }
         });
     }

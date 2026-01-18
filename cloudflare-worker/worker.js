@@ -1,7 +1,5 @@
-// Snip & Ask Guest Mode - Anti-Abuse Worker with API Key Rotation
+// Snip & Ask Guest Mode - Anti-Abuse Worker with Role-Based Access
 // Deploy: wrangler deploy
-//
-// SECURITY: Never log API keys or secrets! Keep console.log statements generic.
 
 export default {
     async fetch(request, env) {
@@ -19,12 +17,7 @@ export default {
             return jsonResponse({ error: 'Method not allowed' }, 405, corsHeaders);
         }
 
-        // =================================================================
-        // SECURITY: Origin Validation via Extension ID
-        // After publishing your extension, set ALLOWED_EXTENSION_ID in
-        // Cloudflare Dashboard > Workers > Settings > Variables
-        // to your Chrome extension ID (e.g., "abcdefghijklmnopqrstuvwxyz123456")
-        // =================================================================
+        // Origin validation via Extension ID
         if (env.ALLOWED_EXTENSION_ID) {
             const providedExtId = request.headers.get('X-Extension-Id');
             if (providedExtId !== env.ALLOWED_EXTENSION_ID) {
@@ -52,26 +45,31 @@ export default {
                 }, 400, corsHeaders);
             }
 
-            // Configuration
-            const VELOCITY_LIMIT = parseInt(env.VELOCITY_LIMIT || '10');
+            // Fallback limits (used if roles table query fails)
+            const DEFAULT_VELOCITY_LIMIT = parseInt(env.VELOCITY_LIMIT || '10');
+            const DEFAULT_DAILY_LIMIT = parseInt(env.HARD_CAP_DAILY || '100');
             const VELOCITY_WINDOW_SECONDS = parseInt(env.VELOCITY_WINDOW || '60');
-            const HARD_CAP_DAILY = parseInt(env.HARD_CAP_DAILY || '100');
 
             // =================================================================
-            // STEP 0: Ensure user exists, get or create
+            // STEP 0: Get or create user with role info
             // =================================================================
-            let user = await env.DB.prepare(
-                'SELECT * FROM users WHERE client_uuid = ?'
-            ).bind(clientUuid).first();
+            let user = await env.DB.prepare(`
+                SELECT u.*, r.name as role_name, r.daily_limit, r.velocity_limit 
+                FROM users u 
+                JOIN roles r ON u.role_id = r.id 
+                WHERE u.client_uuid = ?
+            `).bind(clientUuid).first();
 
             if (!user) {
-                // Check if fingerprint already has a user (different UUID, same device)
-                const existingByFingerprint = await env.DB.prepare(
-                    'SELECT * FROM users WHERE device_fingerprint = ? LIMIT 1'
-                ).bind(deviceFingerprint).first();
+                // Check if fingerprint is banned under different UUID
+                const existingByFingerprint = await env.DB.prepare(`
+                    SELECT u.*, r.name as role_name 
+                    FROM users u 
+                    JOIN roles r ON u.role_id = r.id 
+                    WHERE u.device_fingerprint = ? LIMIT 1
+                `).bind(deviceFingerprint).first();
 
-                if (existingByFingerprint?.is_banned) {
-                    // Device is banned under different UUID
+                if (existingByFingerprint?.role_name === 'banned') {
                     return jsonResponse({
                         error: 'Access denied',
                         code: 'BANNED',
@@ -79,20 +77,29 @@ export default {
                     }, 403, corsHeaders);
                 }
 
-                // Create new user
+                // Create new user with default guest role (id = 1)
                 await env.DB.prepare(
-                    'INSERT INTO users (client_uuid, device_fingerprint) VALUES (?, ?)'
+                    'INSERT INTO users (client_uuid, device_fingerprint, role_id) VALUES (?, ?, 1)'
                 ).bind(clientUuid, deviceFingerprint).run();
 
-                user = { client_uuid: clientUuid, device_fingerprint: deviceFingerprint, is_banned: 0 };
+                // Fetch the newly created user with role info
+                user = await env.DB.prepare(`
+                    SELECT u.*, r.name as role_name, r.daily_limit, r.velocity_limit 
+                    FROM users u 
+                    JOIN roles r ON u.role_id = r.id 
+                    WHERE u.client_uuid = ?
+                `).bind(clientUuid).first();
             }
 
-            const fingerprint = user.device_fingerprint;
+            const userId = user.id;
+            const roleName = user.role_name;
+            const dailyLimit = user.daily_limit ?? DEFAULT_DAILY_LIMIT;
+            const velocityLimit = user.velocity_limit ?? DEFAULT_VELOCITY_LIMIT;
 
             // =================================================================
-            // CHECK 1: Global Ban
+            // CHECK 1: Role-based ban check
             // =================================================================
-            if (user.is_banned) {
+            if (roleName === 'banned') {
                 return jsonResponse({
                     error: 'Access denied',
                     code: 'BANNED',
@@ -101,45 +108,52 @@ export default {
             }
 
             // =================================================================
-            // CHECK 2: Velocity (Speed) Detection
+            // CHECK 2: Skip limits for admin role
             // =================================================================
-            const velocityWindow = new Date(Date.now() - VELOCITY_WINDOW_SECONDS * 1000).toISOString();
-            const recentRequests = await env.DB.prepare(
-                'SELECT COUNT(*) as count FROM request_log WHERE device_fingerprint = ? AND requested_at > ?'
-            ).bind(fingerprint, velocityWindow).first();
+            const isAdmin = dailyLimit === -1 && velocityLimit === -1;
 
-            if (recentRequests?.count >= VELOCITY_LIMIT) {
-                // AUTO-BAN for velocity abuse
-                await env.DB.prepare(
-                    'UPDATE users SET is_banned = 1, ban_reason = ? WHERE device_fingerprint = ?'
-                ).bind('Automated: Too many requests per minute', fingerprint).run();
+            if (!isAdmin) {
+                // =================================================================
+                // CHECK 3: Velocity (Speed) Detection
+                // =================================================================
+                const velocityWindow = new Date(Date.now() - VELOCITY_WINDOW_SECONDS * 1000).toISOString();
+                const recentRequests = await env.DB.prepare(
+                    'SELECT COUNT(*) as count FROM request_log WHERE user_id = ? AND requested_at > ?'
+                ).bind(userId, velocityWindow).first();
 
-                console.log(`AUTO-BAN: ${fingerprint.substring(0, 8)}... for velocity abuse`);
+                if (recentRequests?.count >= velocityLimit) {
+                    // Auto-ban for velocity abuse
+                    await env.DB.prepare(
+                        'UPDATE users SET role_id = 0, ban_reason = ? WHERE id = ?'
+                    ).bind('Automated: Too many requests per minute', userId).run();
 
-                return jsonResponse({
-                    error: 'Rate limit exceeded',
-                    code: 'VELOCITY_BAN',
-                    message: 'Too many requests. Please slow down.'
-                }, 429, corsHeaders);
-            }
+                    console.log(`AUTO-BAN: User ${userId} for velocity abuse`);
 
-            // =================================================================
-            // CHECK 3: Hard Cap (Daily Limit for Wallet Safety)
-            // =================================================================
-            const today = new Date().toISOString().split('T')[0];
-            const dailyUsage = await env.DB.prepare(
-                'SELECT usage_count FROM daily_usage WHERE device_fingerprint = ? AND usage_date = ?'
-            ).bind(fingerprint, today).first();
+                    return jsonResponse({
+                        error: 'Rate limit exceeded',
+                        code: 'VELOCITY_BAN',
+                        message: 'Too many requests. Please slow down.'
+                    }, 429, corsHeaders);
+                }
 
-            const currentUsage = dailyUsage?.usage_count || 0;
-            const incrementBy = parallelCount > 0 ? parallelCount : 1;
+                // =================================================================
+                // CHECK 4: Daily Limit
+                // =================================================================
+                const today = new Date().toISOString().split('T')[0];
+                const dailyUsage = await env.DB.prepare(
+                    'SELECT usage_count FROM daily_usage WHERE user_id = ? AND usage_date = ?'
+                ).bind(userId, today).first();
 
-            if (currentUsage + incrementBy > HARD_CAP_DAILY) {
-                return jsonResponse({
-                    error: 'Daily limit reached',
-                    code: 'HARD_CAP',
-                    message: 'You\'ve reached the daily limit. Please try again tomorrow or get your own free API key at console.groq.com!'
-                }, 429, corsHeaders);
+                const currentUsage = dailyUsage?.usage_count || 0;
+                const incrementBy = parallelCount > 0 ? parallelCount : 1;
+
+                if (currentUsage + incrementBy > dailyLimit) {
+                    return jsonResponse({
+                        error: 'Daily limit reached',
+                        code: 'HARD_CAP',
+                        message: 'You\'ve reached the daily limit. Please try again tomorrow or get your own free API key at console.groq.com!'
+                    }, 429, corsHeaders);
+                }
             }
 
             // =================================================================
@@ -148,8 +162,8 @@ export default {
 
             // Log this request for velocity tracking
             await env.DB.prepare(
-                'INSERT INTO request_log (device_fingerprint) VALUES (?)'
-            ).bind(fingerprint).run();
+                'INSERT INTO request_log (user_id) VALUES (?)'
+            ).bind(userId).run();
 
             // Prepare request body (remove _meta)
             const groqBody = { ...body };
@@ -181,7 +195,6 @@ export default {
                         body: JSON.stringify(groqBody)
                     });
 
-                    // If not rate limited, use this response
                     if (groqResponse.status !== 429) {
                         break;
                     }
@@ -202,24 +215,26 @@ export default {
                 }, 503, corsHeaders);
             }
 
-            // Update usage on success
-            if (groqResponse.ok && parallelCount > 0) {
-                await env.DB.prepare(`
-                    INSERT INTO daily_usage (device_fingerprint, usage_date, usage_count)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(device_fingerprint, usage_date) 
-                    DO UPDATE SET usage_count = usage_count + ?
-                `).bind(fingerprint, today, incrementBy, incrementBy).run();
+            // Update usage on success (skip for admin)
+            if (groqResponse.ok && parallelCount > 0 && !isAdmin) {
+                const today = new Date().toISOString().split('T')[0];
+                const incrementBy = parallelCount > 0 ? parallelCount : 1;
 
-                // Update last seen
-                await env.DB.prepare(
-                    'UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE device_fingerprint = ?'
-                ).bind(fingerprint).run();
+                await env.DB.prepare(`
+                    INSERT INTO daily_usage (user_id, usage_date, usage_count)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(user_id, usage_date) 
+                    DO UPDATE SET usage_count = usage_count + ?
+                `).bind(userId, today, incrementBy, incrementBy).run();
             }
+
+            // Update last seen
+            await env.DB.prepare(
+                'UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?'
+            ).bind(userId).run();
 
             const responseData = await groqResponse.json();
 
-            // Add minimal metadata (no limits shown to user)
             return jsonResponse({
                 ...responseData,
                 _guest: { ok: true }
@@ -241,7 +256,6 @@ function jsonResponse(data, status, corsHeaders) {
 
 // Cleanup old request logs (run periodically via cron trigger)
 export async function scheduled(event, env, ctx) {
-    // Delete request logs older than 1 hour
     const cutoff = new Date(Date.now() - 3600 * 1000).toISOString();
     await env.DB.prepare(
         'DELETE FROM request_log WHERE requested_at < ?'
