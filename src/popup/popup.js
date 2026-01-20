@@ -29,6 +29,10 @@ const ALL_MODELS = {
   groq: [
     { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout (Vision)' },
     { value: 'meta-llama/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick (Vision)' },
+    { value: 'moonshotai/kimi-k2-instruct', name: 'Kimi k2 Instruct' },
+    { value: 'moonshotai/kimi-k2-instruct-0905', name: 'Kimi k2 Instruct (0905)' },
+    { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
+    { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B' },
     { value: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (Text)' },
     { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B (Text)' }
   ],
