@@ -1,39 +1,42 @@
--- Snip & Ask Guest Mode Database Schema
--- Version 2.0 - Role-Based Access Control
-
--- Clean slate (drop in reverse dependency order)
-DROP TABLE IF EXISTS request_log;
-DROP TABLE IF EXISTS daily_usage;
+-- =================================================================
+-- CLEAN SLATE (Drop existing tables)
+-- =================================================================
+DROP TABLE IF EXISTS usage_stats;
+DROP TABLE IF EXISTS velocity_events;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS roles;
+-- Cleanup old legacy tables (V1/V2 schema)
+DROP TABLE IF EXISTS request_log;
+DROP TABLE IF EXISTS daily_usage;
 
 -- =================================================================
 -- ROLES TABLE
--- Defines access levels and their limits. Add new roles here.
--- Use -1 for unlimited (admin bypass).
+-- Defines access levels. IDs are human-readable text.
 -- =================================================================
 CREATE TABLE roles (
-    id INTEGER PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL,
+    id TEXT PRIMARY KEY,
     daily_limit INTEGER NOT NULL,
     velocity_limit INTEGER NOT NULL,
     description TEXT
 );
 
-INSERT INTO roles (id, name, daily_limit, velocity_limit, description) VALUES
-    (0, 'banned', 0, 0, 'Blocked from all access'),
-    (1, 'guest', 100, 10, 'Default free tier'),
-    (2, 'admin', -1, -1, 'Unlimited access, bypasses all checks');
+INSERT INTO roles (id, daily_limit, velocity_limit, description) VALUES
+    ('banned', 0, 0, 'Blocked from all access'),
+    ('guest', 100, 10, 'Default free tier'),
+    ('admin', -1, -1, 'Unlimited access');
 
 -- =================================================================
 -- USERS TABLE
--- Each unique client_uuid gets one record. role_id determines access.
+-- Tracks clients. 'user_id' is internal integer for speed/references.
+-- 'custom_*_limit' allows overriding roles for specific people (e.g. friends).
 -- =================================================================
 CREATE TABLE users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_uuid TEXT UNIQUE NOT NULL,
     device_fingerprint TEXT NOT NULL,
-    role_id INTEGER DEFAULT 1,
+    role_id TEXT DEFAULT 'guest',
+    custom_daily_limit INTEGER,
+    custom_velocity_limit INTEGER,
     ban_reason TEXT,
     notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -42,36 +45,32 @@ CREATE TABLE users (
 );
 
 -- =================================================================
--- REQUEST LOG
--- Tracks individual requests for velocity (speed) detection.
--- Cleaned up periodically by scheduled worker.
+-- VELOCITY EVENTS (Formerly request_log)
+-- Transient log for speed limit checks. 
+-- CLEARED HOURLY.
 -- =================================================================
-CREATE TABLE request_log (
+CREATE TABLE velocity_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
 -- =================================================================
--- DAILY USAGE
--- Tracks daily request count per user for quota enforcement.
+-- USAGE STATS (Formerly daily_usage)
+-- Tracks daily limits.
+-- CLEARED DAILY.
 -- =================================================================
-CREATE TABLE daily_usage (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    usage_date DATE NOT NULL,
+CREATE TABLE usage_stats (
+    user_id INTEGER PRIMARY KEY,
     usage_count INTEGER DEFAULT 0,
-    last_used_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, usage_date),
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
 -- =================================================================
 -- INDEXES
--- Critical for query performance.
+-- Essential for performance and grouping.
 -- =================================================================
 CREATE INDEX IF NOT EXISTS idx_users_uuid ON users(client_uuid);
 CREATE INDEX IF NOT EXISTS idx_users_fingerprint ON users(device_fingerprint);
-CREATE INDEX IF NOT EXISTS idx_logs_user_time ON request_log(user_id, requested_at);
-CREATE INDEX IF NOT EXISTS idx_usage_user_date ON daily_usage(user_id, usage_date);
+CREATE INDEX IF NOT EXISTS idx_velocity_user_time ON velocity_events(user_id, requested_at);

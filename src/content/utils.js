@@ -21,8 +21,14 @@ function parseMarkdown(text) {
 
   // Extract code blocks first to avoid messing up their internal formatting
   text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
-    // Note: Inline styles are used here because content scripts cannot easily load external CSS files into Shadow DOM
-    codeBlocks.push(`<pre style="background: #0d0d0d; color: #cccccc; padding: 10px; border-radius: 6px; overflow-x: auto; border: 1px solid #333; font-family: 'Consolas', monospace; margin: 10px 0;"><code>${escapeHtml(code.trim())}</code></pre>`);
+    const langLabel = lang ? `<span style="position: absolute; top: 6px; left: 10px; font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 0.5px;">${lang}</span>` : '';
+    codeBlocks.push(`<pre style="position: relative; background: linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 100%); color: #e0e0e0; padding: ${lang ? '28px' : '12px'} 14px 12px 14px; border-radius: 8px; overflow-x: auto; border: 1px solid #2a2a2a; font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; margin: 12px 0; font-size: 12px; line-height: 1.5; box-shadow: inset 0 1px 3px rgba(0,0,0,0.3);">${langLabel}<code style="font-family: inherit;">${escapeHtml(code.trim())}</code></pre>`);
+    return `${placeholderPrefix}${codeBlocks.length - 1}\x00`;
+  });
+
+  // Also handle inline code blocks (single backticks on same line) before escaping
+  text = text.replace(/```([\s\S]*?)```/g, (match, code) => {
+    codeBlocks.push(`<pre style="background: linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 100%); color: #e0e0e0; padding: 12px 14px; border-radius: 8px; overflow-x: auto; border: 1px solid #2a2a2a; font-family: 'JetBrains Mono', 'Consolas', monospace; margin: 12px 0; font-size: 12px; line-height: 1.5;"><code>${escapeHtml(code.trim())}</code></pre>`);
     return `${placeholderPrefix}${codeBlocks.length - 1}\x00`;
   });
 
@@ -30,29 +36,98 @@ function parseMarkdown(text) {
   const placeholderRegex = new RegExp(`(${placeholderPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\d+\x00)|([\\s\\S]+?)(?=${placeholderPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|$)`, 'g');
 
   // Escape HTML in remaining text to prevent XSS
-  // But preserve code block placeholders (which now use unique tokens)
   text = text.replace(placeholderRegex, (match, codeBlock, normalText) => {
     if (codeBlock) return codeBlock;
     return escapeHtml(normalText || '');
   });
 
-  // Highlight the "Answer" label specifically (now safe after escaping)
-  text = text.replace(/\*\*Answer:\*\*/g, '<strong style="color: #f55036; font-size: 1.1em;">✓ Answer:</strong>');
+  // Highlight the "Answer" label specifically
+  text = text.replace(/\*\*Answer:\*\*/g, '<span style="display: inline-flex; align-items: center; gap: 6px; color: #4ade80; font-weight: 600; font-size: 1.05em;"><span style="background: #22543d; padding: 2px 6px; border-radius: 4px;">✓</span> Answer:</span>');
 
   // Build restoration regex for this specific parse session
   const restoreRegex = new RegExp(`${placeholderPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)\x00`, 'g');
 
   // Parse standard Markdown syntax
-  return text
-    .replace(/^#### (.*$)/gim, '<h4 style="margin: 10px 0 5px 0; color: #f55036; font-size: 13px;">$1</h4>')
-    .replace(/^### (.*$)/gim, '<h3 style="margin: 15px 0 8px 0; color: #ff8c73; font-size: 14px;">$1</h3>')
-    .replace(/^## (.*$)/gim, '<h2 style="margin: 20px 0 10px 0; color: #f55036; font-size: 16px; border-bottom: 1px solid #333; padding-bottom: 5px;">$1</h2>')
-    .replace(/\*\*(.*?)\*\*/gim, '<b style="color: #ff8c73;">$1</b>')
-    .replace(/\*(.*?)\*/gim, '<i>$1</i>')
-    .replace(/`(.*?)`/gim, '<code style="background:#333; padding:2px 4px; border-radius:3px; color:#dcdcaa; font-family: monospace;">$1</code>')
-    .replace(/\n/g, '<br>')
-    // Restore code blocks using session-specific token
-    .replace(restoreRegex, (match, index) => codeBlocks[index]);
+  text = text
+    // Headers with improved styling
+    .replace(/^#### (.*$)/gim, '<h4 style="margin: 14px 0 8px 0; color: #94a3b8; font-size: 13px; font-weight: 600; letter-spacing: 0.3px;">$1</h4>')
+    .replace(/^### (.*$)/gim, '<h3 style="margin: 16px 0 10px 0; color: #e2e8f0; font-size: 14px; font-weight: 600;">$1</h3>')
+    .replace(/^## (.*$)/gim, '<h2 style="margin: 20px 0 12px 0; color: #f8fafc; font-size: 16px; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;">$1</h2>')
+    .replace(/^# (.*$)/gim, '<h1 style="margin: 22px 0 14px 0; color: #f8fafc; font-size: 18px; font-weight: 700; border-bottom: 2px solid #f55036; padding-bottom: 8px;">$1</h1>')
+    // Horizontal rules
+    .replace(/^---$/gim, '<hr style="border: none; height: 1px; background: linear-gradient(90deg, transparent, #444, transparent); margin: 16px 0;">')
+    .replace(/^\*\*\*$/gim, '<hr style="border: none; height: 1px; background: linear-gradient(90deg, transparent, #444, transparent); margin: 16px 0;">')
+    // Blockquotes with improved styling
+    .replace(/^&gt;\s?(.*)$/gim, '<blockquote style="border-left: 3px solid #f55036; margin: 12px 0; padding: 8px 16px; color: #a1a1aa; background: linear-gradient(90deg, rgba(245, 80, 54, 0.08), transparent); border-radius: 0 6px 6px 0; font-style: italic;">$1</blockquote>')
+    // Strikethrough
+    .replace(/~~(.*?)~~/gim, '<del style="color: #71717a; text-decoration: line-through;">$1</del>')
+    // Links (after HTML escaping, so we look for escaped URLs)
+    .replace(/\[(.*?)\]\((https?:\/\/[^\s)]+)\)/gim, '<a href="$2" target="_blank" rel="noopener" style="color: #60a5fa; text-decoration: none; border-bottom: 1px dotted #60a5fa;">$1</a>')
+    // Bold with accent color
+    .replace(/\*\*(.*?)\*\*/gim, '<strong style="color: #f0f0f0; font-weight: 600;">$1</strong>')
+    // Italic
+    .replace(/\*(.*?)\*/gim, '<em style="color: #d4d4d8;">$1</em>')
+    // Inline code with improved styling
+    .replace(/`(.*?)`/gim, '<code style="background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; color: #fbbf24; font-family: \'JetBrains Mono\', monospace; font-size: 0.9em; border: 1px solid rgba(255,255,255,0.06);">$1</code>');
+
+  // Process lists with improved bullet styling
+  const lines = text.split('\n');
+  let inList = false;
+  let listType = null;
+  const processedLines = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const ulMatch = line.match(/^[\*\-\+]\s+(.*)$/);
+    const olMatch = line.match(/^\d+\.\s+(.*)$/);
+
+    if (ulMatch) {
+      if (!inList || listType !== 'ul') {
+        if (inList) processedLines.push(listType === 'ul' ? '</ul>' : '</ol>');
+        processedLines.push('<ul style="margin: 10px 0; padding-left: 8px; list-style: none;">');
+        inList = true;
+        listType = 'ul';
+      }
+      // Custom bullet point with accent color
+      processedLines.push(`<li style="margin: 6px 0; padding-left: 20px; position: relative; color: #e4e4e7; line-height: 1.6;"><span style="position: absolute; left: 0; color: #f55036; font-weight: bold;">•</span>${ulMatch[1]}</li>`);
+    } else if (olMatch) {
+      if (!inList || listType !== 'ol') {
+        if (inList) processedLines.push(listType === 'ul' ? '</ul>' : '</ol>');
+        processedLines.push('<ol style="margin: 10px 0; padding-left: 8px; list-style: none; counter-reset: item;">');
+        inList = true;
+        listType = 'ol';
+      }
+      // Custom numbered list with accent color
+      processedLines.push(`<li style="margin: 6px 0; padding-left: 24px; position: relative; color: #e4e4e7; line-height: 1.6; counter-increment: item;"><span style="position: absolute; left: 0; color: #f55036; font-weight: 600; font-size: 0.9em;"></span>${olMatch[1]}</li>`);
+    } else {
+      if (inList) {
+        processedLines.push(listType === 'ul' ? '</ul>' : '</ol>');
+        inList = false;
+        listType = null;
+      }
+      processedLines.push(line);
+    }
+  }
+
+  if (inList) {
+    processedLines.push(listType === 'ul' ? '</ul>' : '</ol>');
+  }
+
+  text = processedLines.join('\n');
+
+  // Convert newlines to breaks, but be smarter about paragraph spacing
+  text = text.replace(/\n\n+/g, '</p><p style="margin: 12px 0;">');
+  text = text.replace(/\n/g, '<br>');
+
+  // Clean up breaks around block elements
+  text = text.replace(/<br>(<\/?(?:ul|ol|li|h[1-6]|blockquote|pre|hr|p))/gi, '$1');
+  text = text.replace(/(<\/(?:ul|ol|li|h[1-6]|blockquote|pre|hr|p)>)<br>/gi, '$1');
+
+  // Restore code blocks
+  text = text.replace(restoreRegex, (match, index) => codeBlocks[index]);
+
+  // Wrap in a styled container for consistent typography
+  return `<div style="font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; line-height: 1.65; color: #d4d4d8;">${text}</div>`;
 }
 
 // --- Image Processing ---
