@@ -228,7 +228,8 @@ function loadModels(enabledProviders, enabledModels, selectedModel) {
   modelSelect.innerHTML = '';
 
   // In guest mode, only show Groq models (ignore user's provider settings)
-  const providersToShow = isGuestModeActive
+  // CRITICAL: Force guests to only see Groq provider regardless of their settings
+  const providersToShow = isGuestModeActive === true
     ? { groq: true, google: false, openrouter: false, ollama: false }
     : enabledProviders;
 

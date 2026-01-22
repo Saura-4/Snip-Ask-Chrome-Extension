@@ -503,9 +503,28 @@ function showErrorToast(message) {
 }
 
 // 5. HELPER: Text Sanitizer
+// 5. HELPER: Text Sanitizer
 function sanitizeModelText(rawText) {
     if (!rawText) return rawText;
-    const lines = rawText.split('\n');
+
+    let text = rawText;
+
+    // Strip <think>...</think> blocks from Qwen/DeepSeek models (including multiline)
+    text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+    // Strip incomplete/unclosed thinking tags (model started but didn't finish thinking)
+    text = text.replace(/<think>[\s\S]*$/gi, '').trim();
+
+    // Strip malformed JSON artifacts like "<? {}" or "<?{...}"
+    text = text.replace(/<\?\s*\{[^}]*\}?\s*/gi, '').trim();
+
+    // Strip other potential model artifacts
+    text = text.replace(/<\|.*?\|>/g, '').trim(); // DeepSeek special tokens
+    text = text.replace(/\[INST\][\s\S]*?\[\/INST\]/gi, '').trim(); // Llama instruction tokens
+    text = text.replace(/<\|im_start\|>[\s\S]*?<\|im_end\|>/gi, '').trim(); // ChatML tokens
+
+    // Handle "Corrected text:" prefix (original logic)
+    const lines = text.split('\n');
     if (lines[0].match(/^\s*Corrected text\s*:/i)) {
         const corrected = lines[0].replace(/^\s*Corrected text\s*:\s*/i, '').trim();
         if (corrected.length < 60) {
@@ -514,7 +533,8 @@ function sanitizeModelText(rawText) {
         const trimmed = corrected.length > 200 ? corrected.slice(0, 200) + '…' : corrected;
         return ("Corrected text: " + trimmed + "\n" + lines.slice(1).join('\n')).trim();
     }
-    return rawText;
+
+    return text;
 }
 
 // 6. UI CLASS (Robust State Management)
@@ -537,9 +557,16 @@ class FloatingChatUI {
 
     async initModel() {
         const result = await new Promise(resolve => {
-            chrome.storage.local.get(['selectedModel', 'enabledProviders', 'enabledModels'], resolve);
+            chrome.storage.local.get(['selectedModel', 'enabledProviders', 'enabledModels', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost'], resolve);
         });
         this.currentModel = result.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+        // Check if user is in guest mode (no API keys configured)
+        const hasGroqKey = result.groqKey && result.groqKey.trim().length > 0;
+        const hasGeminiKey = result.geminiKey && result.geminiKey.trim().length > 0;
+        const hasOpenRouterKey = result.openrouterKey && result.openrouterKey.trim().length > 0;
+        const hasOllamaHost = result.ollamaHost && result.ollamaHost.trim().length > 0;
+        const isGuestMode = !hasGroqKey && !hasGeminiKey && !hasOpenRouterKey && !hasOllamaHost;
 
         // Build available models list from enabled providers
         const ALL_MODELS = {
@@ -563,17 +590,29 @@ class FloatingChatUI {
             ]
         };
 
-        const enabledProviders = result.enabledProviders || { groq: true };
+        // In guest mode, force only Groq provider regardless of user settings
+        const enabledProviders = isGuestMode
+            ? { groq: true, google: false, openrouter: false, ollama: false }
+            : (result.enabledProviders || { groq: true });
         const enabledModels = result.enabledModels || {};
 
         this.availableModels = [];
         for (const [provider, models] of Object.entries(ALL_MODELS)) {
             if (enabledProviders[provider]) {
                 models.forEach(m => {
-                    if (enabledModels[m.value] !== false) {
+                    // In guest mode, show ALL Groq models; otherwise respect user's model settings
+                    if (isGuestMode || enabledModels[m.value] !== false) {
                         this.availableModels.push(m);
                     }
                 });
+            }
+        }
+
+        // If in guest mode and current model is not a Groq model, auto-select first Groq model
+        if (isGuestMode && this.availableModels.length > 0) {
+            const isCurrentModelGroq = this.availableModels.some(m => m.value === this.currentModel);
+            if (!isCurrentModelGroq) {
+                this.currentModel = this.availableModels[0].value;
             }
         }
     }
@@ -923,27 +962,40 @@ class FloatingChatUI {
         this.chatHistory.push({ role: role, content: historyContent, model: msgModel });
 
         const msgDiv = document.createElement("div");
-        msgDiv.style.cssText = `max-width: 90%; padding: 10px 12px; border-radius: 8px; line-height: 1.5; word-wrap: break-word; font-size: 13px;`;
+        msgDiv.style.cssText = `max-width: 90%; padding: 12px 16px; border-radius: 8px; line-height: 1.6; word-wrap: break-word; font-size: 13.5px; position: relative; transition: all 0.2s ease;`;
 
         if (role === 'user') {
-            msgDiv.style.alignSelf = "flex-end"; msgDiv.style.background = "#3a3a3a"; msgDiv.style.color = "#ececec";
+            msgDiv.style.alignSelf = "flex-end";
+            msgDiv.style.background = "linear-gradient(135deg, #3a3a3a 0%, #2d2d2d 100%)";
+            msgDiv.style.color = "#ececec";
+            msgDiv.style.borderRadius = "12px 12px 4px 12px";
+            msgDiv.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
+
             if (typeof content === 'object' && content.content) {
                 const textPart = Array.isArray(content.content) ? content.content.find(c => c.type === 'text') : { text: content.content };
                 // Use DOM methods instead of innerHTML to prevent XSS
                 const em = document.createElement('em');
                 em.textContent = '(Snippet)';
+                em.style.opacity = "0.7";
+                em.style.fontSize = "0.9em";
                 msgDiv.appendChild(em);
                 msgDiv.appendChild(document.createElement('br'));
-                msgDiv.appendChild(document.createTextNode(textPart ? textPart.text : ''));
+                const textSpan = document.createElement('span');
+                textSpan.textContent = textPart ? textPart.text : '';
+                msgDiv.appendChild(textSpan);
             } else { msgDiv.innerText = content; }
         } else {
-            msgDiv.style.alignSelf = "flex-start"; msgDiv.style.background = "#2d2d2d"; msgDiv.style.borderLeft = "3px solid #f55036";
+            msgDiv.style.alignSelf = "flex-start";
+            msgDiv.style.background = "linear-gradient(135deg, #252525 0%, #1e1e1e 100%)";
+            msgDiv.style.borderLeft = "3px solid #f55036";
+            msgDiv.style.borderRadius = "4px 12px 12px 12px";
+            msgDiv.style.boxShadow = "0 3px 8px rgba(0,0,0,0.2)";
 
             // Add model label for assistant messages
             const modelLabel = this._getModelDisplayName(msgModel);
             const labelDiv = document.createElement("div");
-            labelDiv.style.cssText = "font-size: 10px; color: #888; margin-bottom: 6px; font-weight: 500;";
-            labelDiv.textContent = `🤖 ${modelLabel}`;
+            labelDiv.style.cssText = "font-size: 10px; color: #f55036; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; display: inline-flex; align-items: center; gap: 4px; background: rgba(245, 80, 54, 0.1); padding: 2px 6px; border-radius: 4px;";
+            labelDiv.innerHTML = `<span style="font-size: 11px;">✨</span> ${modelLabel}`;
             msgDiv.appendChild(labelDiv);
 
             const contentDiv = document.createElement("div");
@@ -954,52 +1006,90 @@ class FloatingChatUI {
 
             const codeBlocks = msgDiv.querySelectorAll("pre");
             codeBlocks.forEach(pre => {
-                pre.style.position = "relative";
                 const btn = document.createElement("button");
-                btn.innerText = "Copy";
-                btn.style.cssText = `position: absolute; top: 5px; right: 5px; background: #f55036; color: white; border: none; border-radius: 3px; font-size: 10px; padding: 3px 8px; cursor: pointer; opacity: 0.9;`;
+                btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> Copy`;
+                btn.style.cssText = `position: absolute; top: 8px; right: 8px; background: rgba(255,255,255,0.08); color: #ccc; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; font-size: 10px; padding: 4px 8px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 4px; backdrop-filter: blur(4px);`;
+
+                btn.onmouseenter = () => { btn.style.background = "rgba(255,255,255,0.15)"; btn.style.color = "white"; };
+                btn.onmouseleave = () => { btn.style.background = "rgba(255,255,255,0.08)"; btn.style.color = "#ccc"; };
+
                 btn.onclick = () => {
-                    // Use textContent from <code> element specifically (more reliable than innerText)
-                    // This avoids including button text and preserves formatting better
                     const codeEl = pre.querySelector("code");
                     const codeText = codeEl ? codeEl.textContent : pre.textContent.replace(/^Copy$|^Copied!$/gm, '').trim();
-                    navigator.clipboard.writeText(codeText).then(() => { btn.innerText = "Copied!"; setTimeout(() => btn.innerText = "Copy", 2000); });
+                    navigator.clipboard.writeText(codeText).then(() => {
+                        btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!`;
+                        btn.style.borderColor = "#4ade80";
+                        btn.style.color = "#4ade80";
+                        setTimeout(() => {
+                            btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> Copy`;
+                            btn.style.borderColor = "rgba(255,255,255,0.1)";
+                            btn.style.color = "#ccc";
+                        }, 2000);
+                    });
                 };
                 pre.appendChild(btn);
             });
 
-            // Action buttons for assistant messages (Copy Response, Regenerate)
+            // Action buttons container
             const actionsDiv = document.createElement("div");
-            actionsDiv.style.cssText = "display: flex; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #3a3a3a;";
+            actionsDiv.style.cssText = "display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08);";
+
+            // Helper to style buttons
+            const createActionButton = (text, icon, title, isPrimary = false) => {
+                const btn = document.createElement("button");
+                btn.innerHTML = `${icon} ${text}`;
+                btn.title = title;
+                btn.style.cssText = `
+                    background: ${isPrimary ? 'rgba(245, 80, 54, 0.15)' : 'rgba(255,255,255,0.05)'}; 
+                    color: ${isPrimary ? '#f55036' : '#9ca3af'}; 
+                    border: 1px solid ${isPrimary ? 'rgba(245, 80, 54, 0.3)' : 'rgba(255,255,255,0.1)'}; 
+                    padding: 4px 10px; 
+                    border-radius: 6px; 
+                    font-size: 11px; 
+                    cursor: pointer; 
+                    transition: all 0.2s;
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;
+                    font-weight: 500;
+                `;
+                btn.onmouseenter = () => {
+                    btn.style.background = isPrimary ? 'rgba(245, 80, 54, 0.25)' : 'rgba(255,255,255,0.1)';
+                    btn.style.color = isPrimary ? '#ff6b52' : '#e5e7eb';
+                };
+                btn.onmouseleave = () => {
+                    btn.style.background = isPrimary ? 'rgba(245, 80, 54, 0.15)' : 'rgba(255,255,255,0.05)';
+                    btn.style.color = isPrimary ? '#f55036' : '#9ca3af';
+                };
+                return btn;
+            };
 
             // Copy entire response button
-            const copyBtn = document.createElement("button");
-            copyBtn.innerHTML = "📋 Copy";
-            copyBtn.title = "Copy entire response";
-            copyBtn.style.cssText = "background: transparent; color: #888; border: 1px solid #444; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;";
+            const copyBtn = createActionButton("Copy", '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>', "Copy entire response");
             copyBtn.onclick = () => {
                 const responseText = contentDiv.textContent;
                 navigator.clipboard.writeText(responseText).then(() => {
-                    copyBtn.innerHTML = "✓ Copied";
-                    setTimeout(() => copyBtn.innerHTML = "📋 Copy", 2000);
+                    const originalHTML = copyBtn.innerHTML;
+                    copyBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied';
+                    copyBtn.style.borderColor = "#4ade80";
+                    copyBtn.style.color = "#4ade80";
+                    setTimeout(() => {
+                        copyBtn.innerHTML = originalHTML;
+                        copyBtn.style.borderColor = "rgba(255,255,255,0.1)";
+                        copyBtn.style.color = "#9ca3af";
+                    }, 2000);
                 });
             };
             actionsDiv.appendChild(copyBtn);
 
             // Regenerate button
-            const regenBtn = document.createElement("button");
-            regenBtn.innerHTML = "🔄 Regenerate";
-            regenBtn.title = "Get a new response";
-            regenBtn.style.cssText = "background: transparent; color: #888; border: 1px solid #444; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;";
+            const regenBtn = createActionButton("Regenerate", '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>', "Get a new response");
             regenBtn.onclick = () => this.regenerateLastResponse();
             actionsDiv.appendChild(regenBtn);
 
-            // Retry button for error messages (only show if explicitly marked as error)
+            // Retry button for error messages
             if (isError) {
-                const retryBtn = document.createElement("button");
-                retryBtn.innerHTML = "🔁 Retry";
-                retryBtn.title = "Retry failed request";
-                retryBtn.style.cssText = "background: #f55036; color: white; border: none; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;";
+                const retryBtn = createActionButton("Retry", '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"></path></svg>', "Retry failed request", true);
                 retryBtn.onclick = () => this.retryLastRequest();
                 actionsDiv.appendChild(retryBtn);
             }
