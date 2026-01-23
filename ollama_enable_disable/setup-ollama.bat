@@ -8,7 +8,7 @@ echo to communicate with your local Ollama instance.
 echo.
 
 :: REPLACE THIS with your actual ID after publishing!
-set "EXTENSION_ID=YOUR_EXTENSION_ID_HERE"
+set "EXTENSION_ID=bhbmfojjmimjpdkebhhipkffjkcglofo"
 
 :: If you are still testing locally, uncomment the line below:
 :: set "EXTENSION_ID=*"
