@@ -2,6 +2,7 @@
 
 import { getAIService } from './ai-service.js';
 import { isGuestMode, isGuestConfigured, makeGuestRequest, GUEST_DEFAULT_MODEL } from './guest-config.js';
+import { getChatWindowModels, checkGuestModeStatus } from './models-config.js';
 
 // --- UTILITIES ---
 
@@ -52,7 +53,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             // Content script not loaded, inject it first
             await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
-                files: ['src/content/utils.js', 'src/content/content.js']
+                files: [
+                    'src/content/utils.js',
+                    'src/content/ui-helpers.js',
+                    'src/content/window-manager.js',
+                    'src/content/snip-selection.js',
+                    'src/content/floating-chat-ui.js',
+                    'src/content/content.js'
+                ]
             });
             await chrome.tabs.sendMessage(tab.id, {
                 action: "SHOW_AI_RESPONSE_FOR_TEXT",
@@ -81,7 +89,14 @@ chrome.commands.onCommand.addListener(async (command) => {
                 // Content script not loaded, inject it first
                 await chrome.scripting.executeScript({
                     target: { tabId: tab.id },
-                    files: ['src/content/utils.js', 'src/content/content.js']
+                    files: [
+                        'src/content/utils.js',
+                        'src/content/ui-helpers.js',
+                        'src/content/window-manager.js',
+                        'src/content/snip-selection.js',
+                        'src/content/floating-chat-ui.js',
+                        'src/content/content.js'
+                    ]
                 });
                 await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP" });
             }
@@ -152,6 +167,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const ocrConfidence = request.ocrConfidence || null;
 
         handleAIRequest(content, type, request.model, sendResponse, ocrConfidence);
+        return true;
+    }
+
+    // --- C2. MULTI-IMAGE AI REQUEST (for compare window) ---
+    if (request.action === "ASK_AI_MULTI_IMAGE") {
+        handleMultiImageRequest(request.images, request.model, request.textContext, sendResponse);
         return true;
     }
 
@@ -317,6 +338,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         })();
         return true;
     }
+
+    // --- I. GET CHAT WINDOW MODELS (centralized model list for content.js) ---
+    if (request.action === "GET_CHAT_WINDOW_MODELS") {
+        (async () => {
+            try {
+                const storage = await getStorage(['enabledProviders', 'enabledModels']);
+                const { isGuestMode: inGuestMode } = await checkGuestModeStatus();
+
+                const enabledProviders = storage.enabledProviders || { groq: true };
+                const enabledModels = storage.enabledModels || {};
+
+                // Get filtered models using centralized logic
+                const models = getChatWindowModels(enabledProviders, enabledModels, inGuestMode);
+
+                sendResponse({
+                    success: true,
+                    models,
+                    isGuestMode: inGuestMode
+                });
+            } catch (err) {
+                sendResponse({ success: false, error: err.message, models: [] });
+            }
+        })();
+        return true;
+    }
 });
 
 // --- AI REQUEST HANDLER ---
@@ -433,6 +479,132 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
             usedOCR: type === 'text',
             ocrConfidence,
             base64Image: type === 'image' ? inputContent : null
+        });
+
+    } catch (error) {
+        sendResponse({
+            success: false,
+            error: error.message || String(error)
+        });
+    }
+}
+
+// --- MULTI-IMAGE REQUEST HANDLER ---
+
+async function handleMultiImageRequest(images, explicitModel, textContext, sendResponse) {
+    try {
+        const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'selectedMode', 'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
+        const mode = storage.selectedMode || storage.interactionMode || 'short';
+
+        let modelName = explicitModel || storage.selectedModel || "meta-llama/llama-4-scout-17b-16e-instruct";
+
+        // CHECK FOR FREE TRIAL MODE
+        const inGuestMode = await isGuestMode();
+
+        if (inGuestMode) {
+            // Guest Mode: use Cloudflare Worker proxy
+            if (!isGuestConfigured()) {
+                throw new Error('Guest Mode is not available. Please add your own API key in the extension popup.');
+            }
+
+            // Force Groq model in demo mode
+            if (!modelName || modelName.startsWith('openrouter:') || modelName.includes('gemini') || modelName.includes('gemma') || modelName.startsWith('ollama:')) {
+                modelName = GUEST_DEFAULT_MODEL;
+            }
+
+            // Build request body with multiple images
+            const messages = [];
+
+            // Add system instruction
+            const customModes = storage.customModes || null;
+            let systemPrompt = 'Analyze the input and provide a helpful response.';
+            if (mode === 'short') systemPrompt = "You are a concise answer engine. Analyze the user's input. If it is a multiple-choice question, output 'Answer: <option>. <explanation>'. For follow-up chat, reply concisely.";
+            else if (mode === 'detailed') systemPrompt = "You are an expert tutor. Analyze the input. Provide a detailed, step-by-step answer. Use Markdown.";
+            else if (mode === 'code') systemPrompt = "You are a code debugger. Correct the code and explain the fix. Output a single fenced code block first.";
+            else if (customModes) {
+                const customMode = customModes.find(m => m.id === mode);
+                if (customMode) systemPrompt = customMode.prompt;
+            }
+
+            messages.push({ role: 'system', content: systemPrompt });
+
+            // Build content array with text and all images
+            const contentArray = [];
+
+            // Add text context first
+            const contextText = textContext || `Analyze these ${images.length} images and provide a helpful response.`;
+            contentArray.push({ type: 'text', text: contextText });
+
+            // Add all images
+            for (const img of images) {
+                contentArray.push({
+                    type: 'image_url',
+                    image_url: { url: `data:image/jpeg;base64,${img}` }
+                });
+            }
+
+            messages.push({ role: 'user', content: contentArray });
+
+            // Make demo request through Cloudflare Worker
+            const guestResponse = await makeGuestRequest({
+                model: modelName,
+                messages: messages,
+                temperature: 0.3,
+                max_tokens: 1024
+            });
+
+            let answer = guestResponse.choices?.[0]?.message?.content || 'No answer returned.';
+
+            // Strip thinking tags from Qwen models
+            answer = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+            const demoInfo = guestResponse._demo || null;
+
+            sendResponse({
+                success: true,
+                answer: answer,
+                initialUserMessage: messages[messages.length - 1],
+                imageCount: images.length,
+                demoInfo: demoInfo
+            });
+            return;
+        }
+
+        // REGULAR MODE: KEY/HOST SELECTION LOGIC
+        let activeKeyOrHost;
+        if (modelName.startsWith('ollama:')) {
+            activeKeyOrHost = storage.ollamaHost || "http://localhost:11434";
+        }
+        else if (modelName.startsWith('openrouter:')) {
+            activeKeyOrHost = storage.openrouterKey;
+        }
+        else if (modelName.includes('gemini') || modelName.includes('gemma')) {
+            activeKeyOrHost = storage.geminiKey;
+        }
+        else {
+            activeKeyOrHost = storage.groqKey;
+        }
+
+        if (!activeKeyOrHost) {
+            throw new Error(`Missing Configuration. Please configure your API keys in the extension popup.`);
+        }
+
+        const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
+
+        // Use askMultiImage if available, otherwise fall back to single image with latest
+        let result;
+        if (typeof aiService.askMultiImage === 'function') {
+            result = await aiService.askMultiImage(images, textContext);
+        } else {
+            // Fallback: use last image only
+            result = await aiService.askImage(images[images.length - 1]);
+        }
+
+        sendResponse({
+            success: true,
+            answer: result.answer,
+            initialUserMessage: result.initialUserMessage,
+            imageCount: images.length
         });
 
     } catch (error) {

@@ -16,64 +16,118 @@
       <h2>⚡ Snip & Ask</h2>
     </div>
 
-    <div id="messageContainer" class="hidden" style="color: #4caf50; text-align: center; margin-bottom: 10px;">
-      Settings saved!
+    <div id="messageContainer" class="message-toast hidden">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M20 6L9 17l-5-5" />
+      </svg>
+      <span>Settings saved!</span>
     </div>
 
-    <!-- Guest Mode Banner (shown only when no API keys configured) -->
+    <!-- Guest Mode Banner -->
     <div id="guestBanner" class="guest-banner hidden">
       <span class="guest-badge">Guest Mode</span>
       <a href="#" id="getOwnKeyLink" class="guest-key-link">Get your own key →</a>
     </div>
 
-    <!-- Primary Action - Snip Button (most important, top of fold) -->
-    <button id="snipBtn">Snip Screen</button>
+    <!-- Primary Action -->
+    <button id="snipBtn" class="primary-btn">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        <line x1="9" y1="3" x2="9" y2="21" />
+      </svg>
+      <span>Snip Screen</span>
+    </button>
 
-    <!-- Model Selection -->
-    <label for="modelSelect">AI Model</label>
-    <select id="modelSelect">
-      <!-- Dynamically populated based on enabled providers -->
-    </select>
+    <!-- Model Selection Card -->
+    <div class="card">
+      <label for="modelSelect">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3" />
+          <path
+            d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24" />
+        </svg>
+        AI Model
+      </label>
+      <select id="modelSelect">
+        <!-- Dynamically populated -->
+      </select>
+    </div>
 
-    <!-- Mode Selection -->
-    <label for="modeSelect">Interaction Mode</label>
-    <select id="modeSelect">
-      <!-- Dynamically populated from storage -->
-    </select>
+    <!-- Mode Selection Card -->
+    <div class="card">
+      <label for="modeSelect">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        Interaction Mode
+      </label>
+      <select id="modeSelect">
+        <!-- Dynamically populated -->
+      </select>
+    </div>
 
-    <div id="customPromptContainer" class="hidden">
-      <label for="customPromptText">Your System Instruction:</label>
+    <div id="customPromptContainer" class="card hidden">
+      <label for="customPromptText">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+        </svg>
+        Your System Instruction
+      </label>
       <textarea id="customPromptText" rows="3" placeholder="Ex: You are a helpful assistant..."></textarea>
     </div>
 
-    <!-- Provider Hint (shown if only Groq enabled) -->
-    <div id="providerHint" class="provider-hint hidden">
-      💡 <a id="enableMoreProviders">Enable more providers</a> like Google, OpenRouter, or Ollama in settings.
+    <!-- Provider Hint -->
+    <div id="providerHint" class="info-banner hidden">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 16v-4M12 8h.01" />
+      </svg>
+      <span>
+        <a id="enableMoreProviders">Enable more providers</a> like Google, OpenRouter, or Ollama in settings.
+      </span>
     </div>
 
-    <!-- API Keys (collapsed) - One-time setup, lower priority -->
-    <details id="apiKeysSection" style="margin-bottom: 12px; margin-top: 12px;">
-      <summary
-        style="cursor: pointer; font-weight: 600; color: #ccc; font-size: 12px; padding: 8px 0; user-select: none;">
-        🔐 API Keys <span style="color: #666; font-size: 10px;">(click to expand)</span>
+    <!-- API Keys (collapsed) -->
+    <details id="apiKeysSection" class="api-keys-section">
+      <summary>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path
+            d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
+        </svg>
+        <span>API Keys</span>
+        <span class="summary-hint">Click to expand</span>
+        <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
       </summary>
-      <div
-        style="padding: 10px; background: #252526; border-radius: 0 0 6px 6px; border: 1px solid #333; border-top: none;">
-        <div style="font-size: 10px; color: #888; margin-bottom: 8px;">
-          🔒 Keys are stored locally in your browser only.<br>
-          <span style="color: #f5a036;">⚠️ Do not use on public or shared computers.</span>
+      <div class="api-keys-content">
+        <div class="security-notice">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+          <span>Keys are stored locally in your browser only.</span>
         </div>
         <div id="apiKeyInputs">
-          <!-- Dynamically populated based on enabled providers -->
+          <!-- Dynamically populated -->
         </div>
-        <div style="font-size: 10px; color: #888; margin-top: 8px; padding-top: 8px; border-top: 1px solid #333;">
-          🗑️ <a href="#" id="resetAllKeys" style="color: #f55036;">Reset All Keys</a>
+        <div class="reset-keys">
+          <a href="#" id="resetAllKeys">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+            Reset All Keys
+          </a>
         </div>
       </div>
     </details>
 
     <div class="footer">
-      <div class="footer-version"><span id="versionDisplay">v--</span> • Customizable</div>
+      <div class="footer-version">
+        <span id="versionDisplay">v--</span>
+        <span class="separator">•</span>
+        <span>Customizable AI Extension</span>
+      </div>
       <div class="footer-icons">
         <a href="#" id="open-welcome" class="icon-btn" title="Setup Guide">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -112,28 +166,69 @@
   <!-- Slide-out Settings Panel -->
   <div class="settings-panel" id="settingsPanel">
     <div class="settings-header">
-      <h3>⚙️ Settings</h3>
-      <button class="close-btn" id="closeSettingsBtn">✕</button>
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3" />
+          <path
+            d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24" />
+        </svg>
+        Settings
+      </h3>
+      <button class="close-btn" id="closeSettingsBtn">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
     </div>
 
     <div class="tabs">
-      <button class="tab-btn active" data-tab="providers">Providers</button>
-      <button class="tab-btn" data-tab="models">Models</button>
-      <button class="tab-btn" data-tab="modes">Modes</button>
-      <button class="tab-btn" data-tab="general">General</button>
+      <button class="tab-btn active" data-tab="providers">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path
+            d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+        </svg>
+        Providers
+      </button>
+      <button class="tab-btn" data-tab="models">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 1v6m0 6v6" />
+        </svg>
+        Models
+      </button>
+      <button class="tab-btn" data-tab="modes">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        Modes
+      </button>
+      <button class="tab-btn" data-tab="general">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2v20M2 12h20" />
+        </svg>
+        General
+      </button>
     </div>
 
     <!-- Providers Tab -->
     <div class="tab-content active" id="providersTab">
-      <div style="font-size: 11px; color: #888; margin-bottom: 12px;">
+      <div class="tab-description">
         Enable/disable AI providers. Hidden providers' API keys are deleted after 7 days.
       </div>
 
       <div class="provider-item">
         <div class="provider-info">
           <span class="provider-icon">🚀</span>
-          <span class="provider-name">Groq</span>
-          <a href="#" class="provider-dashboard-link" data-url="https://console.groq.com" title="View dashboard">📊</a>
+          <div class="provider-details">
+            <span class="provider-name">Groq</span>
+            <span class="provider-desc">Fast inference</span>
+          </div>
+          <a href="#" class="provider-dashboard-link" data-url="https://console.groq.com" title="View dashboard">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
+            </svg>
+          </a>
         </div>
         <label class="toggle">
           <input type="checkbox" id="providerGroq" checked>
@@ -144,9 +239,16 @@
       <div class="provider-item">
         <div class="provider-info">
           <span class="provider-icon">✨</span>
-          <span class="provider-name">Google (Gemini)</span>
+          <div class="provider-details">
+            <span class="provider-name">Google (Gemini)</span>
+            <span class="provider-desc">Multimodal AI</span>
+          </div>
           <a href="#" class="provider-dashboard-link" data-url="https://aistudio.google.com/apikey"
-            title="View API keys">📊</a>
+            title="View API keys">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
+            </svg>
+          </a>
         </div>
         <label class="toggle">
           <input type="checkbox" id="providerGoogle">
@@ -157,9 +259,15 @@
       <div class="provider-item">
         <div class="provider-info">
           <span class="provider-icon">🌐</span>
-          <span class="provider-name">OpenRouter</span>
-          <a href="#" class="provider-dashboard-link" data-url="https://openrouter.ai/activity"
-            title="View activity">📊</a>
+          <div class="provider-details">
+            <span class="provider-name">OpenRouter</span>
+            <span class="provider-desc">Multiple models</span>
+          </div>
+          <a href="#" class="provider-dashboard-link" data-url="https://openrouter.ai/activity" title="View activity">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
+            </svg>
+          </a>
         </div>
         <label class="toggle">
           <input type="checkbox" id="providerOpenRouter">
@@ -170,7 +278,10 @@
       <div class="provider-item">
         <div class="provider-info">
           <span class="provider-icon">🦙</span>
-          <span class="provider-name">Ollama (Local)</span>
+          <div class="provider-details">
+            <span class="provider-name">Ollama (Local)</span>
+            <span class="provider-desc">Privacy-first</span>
+          </div>
         </div>
         <label class="toggle">
           <input type="checkbox" id="providerOllama">
@@ -181,7 +292,7 @@
 
     <!-- Models Tab -->
     <div class="tab-content" id="modelsTab">
-      <div style="font-size: 11px; color: #888; margin-bottom: 12px;">
+      <div class="tab-description">
         Enable/disable individual AI models. Disabled models won't appear in the model selector.
       </div>
 
@@ -192,7 +303,7 @@
 
     <!-- Modes Tab -->
     <div class="tab-content" id="modesTab">
-      <div style="font-size: 11px; color: #888; margin-bottom: 12px;">
+      <div class="tab-description">
         Customize interaction modes with your own prompts.
       </div>
 
@@ -200,7 +311,13 @@
         <!-- Dynamically populated -->
       </div>
 
-      <button class="add-mode-btn" id="addModeBtn">+ Add Custom Mode</button>
+      <button class="add-mode-btn" id="addModeBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+        Add Custom Mode
+      </button>
 
       <!-- Mode Editor -->
       <div class="mode-editor" id="modeEditor">
@@ -214,25 +331,31 @@
         </div>
         <div class="mode-editor-actions">
           <button class="cancel-btn" id="cancelModeBtn">Cancel</button>
-          <button class="save-btn" id="saveModeBtn">Save</button>
+          <button class="save-btn" id="saveModeBtn">Save Mode</button>
         </div>
       </div>
     </div>
 
     <!-- General Tab -->
     <div class="tab-content" id="generalTab">
-      <div style="font-size: 11px; color: #888; margin-bottom: 12px;">
+      <div class="tab-description">
         General settings for the extension.
       </div>
 
       <!-- Compare Windows -->
       <div class="settings-section">
-        <div class="settings-section-title">Compare Windows</div>
-        <div
-          style="display: flex; align-items: center; gap: 10px; padding: 10px; background: #252526; border-radius: 6px;">
-          <span style="font-size: 12px; color: #ccc;">Max comparison windows:</span>
-          <select id="maxCompareWindows"
-            style="background: #1e1e1e; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 8px; font-size: 12px;">
+        <div class="settings-section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7" />
+            <rect x="14" y="3" width="7" height="7" />
+            <rect x="14" y="14" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" />
+          </svg>
+          Compare Windows
+        </div>
+        <div class="settings-option">
+          <span>Max comparison windows:</span>
+          <select id="maxCompareWindows">
             <option value="2">2</option>
             <option value="3">3</option>
             <option value="4" selected>4</option>
@@ -241,41 +364,63 @@
       </div>
 
       <!-- Context Menu -->
-      <div class="settings-section" style="margin-top: 16px;">
-        <div class="settings-section-title">Context Menu</div>
+      <div class="settings-section">
+        <div class="settings-section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path
+              d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4" />
+          </svg>
+          Context Menu
+        </div>
         <div class="provider-item">
           <div class="provider-info">
-            <span style="font-size: 12px; color: #ccc;">Hide right-click menu item</span>
+            <span style="font-size: 13px; color: #b4b4b4;">Hide right-click menu item</span>
           </div>
           <label class="toggle">
             <input type="checkbox" id="hideContextMenu">
             <span class="toggle-slider"></span>
           </label>
         </div>
-        <div style="font-size: 10px; color: #666; margin-top: 4px; padding-left: 10px;">Use keyboard shortcut only</div>
+        <div class="settings-hint">Use keyboard shortcut only</div>
       </div>
 
       <!-- Quick Links -->
-      <div class="settings-section" style="margin-top: 16px;">
-        <div class="settings-section-title">Quick Links</div>
-        <div style="padding: 10px; background: #252526; border-radius: 6px;">
-          <a href="#" id="openShortcutsLinkGeneral"
-            style="color: #f55036; font-size: 12px; display: block; margin-bottom: 8px;">
-            ⌨️ Set keyboard shortcut
+      <div class="settings-section">
+        <div class="settings-section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+          </svg>
+          Quick Links
+        </div>
+        <div class="quick-links">
+          <a href="#" id="openShortcutsLinkGeneral" class="quick-link">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="4" width="20" height="16" rx="2" />
+              <path d="M6 8h.01M10 8h.01M14 8h.01" />
+            </svg>
+            <span>Set keyboard shortcut</span>
           </a>
-          <a href="#" id="groqKeysLinkGeneral"
-            style="color: #4caf50; font-size: 12px; display: block; margin-bottom: 8px;">
-            🆕 Get free Groq API key
+          <a href="#" id="groqKeysLinkGeneral" class="quick-link quick-link-success">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path
+                d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
+            </svg>
+            <span>Get free Groq API key</span>
           </a>
-          <a href="#" id="openExtSettings" style="color: #ccc; font-size: 12px; display: block;">
-            📂 Enable File Access (PDFs)
+          <a href="#" id="openExtSettings" class="quick-link">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+              <polyline points="13 2 13 9 20 9" />
+            </svg>
+            <span>Enable File Access (PDFs)</span>
           </a>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 
 </html>

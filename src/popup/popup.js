@@ -1,70 +1,21 @@
 // popup.js - Custom Modes & Provider Selection
 
+// --- IMPORTS ---
+import {
+  ALL_MODELS,
+  PROVIDER_LABELS,
+  DEFAULT_PROVIDERS,
+  getDefaultEnabledModels,
+  GUEST_MODE_PROVIDERS,
+  checkGuestModeStatus
+} from '../background/models-config.js';
+
 // --- DEFAULT DATA ---
 const DEFAULT_MODES = [
   { id: 'short', name: '⚡ Short Answer', prompt: "You are a concise answer engine. 1. Analyze the user's input. 2. If it is a multiple-choice question, Output in this format: 'Answer: <option>. <explanation>'. 3. For follow-up chat or non-questions, reply naturally but concisely.", isDefault: true },
   { id: 'detailed', name: '🧠 Detailed', prompt: "You are an expert tutor. Analyze the input. Provide a detailed, step-by-step answer. Use Markdown.", isDefault: true },
   { id: 'code', name: '💻 Code Debug', prompt: "You are a code debugger. Correct the code and explain the fix. Output a single fenced code block first.", isDefault: true }
 ];
-
-const DEFAULT_PROVIDERS = {
-  groq: true,
-  google: false,
-  openrouter: false,
-  ollama: false
-};
-
-// Generate default enabled models (all enabled by default)
-function getDefaultEnabledModels() {
-  const enabled = {};
-  for (const [provider, models] of Object.entries(ALL_MODELS)) {
-    models.forEach(model => {
-      enabled[model.value] = true;
-    });
-  }
-  return enabled;
-}
-
-const ALL_MODELS = {
-  groq: [
-    { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout (Vision)' },
-    { value: 'meta-llama/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick (Vision)' },
-    { value: 'moonshotai/kimi-k2-instruct', name: 'Kimi k2 Instruct' },
-    { value: 'moonshotai/kimi-k2-instruct-0905', name: 'Kimi k2 Instruct (0905)' },
-    { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
-    { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B' },
-    { value: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (Text)' },
-    { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B (Text)' }
-  ],
-  google: [
-    { value: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-    { value: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-    { value: 'gemini-2.0-flash-lite-preview-02-05', name: 'Gemini 2.0 Flash Lite' },
-    { value: 'gemma-3-27b-it', name: 'Gemma 3 27B (Vision)' },
-    { value: 'gemma-3-12b-it', name: 'Gemma 3 12B (Vision)' },
-    { value: 'gemma-3-4b-it', name: 'Gemma 3 4B' },
-    { value: 'gemma-3-1b-it', name: 'Gemma 3 1B' }
-  ],
-  openrouter: [
-    { value: 'openrouter:deepseek/deepseek-r1-0528:free', name: 'DeepSeek R1 (Free)' },
-    { value: 'openrouter:custom', name: '⚙️ Custom Model' }
-  ],
-  ollama: [
-    { value: 'ollama:gemma3:4b', name: 'Gemma 3 4B' },
-    { value: 'ollama:llama3', name: 'Llama 3' },
-    { value: 'ollama:mistral', name: 'Mistral' },
-    { value: 'ollama:llava', name: 'LLaVA (Vision)' },
-    { value: 'ollama:moondream', name: 'Moondream (Vision)' },
-    { value: 'ollama:custom', name: '⚙️ Custom Model' }
-  ]
-};
-
-const PROVIDER_LABELS = {
-  groq: '🚀 Groq (Fast)',
-  google: '✨ Google (Gemini)',
-  openrouter: '🌐 OpenRouter',
-  ollama: '🦙 Ollama (Local)'
-};
 
 const API_KEY_CONFIG = {
   groq: { id: 'apiKey', placeholder: 'Groq Key (gsk_...)', type: 'password', storageKey: 'groqKey' },
@@ -98,27 +49,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 // --- GUEST MODE CHECK ---
 async function checkGuestStatus() {
   try {
-    // Check storage DIRECTLY instead of relying on background script
-    // This prevents banner from being stuck when background doesn't respond
-    const storage = await chrome.storage.local.get(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
-
-    // Check if any key has actual content (even if invalid)
-    const hasGroqKey = storage.groqKey && storage.groqKey.trim().length > 0;
-    const hasGeminiKey = storage.geminiKey && storage.geminiKey.trim().length > 0;
-    const hasOpenRouterKey = storage.openrouterKey && storage.openrouterKey.trim().length > 0;
-    const hasOllamaHost = storage.ollamaHost && storage.ollamaHost.trim().length > 0;
-
-    // User is in guest mode ONLY if NO keys are entered
-    const inGuestMode = !hasGroqKey && !hasGeminiKey && !hasOpenRouterKey && !hasOllamaHost;
+    // Use shared guest mode service for consistent behavior
+    const guestStatus = await checkGuestModeStatus();
 
     // Update state
-    isGuestModeActive = inGuestMode;
+    isGuestModeActive = guestStatus.isGuestMode;
 
-    // Update banner immediately based on storage
-    updateGuestBanner({
-      isGuestMode: inGuestMode,
-      isConfigured: true // Assume configured if GUEST_WORKER_URL is set in guest-config.js
-    });
+    // Update banner immediately
+    updateGuestBanner(guestStatus);
 
   } catch (e) {
     console.error('Failed to check guest status:', e);
@@ -228,9 +166,9 @@ function loadModels(enabledProviders, enabledModels, selectedModel) {
   modelSelect.innerHTML = '';
 
   // In guest mode, only show Groq models (ignore user's provider settings)
-  // CRITICAL: Force guests to only see Groq provider regardless of their settings
+  // Use shared GUEST_MODE_PROVIDERS for consistency
   const providersToShow = isGuestModeActive === true
-    ? { groq: true, google: false, openrouter: false, ollama: false }
+    ? GUEST_MODE_PROVIDERS
     : enabledProviders;
 
   for (const [provider, models] of Object.entries(ALL_MODELS)) {
@@ -866,7 +804,14 @@ async function startSnip() {
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: ['src/content/utils.js', 'src/content/content.js']
+        files: [
+          'src/content/utils.js',
+          'src/content/ui-helpers.js',
+          'src/content/window-manager.js',
+          'src/content/snip-selection.js',
+          'src/content/floating-chat-ui.js',
+          'src/content/content.js'
+        ]
       });
       await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP" });
       window.close();
