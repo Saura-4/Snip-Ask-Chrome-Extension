@@ -103,19 +103,21 @@ const WindowManager = {
      * @param {Object} senderUI - The sending window instance
      */
     broadcastFollowUp(text, senderUI) {
+        const mode = senderUI.currentMode || 'short'; // Get mode from sender
+
         if (this.windows.length <= 1) {
-            senderUI.sendMessageDirect(text);
+            senderUI.sendMessageDirect(text, 1, mode);
             return;
         }
 
-        // Multi-window mode - sync all
+        // Multi-window mode - sync all with sender's mode
         const windowCount = this.windows.length;
         this.pendingResponses = windowCount;
         this.windows.forEach(w => w.setInputDisabled(true));
 
         // First window counts for all, others don't increment counter
         this.windows.forEach((w, index) => {
-            w.sendMessageDirect(text, index === 0 ? windowCount : 0);
+            w.sendMessageDirect(text, index === 0 ? windowCount : 0, mode);
         });
     },
 

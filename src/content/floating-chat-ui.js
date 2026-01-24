@@ -8,6 +8,7 @@ class FloatingChatUI {
     constructor() {
         this.chatHistory = [];
         this.currentModel = null;
+        this.currentMode = null; // Track selected mode (short/detailed/code/default)
         this.availableModels = [];
         this.isMinimized = false;
         this.hasSavedPosition = false;
@@ -49,9 +50,10 @@ class FloatingChatUI {
 
         // Get the current selected model from storage
         const storage = await new Promise(resolve => {
-            chrome.storage.local.get(['selectedModel'], resolve);
+            chrome.storage.local.get(['selectedModel', 'selectedMode'], resolve);
         });
         this.currentModel = storage.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
+        this.currentMode = storage.selectedMode || 'short';
 
         // If current model is not in available models, auto-select first available
         const isCurrentModelValid = this.availableModels.some(m => m.value === this.currentModel);
@@ -246,6 +248,43 @@ class FloatingChatUI {
             backdrop-filter: blur(10px);
         `;
 
+        // Inject UX Polish Styles (Tables, Code Blocks, Typing Indicator)
+        const style = document.createElement('style');
+        style.textContent = `
+            /* MARKDOWN TABLES */
+            .table-container { overflow-x: auto; border-radius: 8px; border: 1px solid #333; background: #111; margin: 10px 0; }
+            table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
+            th { background: #1f1f1f; padding: 10px 12px; color: #aaa; font-weight: 600; border-bottom: 1px solid #333; }
+            td { padding: 10px 12px; border-bottom: 1px solid #222; color: #ddd; }
+            tr:last-child td { border-bottom: none; }
+            
+            /* ENHANCED CODE BLOCKS */
+            .code-block-wrapper { background: #0d0d0d; border: 1px solid #333; border-radius: 8px; overflow: hidden; margin: 10px 0; }
+            .code-header { display: flex; justify-content: space-between; align-items: center; background: #1a1a1a; padding: 6px 12px; border-bottom: 1px solid #333; }
+            .lang-label { font-size: 10px; color: #666; font-weight: 700; letter-spacing: 0.5px; }
+            .copy-btn { background: transparent; border: none; color: #888; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+            .copy-btn:hover { color: #fff; }
+            pre { margin: 0; padding: 12px; overflow-x: auto; }
+            code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #ccc; }
+            
+            /* TYPING INDICATOR */
+            .typing-container { display: flex; align-items: center; gap: 10px; opacity: 0.8; margin-bottom: 10px; }
+            .typing-bubble { background: #2a2a2a; padding: 8px 14px; border-radius: 12px 12px 12px 2px; display: flex; gap: 4px; width: fit-content; }
+            .dot { width: 6px; height: 6px; background: #666; border-radius: 50%; animation: bounce 1.4s infinite ease-in-out both; }
+            .dot:nth-child(1) { animation-delay: -0.32s; }
+            .dot:nth-child(2) { animation-delay: -0.16s; }
+            @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); background: #f55036; } }
+            .thinking-text { font-size: 11px; color: #666; font-style: italic; animation: pulse 1.5s infinite; }
+            @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+            
+            /* MATH BLOCKS (LaTeX) */
+            .math-block { background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 12px 16px; margin: 10px 0; overflow-x: auto; text-align: center; }
+            .math-inline { background: rgba(139, 92, 246, 0.15); padding: 2px 6px; border-radius: 4px; color: #c4b5fd; }
+            .katex { font-size: 1.1em; color: #c4b5fd; }
+            .katex-display { margin: 0.5em 0; }
+        `;
+        this.shadow.appendChild(style);
+
         // Header with model selector
         const header = document.createElement("div");
         header.style.cssText = `
@@ -286,6 +325,37 @@ class FloatingChatUI {
         });
 
         titleSection.appendChild(this.modelSelect);
+
+        // Mode selector dropdown
+        this.modeSelect = document.createElement("select");
+        this.modeSelect.style.cssText = `
+            background: #0a0a0a; color: #e8e8e8; border: 1px solid rgba(255, 255, 255, 0.15); 
+            border-radius: 6px; padding: 6px 10px; font-size: 12px;
+            cursor: pointer; min-width: 90px;
+            transition: all 0.2s; font-weight: 500;
+        `;
+
+        const modes = [
+            { value: 'short', name: '⚡ Short' },
+            { value: 'detailed', name: '📚 Detailed' },
+            { value: 'code', name: '💻 Code' },
+            { value: 'default', name: '🎯 Default' }
+        ];
+
+        modes.forEach(m => {
+            const opt = document.createElement("option");
+            opt.value = m.value;
+            opt.textContent = m.name;
+            if (m.value === this.currentMode) opt.selected = true;
+            this.modeSelect.appendChild(opt);
+        });
+
+        this.modeSelect.addEventListener("change", () => {
+            this.currentMode = this.modeSelect.value;
+            chrome.storage.local.set({ selectedMode: this.currentMode });
+        });
+
+        titleSection.appendChild(this.modeSelect);
         header.appendChild(titleSection);
 
         // Snip Again button
@@ -484,6 +554,7 @@ class FloatingChatUI {
             msgDiv.appendChild(labelDiv);
 
             const contentDiv = document.createElement("div");
+            contentDiv.style.cssText = "max-height: 350px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #404040 transparent;";
             const cleanText = sanitizeModelText(content);
             if (typeof parseMarkdown === 'function') {
                 contentDiv.innerHTML = parseMarkdown(cleanText);
@@ -492,32 +563,7 @@ class FloatingChatUI {
             }
             msgDiv.appendChild(contentDiv);
 
-            // Copy buttons for code blocks
-            const codeBlocks = msgDiv.querySelectorAll("pre");
-            codeBlocks.forEach(pre => {
-                const btn = document.createElement("button");
-                btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> Copy`;
-                btn.style.cssText = `position: absolute; top: 8px; right: 8px; background: rgba(255,255,255,0.08); color: #ccc; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; font-size: 10px; padding: 4px 8px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 4px; backdrop-filter: blur(4px);`;
 
-                btn.onmouseenter = () => { btn.style.background = "rgba(255,255,255,0.15)"; btn.style.color = "white"; };
-                btn.onmouseleave = () => { btn.style.background = "rgba(255,255,255,0.08)"; btn.style.color = "#ccc"; };
-
-                btn.onclick = () => {
-                    const codeEl = pre.querySelector("code");
-                    const codeText = codeEl ? codeEl.textContent : pre.textContent.replace(/^Copy$|^Copied!$/gm, '').trim();
-                    navigator.clipboard.writeText(codeText).then(() => {
-                        btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!`;
-                        btn.style.borderColor = "#4ade80";
-                        btn.style.color = "#4ade80";
-                        setTimeout(() => {
-                            btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> Copy`;
-                            btn.style.borderColor = "rgba(255,255,255,0.1)";
-                            btn.style.color = "#ccc";
-                        }, 2000);
-                    });
-                };
-                pre.appendChild(btn);
-            });
 
             // Action buttons container
             const actionsDiv = document.createElement("div");
@@ -576,6 +622,24 @@ class FloatingChatUI {
             regenBtn.onclick = () => this.regenerateLastResponse();
             actionsDiv.appendChild(regenBtn);
 
+            // Minimize/Expand button
+            const minimizeBtn = createActionButton("Minimize", '➖', "Minimize response");
+            minimizeBtn.onclick = () => {
+                const isMinimized = contentDiv.style.display === 'none';
+                if (isMinimized) {
+                    // Expand
+                    contentDiv.style.display = 'block';
+                    minimizeBtn.innerHTML = '➖ Minimize';
+                    minimizeBtn.title = 'Minimize response';
+                } else {
+                    // Minimize
+                    contentDiv.style.display = 'none';
+                    minimizeBtn.innerHTML = '➕ Expand';
+                    minimizeBtn.title = 'Expand response';
+                }
+            };
+            actionsDiv.appendChild(minimizeBtn);
+
             // Retry button for error messages
             if (isError) {
                 const retryBtn = createActionButton("Retry", '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"></path></svg>', "Retry failed request", true);
@@ -587,6 +651,36 @@ class FloatingChatUI {
         }
         this.chatBody.appendChild(msgDiv);
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
+    }
+
+    /**
+     * Show typing indicator in chat
+     */
+    showTypingIndicator() {
+        this.removeTypingIndicator(); // Ensure only one exists
+
+        const container = document.createElement("div");
+        container.className = "typing-container";
+        container.id = "typing-indicator";
+        container.innerHTML = `
+            <div class="typing-bubble">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+            </div>
+            <span class="thinking-text">Thinking...</span>
+        `;
+
+        this.chatBody.appendChild(container);
+        this.chatBody.scrollTop = this.chatBody.scrollHeight;
+    }
+
+    /**
+     * Remove typing indicator from chat
+     */
+    removeTypingIndicator() {
+        const existing = this.chatBody.querySelector("#typing-indicator");
+        if (existing) existing.remove();
     }
 
     /**
@@ -622,13 +716,9 @@ class FloatingChatUI {
             if (lastMsgDiv) lastMsgDiv.remove();
         }
 
-        const historyUpToLastUser = this.chatHistory.slice(0, lastUserMsgIndex + 1);
 
-        const loadingDiv = document.createElement("div");
-        loadingDiv.innerText = `🔄 ${this._getModelDisplayName(this.currentModel)} is regenerating...`;
-        loadingDiv.style.cssText = "align-self: flex-start; color: #888; font-style: italic; font-size: 12px;";
-        this.chatBody.appendChild(loadingDiv);
-        this.chatBody.scrollTop = this.chatBody.scrollHeight;
+
+        this.showTypingIndicator();
 
         try {
             let response;
@@ -643,10 +733,13 @@ class FloatingChatUI {
                 response = await chrome.runtime.sendMessage({
                     action: "CONTINUE_CHAT",
                     model: this.currentModel,
-                    history: historyUpToLastUser.map(m => ({ role: m.role, content: m.content }))
+                    history: this.chatHistory.slice(0, lastUserMsgIndex + 1).map(m => ({ role: m.role, content: m.content })),
+                    mode: this.currentMode // Maintain selected mode on regenerate
                 });
             }
-            loadingDiv.remove();
+
+            this.removeTypingIndicator();
+
             if (response && response.success) {
                 this.addMessage('assistant', response.answer, this.currentModel);
                 if (response.demoInfo) {
@@ -656,7 +749,7 @@ class FloatingChatUI {
                 this.addMessage('assistant', "⚠️ Regenerate failed: " + (response?.error || "Unknown error"), this.currentModel, true);
             }
         } catch (e) {
-            loadingDiv.remove();
+            this.removeTypingIndicator();
             this.addMessage('assistant', "⚠️ Network Error: " + e.message, this.currentModel, true);
         }
     }
@@ -718,11 +811,7 @@ class FloatingChatUI {
         // Store image for compare window access
         this.allImages.push(croppedBase64);
 
-        const loadingDiv = document.createElement("div");
-        loadingDiv.innerText = `🤖 ${this._getModelDisplayName(this.currentModel)} is analyzing new image...`;
-        loadingDiv.style.cssText = "align-self: flex-start; color: #888; font-style: italic; font-size: 12px;";
-        this.chatBody.appendChild(loadingDiv);
-        this.chatBody.scrollTop = this.chatBody.scrollHeight;
+        this.showTypingIndicator();
 
         this.addMessage('user', '(New screenshot added)');
 
@@ -732,7 +821,7 @@ class FloatingChatUI {
                 model: this.currentModel,
                 base64Image: croppedBase64
             }, (response) => {
-                loadingDiv.remove();
+                this.removeTypingIndicator();
                 if (response && response.success) {
                     this.addMessage('assistant', response.answer, this.currentModel);
                     if (response.demoInfo) {
@@ -753,7 +842,7 @@ class FloatingChatUI {
                         model: this.currentModel,
                         text: ocrResult.text
                     }, (response) => {
-                        loadingDiv.remove();
+                        this.removeTypingIndicator();
                         if (response && response.success) {
                             this.addMessage('assistant', response.answer, this.currentModel);
                             if (response.demoInfo) {
@@ -764,7 +853,7 @@ class FloatingChatUI {
                         }
                     });
                 } else {
-                    loadingDiv.remove();
+                    this.removeTypingIndicator();
                     this.addMessage('assistant', "⚠️ OCR failed - no text extracted from image", this.currentModel, true);
                 }
             });
@@ -846,6 +935,10 @@ class FloatingChatUI {
             newUI.initialBase64Image = this.initialBase64Image;
             newUI.allImages = [...this.allImages];  // Copy all images
 
+            // Inherit mode from parent window
+            newUI.currentMode = this.currentMode;
+            if (newUI.modeSelect) newUI.modeSelect.value = this.currentMode;
+
             // Build summarized context for text display
             const summarizedContext = this._buildSummarizedContext();
             newUI.addMessage('user', summarizedContext);
@@ -856,10 +949,7 @@ class FloatingChatUI {
                 newUI.modelSelect.value = otherModel;
             }
 
-            const loadingDiv = document.createElement("div");
-            loadingDiv.innerText = `🤖 ${newUI._getModelDisplayName(newUI.currentModel)} is thinking...`;
-            loadingDiv.style.cssText = "align-self: flex-start; color: #888; font-style: italic; font-size: 12px;";
-            newUI.chatBody.appendChild(loadingDiv);
+            newUI.showTypingIndicator();
 
             try {
                 let response;
@@ -891,6 +981,7 @@ class FloatingChatUI {
                     }
                 } else if (!isVisionModel(newUI.currentModel) && allImagesToSend.length > 0) {
                     // Text model - OCR all images and combine
+                    // ... (legacy ocr logic)
                     let allOcrText = '';
                     for (const img of allImagesToSend) {
                         const ocrResult = await chrome.runtime.sendMessage({
@@ -916,11 +1007,12 @@ class FloatingChatUI {
                     response = await chrome.runtime.sendMessage({
                         action: "CONTINUE_CHAT",
                         model: newUI.currentModel,
-                        history: [{ role: 'user', content: summarizedContext }]
+                        history: [{ role: 'user', content: summarizedContext }],
+                        mode: newUI.currentMode // Inherit mode from parent
                     });
                 }
 
-                loadingDiv.remove();
+                newUI.removeTypingIndicator();
                 if (response && response.success) {
                     newUI.addMessage('assistant', response.answer, newUI.currentModel);
                     if (response.demoInfo) {
@@ -930,7 +1022,7 @@ class FloatingChatUI {
                     newUI.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), newUI.currentModel, true);
                 }
             } catch (e) {
-                loadingDiv.remove();
+                newUI.removeTypingIndicator();
                 newUI.addMessage('assistant', "⚠️ Network Error: " + e.message, newUI.currentModel, true);
             }
         }
@@ -967,17 +1059,16 @@ class FloatingChatUI {
      * Send a message directly (for broadcast)
      * @param {string} text
      * @param {number} parallelCount
+     * @param {string|null} mode - Interaction mode (short/detailed/code/default)
      */
-    async sendMessageDirect(text, parallelCount = 1) {
+    async sendMessageDirect(text, parallelCount = 1, mode = null) {
         this.addMessage('user', text);
 
-        const loadingDiv = document.createElement("div");
-        loadingDiv.innerText = `🤖 ${this._getModelDisplayName(this.currentModel)} is thinking...`;
-        loadingDiv.style.cssText = "align-self: flex-start; color: #888; font-style: italic; font-size: 12px;";
-        this.chatBody.appendChild(loadingDiv);
-        this.chatBody.scrollTop = this.chatBody.scrollHeight;
+        this.showTypingIndicator();
 
         const modelToUse = this.currentModel;
+        const modeToUse = mode || this.currentMode || 'short';
+
         const formattedHistory = this.chatHistory.map(msg => {
             if (msg.model && msg.role === 'assistant') {
                 return { role: msg.role, content: `[Response from ${this._getModelDisplayName(msg.model)}]: ${msg.content}` };
@@ -990,9 +1081,12 @@ class FloatingChatUI {
                 action: "CONTINUE_CHAT",
                 model: modelToUse,
                 history: formattedHistory,
+                mode: modeToUse,
                 parallelCount: parallelCount
             });
-            loadingDiv.remove();
+
+            this.removeTypingIndicator();
+
             if (response && response.success) {
                 this.addMessage('assistant', response.answer, modelToUse);
                 if (response.demoInfo) {
@@ -1002,7 +1096,7 @@ class FloatingChatUI {
                 this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), modelToUse, true);
             }
         } catch (e) {
-            loadingDiv.remove();
+            this.removeTypingIndicator();
             this.addMessage('assistant', "⚠️ Network Error: " + e.message, modelToUse, true);
         }
         WindowManager.onResponseReceived();

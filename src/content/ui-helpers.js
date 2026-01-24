@@ -33,7 +33,8 @@ function updateLocalDemoCache(demoInfo) {
 }
 
 /**
- * Sanitize model response text - removes thinking tags and artifacts
+ * Sanitize model response text - removes thinking tags, HTML artifacts, and other model noise
+ * IMPORTANT: Preserves code blocks to avoid stripping valid syntax like <iostream>, <vector>, etc.
  * @param {string} rawText - Raw text from model response
  * @returns {string} - Cleaned text
  */
@@ -42,21 +43,81 @@ function sanitizeModelText(rawText) {
 
     let text = rawText;
 
-    // Strip <think>...</think> blocks from Qwen/DeepSeek models (including multiline)
-    text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    // --- STEP 1: PROTECT CODE BLOCKS ---
+    // Extract code blocks BEFORE HTML stripping to preserve <iostream>, <T>, etc.
+    const codeBlocks = [];
+    const inlineCodes = [];
+    const blockToken = '\x00CODEBLOCK_';
+    const inlineToken = '\x00INLINE_';
 
-    // Strip incomplete/unclosed thinking tags (model started but didn't finish thinking)
+    // Protect fenced code blocks: ```lang\ncode\n```
+    text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (match, lang, code) => {
+        codeBlocks.push({ lang, code });
+        return `${blockToken}${codeBlocks.length - 1}\x00`;
+    });
+
+    // Protect inline code: `code`
+    text = text.replace(/`([^`]+)`/g, (match, code) => {
+        inlineCodes.push(code);
+        return `${inlineToken}${inlineCodes.length - 1}\x00`;
+    });
+
+    // --- STEP 2: STRIP MODEL ARTIFACTS ---
+    // Strip <think>...</think> blocks from Qwen/DeepSeek models
+    text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     text = text.replace(/<think>[\s\S]*$/gi, '').trim();
 
-    // Strip malformed JSON artifacts like "<? {}" or "<?{...}"
+    // Strip malformed JSON artifacts
     text = text.replace(/<\?\s*\{[^}]*\}?\s*/gi, '').trim();
 
-    // Strip other potential model artifacts
-    text = text.replace(/<\|.*?\|>/g, '').trim(); // DeepSeek special tokens
-    text = text.replace(/\[INST\][\s\S]*?\[\/INST\]/gi, '').trim(); // Llama instruction tokens
-    text = text.replace(/<\|im_start\|>[\s\S]*?<\|im_end\|>/gi, '').trim(); // ChatML tokens
+    // Strip other model artifacts
+    text = text.replace(/<\|.*?\|>/g, '').trim();
+    text = text.replace(/\[INST\][\s\S]*?\[\/INST\]/gi, '').trim();
+    text = text.replace(/<\|im_start\|>[\s\S]*?<\|im_end\|>/gi, '').trim();
 
-    // Handle "Corrected text:" prefix (original logic)
+    // --- STEP 3: STRIP HTML TAGS (code blocks are protected) ---
+    // Strip style/script blocks entirely
+    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+
+    // Repeatedly strip HTML tags until none remain
+    let prevText;
+    let iterations = 0;
+    const maxIterations = 10;
+
+    do {
+        prevText = text;
+        iterations++;
+        // Strip opening tags with attributes: <code style="...">
+        text = text.replace(/<[a-z][a-z0-9]*\s+[^>]*>/gi, '');
+        // Strip simple opening tags: <code>
+        text = text.replace(/<[a-z][a-z0-9]*>/gi, '');
+        // Strip closing tags: </code>
+        text = text.replace(/<\/[a-z][a-z0-9]*>/gi, '');
+        // Strip self-closing tags: <br/>
+        text = text.replace(/<[a-z][a-z0-9]*\s*\/>/gi, '');
+    } while (text !== prevText && iterations < maxIterations);
+
+    // Catch remaining HTML-like patterns
+    text = text.replace(/<\/?[a-z][^>]*>/gi, '');
+
+    // Clean up excessive horizontal whitespace (preserve newlines)
+    text = text.replace(/[^\S\r\n]{3,}/g, '  ').trim();
+
+    // --- STEP 4: RESTORE CODE BLOCKS ---
+    // Restore fenced code blocks
+    text = text.replace(new RegExp(`${blockToken.replace(/\x00/g, '\\x00')}(\\d+)\\x00`, 'g'), (match, index) => {
+        const block = codeBlocks[parseInt(index)];
+        return block ? `\`\`\`${block.lang}\n${block.code}\`\`\`` : match;
+    });
+
+    // Restore inline code
+    text = text.replace(new RegExp(`${inlineToken.replace(/\x00/g, '\\x00')}(\\d+)\\x00`, 'g'), (match, index) => {
+        const code = inlineCodes[parseInt(index)];
+        return code !== undefined ? `\`${code}\`` : match;
+    });
+
+    // --- STEP 5: CLEANUP ---
     const lines = text.split('\n');
     if (lines[0].match(/^\s*Corrected text\s*:/i)) {
         const corrected = lines[0].replace(/^\s*Corrected text\s*:\s*/i, '').trim();

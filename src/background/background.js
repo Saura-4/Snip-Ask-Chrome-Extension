@@ -54,6 +54,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
                 files: [
+                    'lib/katex.min.js',
                     'src/content/utils.js',
                     'src/content/ui-helpers.js',
                     'src/content/window-manager.js',
@@ -90,6 +91,7 @@ chrome.commands.onCommand.addListener(async (command) => {
                 await chrome.scripting.executeScript({
                     target: { tabId: tab.id },
                     files: [
+                        'lib/katex.min.js',
                         'src/content/utils.js',
                         'src/content/ui-helpers.js',
                         'src/content/window-manager.js',
@@ -197,11 +199,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     // 0 means don't count this request (companion in parallel batch)
                     const parallelCount = request.parallelCount ?? 1;
 
+                    // Use mode from request (mode selector), fallback to storage
+                    const mode = request.mode || storage.selectedMode || storage.interactionMode || 'short';
+
+                    // Build system prompt based on mode (guest mode doesn't use aiService, so we add manually)
+                    let systemPrompt = 'This is a POPUP WINDOW. Analyze the input and provide a helpful, concise response (under 200 words). Be direct and focused.';
+                    if (mode === 'short') systemPrompt = "POPUP WINDOW: Concise answer engine. Keep under 100 words. For MCQs: 'Answer: <option>. <one-sentence explanation>'. For other questions: direct answer only. No preamble, no elaboration.";
+                    else if (mode === 'detailed') systemPrompt = "POPUP TUTOR: Provide a focused, step-by-step answer. Use concise bullet points. Limit to 3-5 key steps max. Use Markdown sparingly (bold for emphasis only).";
+                    else if (mode === 'code') systemPrompt = "POPUP CODE ASSISTANT: Provide ESSENTIAL CODE ONLY - no exhaustive examples. Output ONE clean code block + 1-2 sentences explaining the key fix/concept. Be concise.";
+
+                    // Prepend system message to history
+                    const messagesWithSystem = [
+                        { role: 'system', content: systemPrompt },
+                        ...request.history
+                    ];
+
                     const guestResponse = await makeGuestRequest({
                         model: modelName || GUEST_DEFAULT_MODEL,
-                        messages: request.history,
+                        messages: messagesWithSystem,
                         temperature: 0.3,
-                        max_tokens: 1024,
+                        max_tokens: mode === 'short' ? 512 : (mode === 'code' ? 2048 : 1536),
                         _meta: { parallelCount } // Pass to worker for proper counting
                     });
 
@@ -225,7 +242,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     throw new Error('Missing API key. Please configure your API keys in the extension popup.');
                 }
 
-                const mode = storage.selectedMode || storage.interactionMode || 'short';
+                // Use mode from request (set by mode selector), fallback to storage
+                const mode = request.mode || storage.selectedMode || storage.interactionMode || 'short';
                 const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
 
                 const answer = await aiService.chat(request.history);
@@ -393,10 +411,10 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
 
             // Add system instruction
             const customModes = storage.customModes || null;
-            let systemPrompt = 'Analyze the input and provide a helpful response.';
-            if (mode === 'short') systemPrompt = "You are a concise answer engine. Analyze the user's input. If it is a multiple-choice question, output 'Answer: <option>. <explanation>'. For follow-up chat, reply concisely.";
-            else if (mode === 'detailed') systemPrompt = "You are an expert tutor. Analyze the input. Provide a detailed, step-by-step answer. Use Markdown.";
-            else if (mode === 'code') systemPrompt = "You are a code debugger. Correct the code and explain the fix. Output a single fenced code block first.";
+            let systemPrompt = 'This is a POPUP WINDOW. Analyze the input and provide a helpful, concise response (under 200 words).';
+            if (mode === 'short') systemPrompt = "POPUP WINDOW: Concise answer engine. Keep under 100 words. For MCQs: 'Answer: <option>. <one-sentence explanation>'. For other questions: direct answer only. No preamble, no elaboration.";
+            else if (mode === 'detailed') systemPrompt = "POPUP TUTOR: Provide a focused, step-by-step answer. Use concise bullet points. Limit to 3-5 key steps max. Use Markdown sparingly (bold for emphasis only).";
+            else if (mode === 'code') systemPrompt = "POPUP CODE ASSISTANT: Provide ESSENTIAL CODE ONLY - no exhaustive examples. Output ONE clean code block + 1-2 sentences explaining the key fix/concept. Be concise.";
             else if (customModes) {
                 const customMode = customModes.find(m => m.id === mode);
                 if (customMode) systemPrompt = customMode.prompt;
@@ -422,7 +440,7 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
                 model: modelName,
                 messages: messages,
                 temperature: 0.3,
-                max_tokens: 1024
+                max_tokens: mode === 'short' ? 512 : (mode === 'code' ? 2048 : 1536)
             });
 
             let answer = guestResponse.choices?.[0]?.message?.content || 'No answer returned.';
@@ -517,10 +535,10 @@ async function handleMultiImageRequest(images, explicitModel, textContext, sendR
 
             // Add system instruction
             const customModes = storage.customModes || null;
-            let systemPrompt = 'Analyze the input and provide a helpful response.';
-            if (mode === 'short') systemPrompt = "You are a concise answer engine. Analyze the user's input. If it is a multiple-choice question, output 'Answer: <option>. <explanation>'. For follow-up chat, reply concisely.";
-            else if (mode === 'detailed') systemPrompt = "You are an expert tutor. Analyze the input. Provide a detailed, step-by-step answer. Use Markdown.";
-            else if (mode === 'code') systemPrompt = "You are a code debugger. Correct the code and explain the fix. Output a single fenced code block first.";
+            let systemPrompt = 'This is a POPUP WINDOW. Analyze the input and provide a helpful, concise response (under 200 words).';
+            if (mode === 'short') systemPrompt = "POPUP WINDOW: Concise answer engine. Keep under 100 words. For MCQs: 'Answer: <option>. <one-sentence explanation>'. For other questions: direct answer only. No preamble, no elaboration.";
+            else if (mode === 'detailed') systemPrompt = "POPUP TUTOR: Provide a focused, step-by-step answer. Use concise bullet points. Limit to 3-5 key steps max. Use Markdown sparingly (bold for emphasis only).";
+            else if (mode === 'code') systemPrompt = "POPUP CODE ASSISTANT: Provide ESSENTIAL CODE ONLY - no exhaustive examples. Output ONE clean code block + 1-2 sentences explaining the key fix/concept. Be concise.";
             else if (customModes) {
                 const customMode = customModes.find(m => m.id === mode);
                 if (customMode) systemPrompt = customMode.prompt;
@@ -550,7 +568,7 @@ async function handleMultiImageRequest(images, explicitModel, textContext, sendR
                 model: modelName,
                 messages: messages,
                 temperature: 0.3,
-                max_tokens: 1024
+                max_tokens: mode === 'short' ? 512 : (mode === 'code' ? 2048 : 1536)
             });
 
             let answer = guestResponse.choices?.[0]?.message?.content || 'No answer returned.';
