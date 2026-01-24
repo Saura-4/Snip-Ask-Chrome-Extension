@@ -5,23 +5,23 @@ const PROMPTS =
 {
     short:
     {
-        base: "You are a concise answer engine. 1. Analyze the user's input. 2. If it is a multiple-choice question, Output in this format: 'Answer: <option>. <explanation>'. 3. For follow-up chat or non-questions, reply naturally but concisely.",
-        image: "Analyze the CONTENT of this image (whether it is text, code, or a visual scene). If it's a question, provide the Answer and a short Why. If it's general content, summarize it."
+        base: "You are a concise answer engine for a POPUP WINDOW. Keep responses under 100 words. 1. Analyze the user's input. 2. If it's a multiple-choice question, output: 'Answer: <option>. <one-sentence explanation>'. 3. For other questions, give the direct answer only. No preamble, no elaboration.",
+        image: "POPUP WINDOW RESPONSE: Analyze this image content concisely (under 100 words). If it's a question, provide Answer + short Why. If it's general content, give a brief summary."
     },
     detailed:
     {
-        base: "You are an expert tutor. Analyze the input. Provide a detailed, step-by-step answer. Use Markdown.",
-        image: "You are a tutor. Read the text or analyze the diagrams in this image. Break down the solution step-by-step. Use bolding and bullet points."
+        base: "You are an expert tutor for a POPUP WINDOW. Provide a focused, step-by-step answer. Use concise bullet points. Limit to 3-5 key steps max. Use Markdown sparingly (bold for emphasis only).",
+        image: "POPUP TUTOR: Read the content in this image. Break down the solution in 3-5 concise bullet points. Be clear but brief - this displays in a small popup."
     },
     code:
     {
-        base: "You are a code debugger. Correct the code and explain the fix. Output a single fenced code block first.",
-        image: "You are a Code Linter. Read the code in this image. 1. Provide the CORRECTED code block. 2. Explain the bug in 1-2 sentences."
+        base: "You are a code assistant for a POPUP WINDOW. Provide ESSENTIAL CODE ONLY - no exhaustive examples. 1. Output ONE clean, working code block. 2. Add 1-2 sentences explaining the key fix or concept. Keep it concise.",
+        image: "POPUP CODE LINTER: Read the code in this image. 1. Provide the CORRECTED code (essential parts only). 2. Explain the fix in 1-2 sentences. This displays in a small popup - be concise."
     },
     default:
     {
-        base: "Analyze the input and provide a helpful response.",
-        image: "Analyze the content of this image (text or visual) and provide a helpful response."
+        base: "This is a POPUP WINDOW with limited space. Analyze the input and provide a helpful, concise response (aim for under 200 words). Be direct and focused.",
+        image: "POPUP RESPONSE: Analyze this image content and provide a helpful, concise response (under 200 words). Be clear but brief."
     }
 };
 
@@ -159,7 +159,7 @@ class GroqService extends AbstractAIService {
             messages: finalMessages,
             model: this.actualModel,
             temperature: 0.3,
-            max_tokens: 1024
+            max_tokens: 2048
         };
 
         const response = await fetchWithTimeout(this.API_ENDPOINT, {
@@ -252,7 +252,7 @@ class GeminiService extends AbstractAIService {
 
         const payload = {
             contents: contents,
-            generationConfig: { temperature: 0.3, maxOutputTokens: 1024 }
+            generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
         };
 
         if (finalSystemInstruction) payload.system_instruction = finalSystemInstruction;

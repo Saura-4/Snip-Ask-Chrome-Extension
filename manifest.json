@@ -27,7 +27,9 @@
         "lib/worker.min.js",
         "lib/tesseract-core.wasm.js",
         "lib/tesseract-core.wasm",
-        "lib/eng.traineddata.gz"
+        "lib/eng.traineddata.gz",
+        "lib/katex.min.js",
+        "lib/katex.min.css"
       ],
       "matches": [
         "<all_urls>"
