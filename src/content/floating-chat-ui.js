@@ -486,34 +486,52 @@ class FloatingChatUI {
     /**
      * Add a message to the chat
      * @param {string} role - 'user' or 'assistant'
-     * @param {string|Object} content - Message content
+     * @param {string|Object} content - Message content (can include image_url data)
      * @param {string|null} modelName - Model name for assistant messages
      * @param {boolean} isError - Whether this is an error message
+     * @param {string|null} base64Image - Optional base64 image data for this message
+     * @param {boolean} isRegenerated - Whether this is a regenerated response
      */
-    addMessage(role, content, modelName = null, isError = false) {
+    addMessage(role, content, modelName = null, isError = false, base64Image = null, isRegenerated = false) {
         // Track model name for assistant messages
         const msgModel = role === 'assistant' ? (modelName || this.currentModel) : null;
 
-        // ALWAYS store string content in chatHistory for compatibility with all models
-        let historyContent = content;
+        // Store FULL raw content in chatHistory to preserve image data for regeneration
+        // Also extract text for display purposes
+        let rawContent = content; // Keep original for history
+        let displayText = content;
+
         if (typeof content !== 'string') {
             if (Array.isArray(content)) {
                 const textPart = content.find(c => c.type === 'text');
-                historyContent = textPart ? textPart.text : '(image analyzed)';
+                displayText = textPart ? textPart.text : '(image analyzed)';
             } else if (content && content.content) {
                 if (Array.isArray(content.content)) {
                     const textPart = content.content.find(c => c.type === 'text');
-                    historyContent = textPart ? textPart.text : '(image analyzed)';
+                    displayText = textPart ? textPart.text : '(image analyzed)';
                 } else if (typeof content.content === 'string') {
-                    historyContent = content.content;
+                    displayText = content.content;
                 } else {
-                    historyContent = '(complex content)';
+                    displayText = '(complex content)';
                 }
             } else {
-                historyContent = '(complex content)';
+                displayText = '(complex content)';
             }
         }
-        this.chatHistory.push({ role: role, content: historyContent, model: msgModel });
+
+        // Store full message object with raw content AND optional image data
+        const historyEntry = {
+            role: role,
+            content: rawContent, // Keep full raw content
+            displayText: typeof displayText === 'string' ? displayText : String(displayText),
+            model: msgModel,
+            base64Image: base64Image || null, // Store image data if provided
+            isRegenerated: isRegenerated || false,
+            timestamp: Date.now()
+        };
+
+        this.chatHistory.push(historyEntry);
+        const messageIndex = this.chatHistory.length - 1;
 
         const msgDiv = document.createElement("div");
         msgDiv.style.cssText = `max-width: 85%; padding: 12px 14px; border-radius: 10px; line-height: 1.5; word-wrap: break-word; font-size: 13px; position: relative; transition: all 0.2s ease;`;
@@ -525,7 +543,80 @@ class FloatingChatUI {
             msgDiv.style.borderRadius = "10px 10px 2px 10px";
             msgDiv.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
 
-            if (typeof content === 'object' && content.content) {
+            // Check if this message has an image (from base64Image or content array)
+            const hasImage = base64Image || (Array.isArray(content) && content.some(c => c.type === 'image_url'));
+
+            if (hasImage) {
+                // Create image thumbnail preview
+                const imgContainer = document.createElement('div');
+                imgContainer.style.cssText = `
+                    margin-bottom: 8px; 
+                    border-radius: 6px; 
+                    overflow: hidden; 
+                    border: 1px solid rgba(255,255,255,0.1);
+                    background: #1a1a1a;
+                    position: relative;
+                `;
+
+                const thumbnail = document.createElement('img');
+                // Get image source from base64Image or content array
+                let imgSrc = base64Image ? `data:image/png;base64,${base64Image}` : null;
+                if (!imgSrc && Array.isArray(content)) {
+                    const imgPart = content.find(c => c.type === 'image_url');
+                    if (imgPart?.image_url?.url) {
+                        imgSrc = imgPart.image_url.url;
+                    }
+                }
+
+                thumbnail.src = imgSrc;
+                thumbnail.style.cssText = `
+                    width: 100%; 
+                    max-height: 120px; 
+                    object-fit: cover; 
+                    cursor: pointer;
+                    display: block;
+                    transition: transform 0.2s;
+                `;
+                thumbnail.title = "Click to view full size";
+                thumbnail.alt = "Screenshot thumbnail";
+
+                // Hover effect
+                thumbnail.onmouseenter = () => thumbnail.style.opacity = '0.85';
+                thumbnail.onmouseleave = () => thumbnail.style.opacity = '1';
+
+                // Click to view full size
+                thumbnail.onclick = () => this._showImageModal(imgSrc);
+
+                // Image icon overlay
+                const iconOverlay = document.createElement('div');
+                iconOverlay.style.cssText = `
+                    position: absolute;
+                    bottom: 4px;
+                    right: 4px;
+                    background: rgba(0,0,0,0.6);
+                    border-radius: 4px;
+                    padding: 2px 6px;
+                    font-size: 10px;
+                    color: #ccc;
+                    pointer-events: none;
+                `;
+                iconOverlay.textContent = '📷 Click to expand';
+
+                imgContainer.appendChild(thumbnail);
+                imgContainer.appendChild(iconOverlay);
+                msgDiv.appendChild(imgContainer);
+
+                // Add text label
+                const textLabel = document.createElement('em');
+                textLabel.style.cssText = "opacity: 0.7; font-size: 11px; display: block;";
+                if (Array.isArray(content)) {
+                    const textPart = content.find(c => c.type === 'text');
+                    textLabel.textContent = textPart?.text || '(Screenshot)';
+                } else {
+                    textLabel.textContent = '(Screenshot)';
+                }
+                msgDiv.appendChild(textLabel);
+            } else if (typeof content === 'object' && content.content) {
                 const textPart = Array.isArray(content.content) ? content.content.find(c => c.type === 'text') : { text: content.content };
                 const em = document.createElement('em');
                 em.textContent = '(Snippet)';
@@ -537,7 +628,7 @@ class FloatingChatUI {
                 textSpan.textContent = textPart ? textPart.text : '';
                 msgDiv.appendChild(textSpan);
             } else {
-                msgDiv.innerText = content;
+                msgDiv.innerText = typeof displayText === 'string' ? displayText : String(content);
             }
         } else {
             msgDiv.style.alignSelf = "flex-start";
@@ -546,11 +637,16 @@ class FloatingChatUI {
             msgDiv.style.border = "1px solid rgba(255,255,255,0.08)";
             msgDiv.style.borderRadius = "10px 10px 10px 2px";
 
-            // Add model label for assistant messages
+            // Add model label for assistant messages (with regenerated indicator if applicable)
             const modelLabel = this._getModelDisplayName(msgModel);
             const labelDiv = document.createElement("div");
             labelDiv.style.cssText = "font-size: 10px; color: #ff6b4a; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; display: inline-flex; align-items: center; gap: 4px; background: rgba(255,107,74,0.1); padding: 3px 8px; border-radius: 4px;";
-            labelDiv.innerHTML = `<span style="font-size: 11px;">✨</span> ${modelLabel}`;
+
+            if (isRegenerated) {
+                labelDiv.innerHTML = `<span style="font-size: 11px;">🔄</span> ${modelLabel} <span style="font-size: 9px; color: #888; margin-left: 4px; font-weight: 500;">Regenerated</span>`;
+            } else {
+                labelDiv.innerHTML = `<span style="font-size: 11px;">✨</span> ${modelLabel}`;
+            }
             msgDiv.appendChild(labelDiv);
 
             const contentDiv = document.createElement("div");
@@ -617,9 +713,9 @@ class FloatingChatUI {
             };
             actionsDiv.appendChild(copyBtn);
 
-            // Regenerate button
-            const regenBtn = createActionButton("Regenerate", '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>', "Get a new response");
-            regenBtn.onclick = () => this.regenerateLastResponse();
+            // Regenerate button - pass the message index for targeted regeneration
+            const regenBtn = createActionButton("Regenerate", '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>', "Regenerate from this point");
+            regenBtn.onclick = () => this.regenerateAtIndex(messageIndex);
             actionsDiv.appendChild(regenBtn);
 
             // Minimize/Expand button
@@ -697,51 +793,146 @@ class FloatingChatUI {
     }
 
     /**
-     * Regenerate the last assistant response
+     * Regenerate the last assistant response (convenience wrapper)
      */
     async regenerateLastResponse() {
-        let lastUserMsgIndex = -1;
+        // Find last assistant message index and regenerate from there
         for (let i = this.chatHistory.length - 1; i >= 0; i--) {
+            if (this.chatHistory[i].role === 'assistant') {
+                await this.regenerateAtIndex(i);
+                return;
+            }
+        }
+    }
+
+    /**
+     * Regenerate response at a specific index - "rewinds" conversation to that point
+     * @param {number} index - The index of the assistant message to regenerate
+     */
+    async regenerateAtIndex(index) {
+        if (index < 0 || index >= this.chatHistory.length) return;
+        if (this.chatHistory[index].role !== 'assistant') return;
+
+        // Find the user message that triggered this response
+        let userMsgIndex = -1;
+        for (let i = index - 1; i >= 0; i--) {
             if (this.chatHistory[i].role === 'user') {
-                lastUserMsgIndex = i;
+                userMsgIndex = i;
                 break;
             }
         }
+        if (userMsgIndex === -1) return;
 
-        if (lastUserMsgIndex === -1) return;
+        // Slice history to remove everything from the target index onward ("rewind")
+        const messagesToRemove = this.chatHistory.length - index;
+        this.chatHistory = this.chatHistory.slice(0, index);
 
-        if (this.chatHistory.length > lastUserMsgIndex + 1) {
-            this.chatHistory.pop();
-            const lastMsgDiv = this.chatBody.lastElementChild;
-            if (lastMsgDiv) lastMsgDiv.remove();
+        // Remove corresponding DOM elements from chatBody
+        for (let i = 0; i < messagesToRemove; i++) {
+            const lastChild = this.chatBody.lastElementChild;
+            if (lastChild && !lastChild.classList?.contains('typing-container')) {
+                lastChild.remove();
+            }
         }
-
-
 
         this.showTypingIndicator();
 
         try {
             let response;
 
-            if (isVisionModel(this.currentModel) && this.initialBase64Image && lastUserMsgIndex === 0) {
-                response = await chrome.runtime.sendMessage({
-                    action: "ASK_AI",
-                    model: this.currentModel,
-                    base64Image: this.initialBase64Image
-                });
+            // Collect all images from history up to (and including) the user message
+            const imagesToSend = [];
+            for (let i = 0; i <= userMsgIndex; i++) {
+                if (this.chatHistory[i].base64Image) {
+                    imagesToSend.push(this.chatHistory[i].base64Image);
+                }
+            }
+            // Also include initialBase64Image if not already in history
+            if (this.initialBase64Image && !imagesToSend.includes(this.initialBase64Image)) {
+                imagesToSend.unshift(this.initialBase64Image);
+            }
+
+            // Check if we need to include image data for vision models
+            if (isVisionModel(this.currentModel)) {
+                if (imagesToSend.length > 0) {
+                    // Use multi-image if multiple, single image otherwise
+                    if (imagesToSend.length === 1) {
+                        response = await chrome.runtime.sendMessage({
+                            action: "ASK_AI",
+                            model: this.currentModel,
+                            base64Image: imagesToSend[0]
+                        });
+                    } else {
+                        response = await chrome.runtime.sendMessage({
+                            action: "ASK_AI_MULTI_IMAGE",
+                            model: this.currentModel,
+                            images: imagesToSend,
+                            textContext: this._extractTextFromHistory(userMsgIndex)
+                        });
+                    }
+                } else {
+                    // No images, use text chat
+                    response = await chrome.runtime.sendMessage({
+                        action: "CONTINUE_CHAT",
+                        model: this.currentModel,
+                        history: this._buildApiHistory(userMsgIndex),
+                        mode: this.currentMode
+                    });
+                }
             } else {
-                response = await chrome.runtime.sendMessage({
-                    action: "CONTINUE_CHAT",
-                    model: this.currentModel,
-                    history: this.chatHistory.slice(0, lastUserMsgIndex + 1).map(m => ({ role: m.role, content: m.content })),
-                    mode: this.currentMode // Maintain selected mode on regenerate
-                });
+                // Non-vision model - need to use OCR text if there are images
+                if (imagesToSend.length > 0) {
+                    // OCR all images and build context
+                    let ocrTextParts = [];
+                    for (const img of imagesToSend) {
+                        const ocrResult = await chrome.runtime.sendMessage({
+                            action: "PERFORM_OCR",
+                            base64Image: img
+                        });
+                        if (ocrResult?.success && ocrResult.text) {
+                            ocrTextParts.push(ocrResult.text);
+                        }
+                    }
+
+                    if (ocrTextParts.length > 0) {
+                        // Build history with OCR text as the first user message
+                        const ocrContext = ocrTextParts.join('\n---\n');
+                        const historyWithOcr = [
+                            { role: 'user', content: `[Image content extracted via OCR]:\n${ocrContext}` },
+                            ...this._buildApiHistory(userMsgIndex).slice(1) // Skip original first message, use OCR instead
+                        ];
+
+                        response = await chrome.runtime.sendMessage({
+                            action: "CONTINUE_CHAT",
+                            model: this.currentModel,
+                            history: historyWithOcr,
+                            mode: this.currentMode
+                        });
+                    } else {
+                        // OCR failed, use text history as fallback
+                        response = await chrome.runtime.sendMessage({
+                            action: "CONTINUE_CHAT",
+                            model: this.currentModel,
+                            history: this._buildApiHistory(userMsgIndex),
+                            mode: this.currentMode
+                        });
+                    }
+                } else {
+                    // No images, use text history
+                    response = await chrome.runtime.sendMessage({
+                        action: "CONTINUE_CHAT",
+                        model: this.currentModel,
+                        history: this._buildApiHistory(userMsgIndex),
+                        mode: this.currentMode
+                    });
+                }
             }
 
             this.removeTypingIndicator();
 
             if (response && response.success) {
-                this.addMessage('assistant', response.answer, this.currentModel);
+                // Add regenerated indicator to the response
+                this._addRegeneratedMessage(response.answer, this.currentModel);
                 if (response.demoInfo) {
                     updateLocalDemoCache(response.demoInfo);
                 }
@@ -752,6 +943,167 @@ class FloatingChatUI {
             this.removeTypingIndicator();
             this.addMessage('assistant', "⚠️ Network Error: " + e.message, this.currentModel, true);
         }
+    }
+
+    /**
+     * Add a regenerated message with indicator badge
+     * @param {string} content - Message content
+     * @param {string} modelName - Model name
+     */
+    _addRegeneratedMessage(content, modelName) {
+        // Use addMessage but mark it as regenerated
+        this.addMessage('assistant', content, modelName, false, null, true);
+    }
+
+    /**
+     * Build API-compatible history array from chatHistory up to (and including) specified index
+     * @param {number} upToIndex - Include messages up to this index
+     * @returns {Array} History formatted for API calls
+     */
+    _buildApiHistory(upToIndex) {
+        return this.chatHistory.slice(0, upToIndex + 1).map(m => {
+            // Extract text content for API (some models don't support complex content)
+            let textContent = m.displayText || m.content;
+            if (typeof textContent !== 'string') {
+                if (Array.isArray(textContent)) {
+                    const textPart = textContent.find(c => c.type === 'text');
+                    textContent = textPart ? textPart.text : '';
+                } else {
+                    textContent = String(textContent);
+                }
+            }
+            return { role: m.role, content: textContent };
+        });
+    }
+
+    /**
+     * Extract text content from history for context
+     * @param {number} upToIndex - Include messages up to this index
+     * @returns {string} Combined text content
+     */
+    _extractTextFromHistory(upToIndex) {
+        return this.chatHistory
+            .slice(0, upToIndex + 1)
+            .filter(m => m.role === 'user')
+            .map(m => m.displayText || (typeof m.content === 'string' ? m.content : ''))
+            .join('\n');
+    }
+
+    /**
+     * Show full-size image in a modal overlay
+     * @param {string} imgSrc - Image source URL or data URI
+     */
+    _showImageModal(imgSrc) {
+        if (!imgSrc) return;
+
+        // Create modal overlay
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2147483647;
+            cursor: zoom-out;
+            animation: fadeIn 0.2s ease;
+        `;
+
+        // Add animation keyframes
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        `;
+        overlay.appendChild(style);
+
+        // Create image container
+        const imgContainer = document.createElement('div');
+        imgContainer.style.cssText = `
+            position: relative;
+            max-width: 90vw;
+            max-height: 90vh;
+            animation: scaleIn 0.2s ease;
+        `;
+
+        // Full-size image
+        const fullImg = document.createElement('img');
+        fullImg.src = imgSrc;
+        fullImg.style.cssText = `
+            max-width: 90vw;
+            max-height: 85vh;
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        `;
+        fullImg.alt = "Full size screenshot";
+
+        // Close button
+        const closeBtn = document.createElement('div');
+        closeBtn.style.cssText = `
+            position: absolute;
+            top: -15px;
+            right: -15px;
+            width: 32px;
+            height: 32px;
+            background: #ff6b4a;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 18px;
+            color: white;
+            box-shadow: 0 4px 12px rgba(255, 107, 74, 0.4);
+            transition: transform 0.2s;
+        `;
+        closeBtn.innerHTML = '×';
+        closeBtn.onmouseenter = () => closeBtn.style.transform = 'scale(1.1)';
+        closeBtn.onmouseleave = () => closeBtn.style.transform = 'scale(1)';
+
+        // Hint text
+        const hint = document.createElement('div');
+        hint.style.cssText = `
+            position: absolute;
+            bottom: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #888;
+            font-size: 12px;
+            white-space: nowrap;
+        `;
+        hint.textContent = 'Click anywhere or press ESC to close';
+
+        imgContainer.appendChild(fullImg);
+        imgContainer.appendChild(closeBtn);
+        imgContainer.appendChild(hint);
+        overlay.appendChild(imgContainer);
+
+        // Close handlers
+        const closeModal = () => {
+            overlay.style.animation = 'fadeIn 0.15s ease reverse';
+            setTimeout(() => overlay.remove(), 150);
+        };
+
+        overlay.onclick = closeModal;
+        closeBtn.onclick = (e) => { e.stopPropagation(); closeModal(); };
+        imgContainer.onclick = (e) => e.stopPropagation(); // Prevent close when clicking image
+
+        // ESC key handler
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+                document.removeEventListener('keydown', escHandler);
+            }
+        };
+        document.addEventListener('keydown', escHandler);
+
+        // Add to shadow DOM
+        this.shadow.appendChild(overlay);
     }
 
     /**
@@ -805,6 +1157,7 @@ class FloatingChatUI {
 
     /**
      * Process a snipped image for this window
+     * Creates a proper message object (like the initial snip) so it persists in history correctly
      * @param {string} croppedBase64
      */
     _processSnippedImage(croppedBase64) {
@@ -813,7 +1166,14 @@ class FloatingChatUI {
 
         this.showTypingIndicator();
 
-        this.addMessage('user', '(New screenshot added)');
+        // Create a proper message object with image data (unified format like initial snip)
+        const userContent = [
+            { type: 'text', text: '(Additional screenshot)' },
+            { type: 'image_url', image_url: { url: `data:image/png;base64,${croppedBase64}` } }
+        ];
+
+        // Add message with the full content AND store the base64 image
+        this.addMessage('user', userContent, null, false, croppedBase64);
 
         if (isVisionModel(this.currentModel)) {
             chrome.runtime.sendMessage({
@@ -887,14 +1247,16 @@ class FloatingChatUI {
             return initialText;
         }
 
-        // Build summary of follow-ups
+        // Build summary of follow-ups (use displayText for consistent text handling)
         const userFollowUps = followUpMessages.filter(m => m.role === 'user');
-        const snipAgainCount = userFollowUps.filter(m =>
-            m.content.includes('(New screenshot added)') || m.content.includes('(Snippet)')
-        ).length;
-        const textFollowUps = userFollowUps.filter(m =>
-            !m.content.includes('(New screenshot added)') && !m.content.includes('(Snippet)')
-        );
+        const snipAgainCount = userFollowUps.filter(m => {
+            const text = m.displayText || (typeof m.content === 'string' ? m.content : '');
+            return text.includes('(Additional screenshot)') || text.includes('(Snippet)') || m.base64Image;
+        }).length;
+        const textFollowUps = userFollowUps.filter(m => {
+            const text = m.displayText || (typeof m.content === 'string' ? m.content : '');
+            return !text.includes('(Additional screenshot)') && !text.includes('(Snippet)') && !m.base64Image;
+        });
 
         let summary = initialText;
 
@@ -907,9 +1269,10 @@ class FloatingChatUI {
 
             // Include text follow-ups (condensed)
             textFollowUps.forEach((msg, i) => {
-                const truncated = msg.content.length > 100
-                    ? msg.content.substring(0, 100) + '...'
-                    : msg.content;
+                const text = msg.displayText || (typeof msg.content === 'string' ? msg.content : '');
+                const truncated = text.length > 100
+                    ? text.substring(0, 100) + '...'
+                    : text;
                 summary += `• Follow-up ${i + 1}: "${truncated}"\n`;
             });
         }
@@ -919,6 +1282,7 @@ class FloatingChatUI {
 
     /**
      * Spawn a comparison window with a different model
+     * Duplicates the entire chat history and regenerates the last response
      */
     async spawnCompareWindow() {
         if (WindowManager.isMaxReached()) {
@@ -926,106 +1290,213 @@ class FloatingChatUI {
             return;
         }
 
+        // Find the last assistant message index in current chat
+        let lastAssistantIndex = -1;
+        for (let i = this.chatHistory.length - 1; i >= 0; i--) {
+            if (this.chatHistory[i].role === 'assistant') {
+                lastAssistantIndex = i;
+                break;
+            }
+        }
+
+        if (lastAssistantIndex === -1) {
+            showErrorToast("No response to compare yet");
+            return;
+        }
+
         const newUI = await FloatingChatUI.create();
         WindowManager.register(newUI);
 
-        if (this.initialUserMessage) {
-            // Copy all context to compare window
-            newUI.initialUserMessage = this.initialUserMessage;
-            newUI.initialBase64Image = this.initialBase64Image;
-            newUI.allImages = [...this.allImages];  // Copy all images
+        // Copy all state to compare window
+        newUI.initialUserMessage = this.initialUserMessage;
+        newUI.initialBase64Image = this.initialBase64Image;
+        newUI.allImages = [...this.allImages];
 
-            // Inherit mode from parent window
-            newUI.currentMode = this.currentMode;
-            if (newUI.modeSelect) newUI.modeSelect.value = this.currentMode;
+        // Inherit mode from parent window
+        newUI.currentMode = this.currentMode;
+        if (newUI.modeSelect) newUI.modeSelect.value = this.currentMode;
 
-            // Build summarized context for text display
-            const summarizedContext = this._buildSummarizedContext();
-            newUI.addMessage('user', summarizedContext);
+        // Select a different model
+        const otherModel = this._getNextAvailableModel();
+        if (otherModel && newUI.modelSelect) {
+            newUI.currentModel = otherModel;
+            newUI.modelSelect.value = otherModel;
+        }
 
-            const otherModel = this._getNextAvailableModel();
-            if (otherModel && newUI.modelSelect) {
-                newUI.currentModel = otherModel;
-                newUI.modelSelect.value = otherModel;
+        // Clone all messages UP TO (but not including) the last assistant message
+        // This preserves the full conversation context
+        for (let i = 0; i < lastAssistantIndex; i++) {
+            const msg = this.chatHistory[i];
+            // Recreate each message in the new window (without adding to DOM twice)
+            newUI.chatHistory.push({
+                role: msg.role,
+                content: msg.content,
+                displayText: msg.displayText,
+                model: msg.model,
+                base64Image: msg.base64Image,
+                isRegenerated: msg.isRegenerated,
+                timestamp: msg.timestamp
+            });
+
+            // Render the message in the UI
+            this._renderClonedMessage(newUI, msg);
+        }
+
+        // Now regenerate the last response with the new model
+        newUI.showTypingIndicator();
+
+        try {
+            let response;
+
+            // Collect all images from history
+            const imagesToSend = [];
+            if (newUI.initialBase64Image) {
+                imagesToSend.push(newUI.initialBase64Image);
+            }
+            for (let i = 0; i < newUI.chatHistory.length; i++) {
+                if (newUI.chatHistory[i].base64Image && !imagesToSend.includes(newUI.chatHistory[i].base64Image)) {
+                    imagesToSend.push(newUI.chatHistory[i].base64Image);
+                }
             }
 
-            newUI.showTypingIndicator();
+            // Build full conversation history as text
+            const apiHistory = newUI._buildApiHistory(newUI.chatHistory.length - 1);
+            const fullTextContext = apiHistory.map(m => `${m.role}: ${m.content}`).join('\n');
 
-            try {
-                let response;
-
-                // Collect all images (initial + snip-again)
-                const allImagesToSend = [];
-                if (this.initialBase64Image) {
-                    allImagesToSend.push(this.initialBase64Image);
-                }
-                allImagesToSend.push(...this.allImages);
-
-                // For vision models, send ALL images
-                if (isVisionModel(newUI.currentModel) && allImagesToSend.length > 0) {
-                    response = await chrome.runtime.sendMessage({
-                        action: "ASK_AI_MULTI_IMAGE",
-                        model: newUI.currentModel,
-                        images: allImagesToSend,
-                        textContext: summarizedContext
+            if (isVisionModel(newUI.currentModel) && imagesToSend.length > 0) {
+                // Vision model with images: Always use MULTI_IMAGE which supports textContext
+                // ASK_AI does NOT support additionalContext, so we must use MULTI_IMAGE even for 1 image
+                response = await chrome.runtime.sendMessage({
+                    action: "ASK_AI_MULTI_IMAGE",
+                    model: newUI.currentModel,
+                    images: imagesToSend,
+                    textContext: fullTextContext
+                });
+            } else if (!isVisionModel(newUI.currentModel) && imagesToSend.length > 0) {
+                // Non-vision model with images: Extract text via OCR first
+                let ocrTextParts = [];
+                for (const img of imagesToSend) {
+                    const ocrResult = await chrome.runtime.sendMessage({
+                        action: "PERFORM_OCR",
+                        base64Image: img
                     });
+                    if (ocrResult?.success && ocrResult.text) {
+                        ocrTextParts.push(ocrResult.text);
+                    }
+                }
 
-                    // Fallback to single image if multi-image not supported
-                    if (!response || response.error?.includes('not supported')) {
-                        response = await chrome.runtime.sendMessage({
-                            action: "ASK_AI",
-                            model: newUI.currentModel,
-                            base64Image: allImagesToSend[allImagesToSend.length - 1],  // Use latest image
-                            additionalContext: summarizedContext
-                        });
-                    }
-                } else if (!isVisionModel(newUI.currentModel) && allImagesToSend.length > 0) {
-                    // Text model - OCR all images and combine
-                    // ... (legacy ocr logic)
-                    let allOcrText = '';
-                    for (const img of allImagesToSend) {
-                        const ocrResult = await chrome.runtime.sendMessage({
-                            action: "PERFORM_OCR",
-                            base64Image: img
-                        });
-                        if (ocrResult?.success && ocrResult.text) {
-                            allOcrText += ocrResult.text + '\n---\n';
-                        }
-                    }
+                if (ocrTextParts.length > 0) {
+                    // Inject OCR context at the start of history
+                    const ocrContext = ocrTextParts.join('\n---\n');
+                    const historyWithOcr = [
+                        { role: 'user', content: `[Image content extracted via OCR]:\n${ocrContext}` },
+                        ...apiHistory.slice(1) // Skip first message which references the image
+                    ];
 
-                    if (allOcrText) {
-                        response = await chrome.runtime.sendMessage({
-                            action: "ASK_AI_TEXT",
-                            model: newUI.currentModel,
-                            text: allOcrText.trim()
-                        });
-                    } else {
-                        response = { success: false, error: "OCR failed - no text extracted from images" };
-                    }
-                } else {
-                    // No image - send summarized context as chat
                     response = await chrome.runtime.sendMessage({
                         action: "CONTINUE_CHAT",
                         model: newUI.currentModel,
-                        history: [{ role: 'user', content: summarizedContext }],
-                        mode: newUI.currentMode // Inherit mode from parent
+                        history: historyWithOcr,
+                        mode: newUI.currentMode
+                    });
+                } else {
+                    // OCR failed, just use text history
+                    response = await chrome.runtime.sendMessage({
+                        action: "CONTINUE_CHAT",
+                        model: newUI.currentModel,
+                        history: apiHistory,
+                        mode: newUI.currentMode
                     });
                 }
-
-                newUI.removeTypingIndicator();
-                if (response && response.success) {
-                    newUI.addMessage('assistant', response.answer, newUI.currentModel);
-                    if (response.demoInfo) {
-                        updateLocalDemoCache(response.demoInfo);
-                    }
-                } else {
-                    newUI.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), newUI.currentModel, true);
-                }
-            } catch (e) {
-                newUI.removeTypingIndicator();
-                newUI.addMessage('assistant', "⚠️ Network Error: " + e.message, newUI.currentModel, true);
+            } else {
+                // No images: Use text-only chat
+                response = await chrome.runtime.sendMessage({
+                    action: "CONTINUE_CHAT",
+                    model: newUI.currentModel,
+                    history: apiHistory,
+                    mode: newUI.currentMode
+                });
             }
+
+            newUI.removeTypingIndicator();
+            if (response && response.success) {
+                newUI.addMessage('assistant', response.answer, newUI.currentModel);
+                if (response.demoInfo) {
+                    updateLocalDemoCache(response.demoInfo);
+                }
+            } else {
+                newUI.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), newUI.currentModel, true);
+            }
+        } catch (e) {
+            newUI.removeTypingIndicator();
+            newUI.addMessage('assistant', "⚠️ Network Error: " + e.message, newUI.currentModel, true);
         }
+    }
+
+    /**
+     * Helper to render a cloned message in a new window
+     * @param {FloatingChatUI} targetUI - The target window
+     * @param {Object} msg - The message object from chatHistory
+     */
+    _renderClonedMessage(targetUI, msg) {
+        const msgDiv = document.createElement("div");
+        msgDiv.style.cssText = `max-width: 85%; padding: 12px 14px; border-radius: 10px; line-height: 1.5; word-wrap: break-word; font-size: 13px; position: relative;`;
+
+        if (msg.role === 'user') {
+            msgDiv.style.alignSelf = "flex-end";
+            msgDiv.style.background = "linear-gradient(135deg, #3a3a3a 0%, #2d2d2d 100%)";
+            msgDiv.style.color = "#e8e8e8";
+            msgDiv.style.borderRadius = "10px 10px 2px 10px";
+            msgDiv.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
+
+            // Check for image
+            if (msg.base64Image) {
+                const imgContainer = document.createElement('div');
+                imgContainer.style.cssText = `margin-bottom: 8px; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); background: #1a1a1a; position: relative;`;
+
+                const thumbnail = document.createElement('img');
+                thumbnail.src = `data:image/png;base64,${msg.base64Image}`;
+                thumbnail.style.cssText = `width: 100%; max-height: 120px; object-fit: cover; cursor: pointer; display: block;`;
+                thumbnail.onclick = () => targetUI._showImageModal(`data:image/png;base64,${msg.base64Image}`);
+
+                const overlay = document.createElement('div');
+                overlay.style.cssText = `position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.6); border-radius: 4px; padding: 2px 6px; font-size: 10px; color: #ccc;`;
+                overlay.textContent = '📷';
+
+                imgContainer.appendChild(thumbnail);
+                imgContainer.appendChild(overlay);
+                msgDiv.appendChild(imgContainer);
+            }
+
+            const textLabel = document.createElement('span');
+            textLabel.style.cssText = "opacity: 0.9; font-size: 12px;";
+            textLabel.textContent = msg.displayText || '';
+            msgDiv.appendChild(textLabel);
+        } else {
+            msgDiv.style.alignSelf = "flex-start";
+            msgDiv.style.background = "rgba(255,255,255,0.05)";
+            msgDiv.style.color = "#e8e8e8";
+            msgDiv.style.border = "1px solid rgba(255,255,255,0.08)";
+            msgDiv.style.borderRadius = "10px 10px 10px 2px";
+
+            const modelLabel = targetUI._getModelDisplayName(msg.model);
+            const labelDiv = document.createElement("div");
+            labelDiv.style.cssText = "font-size: 10px; color: #ff6b4a; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; display: inline-flex; align-items: center; gap: 4px; background: rgba(255,107,74,0.1); padding: 3px 8px; border-radius: 4px;";
+            labelDiv.innerHTML = `<span style="font-size: 11px;">✨</span> ${modelLabel}`;
+            msgDiv.appendChild(labelDiv);
+
+            const contentDiv = document.createElement("div");
+            contentDiv.style.cssText = "max-height: 350px; overflow-y: auto;";
+            const text = msg.displayText || (typeof msg.content === 'string' ? msg.content : '');
+            if (typeof parseMarkdown === 'function') {
+                contentDiv.innerHTML = parseMarkdown(sanitizeModelText(text));
+            } else {
+                contentDiv.innerText = text;
+            }
+            msgDiv.appendChild(contentDiv);
+        }
+
+        targetUI.chatBody.appendChild(msgDiv);
     }
 
     /**
@@ -1069,11 +1540,13 @@ class FloatingChatUI {
         const modelToUse = this.currentModel;
         const modeToUse = mode || this.currentMode || 'short';
 
+        // Use displayText for API calls (compatible format) while preserving model attribution
         const formattedHistory = this.chatHistory.map(msg => {
+            const textContent = msg.displayText || (typeof msg.content === 'string' ? msg.content : '');
             if (msg.model && msg.role === 'assistant') {
-                return { role: msg.role, content: `[Response from ${this._getModelDisplayName(msg.model)}]: ${msg.content}` };
+                return { role: msg.role, content: `[Response from ${this._getModelDisplayName(msg.model)}]: ${textContent}` };
             }
-            return { role: msg.role, content: msg.content };
+            return { role: msg.role, content: textContent };
         });
 
         try {

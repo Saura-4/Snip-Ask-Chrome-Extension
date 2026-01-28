@@ -159,7 +159,9 @@ async function handleResponse(apiResponse) {
 
         const ui = await FloatingChatUI.create();
         WindowManager.register(ui);
-        ui.addMessage('user', apiResponse.initialUserMessage);
+
+        // Pass base64Image so image thumbnail appears in chat
+        ui.addMessage('user', apiResponse.initialUserMessage, null, false, apiResponse.base64Image || null);
         ui.addMessage('assistant', apiResponse.answer);
 
         // Store initial state for comparison cloning
