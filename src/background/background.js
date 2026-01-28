@@ -609,14 +609,32 @@ async function handleMultiImageRequest(images, explicitModel, textContext, sendR
 
         const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
 
-        // Use askMultiImage if available, otherwise fall back to single image with latest
-        let result;
-        if (typeof aiService.askMultiImage === 'function') {
-            result = await aiService.askMultiImage(images, textContext);
+        // Use chat() with properly formatted messages including images and text context
+        // Build a message with all images and the conversation context
+        const contentArray = [];
+
+        // Add text context (conversation history)
+        if (textContext) {
+            contentArray.push({ type: 'text', text: textContext });
         } else {
-            // Fallback: use last image only
-            result = await aiService.askImage(images[images.length - 1]);
+            contentArray.push({ type: 'text', text: `Analyze these ${images.length} images and provide a helpful response.` });
         }
+
+        // Add all images
+        for (const img of images) {
+            contentArray.push({
+                type: 'image_url',
+                image_url: { url: `data:image/jpeg;base64,${img}` }
+            });
+        }
+
+        // Use chat() which all services implement
+        const messages = [
+            { role: 'user', content: contentArray }
+        ];
+
+        const answer = await aiService.chat(messages);
+        const result = { answer: answer, initialUserMessage: messages[0] };
 
         sendResponse({
             success: true,

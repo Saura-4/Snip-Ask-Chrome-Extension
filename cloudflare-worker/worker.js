@@ -223,6 +223,48 @@ export default {
             console.error('Worker error:', error);
             return jsonResponse({ error: 'Internal error', code: 'INTERNAL_ERROR' }, 500, corsHeaders);
         }
+    },
+
+    // Scheduled Cleanup Handler - MUST be inside default export
+    // Cron runs at :30 past each hour: "30 * * * *"
+    // IST = UTC + 5:30, so midnight IST (00:00) = 18:30 UTC
+    async scheduled(event, env, ctx) {
+        try {
+            const now = new Date();
+            const utcHours = now.getUTCHours();
+            const utcMinutes = now.getUTCMinutes();
+
+            // IST offset is +5:30 (330 minutes)
+            const istOffset = 330; // minutes
+            const istTime = new Date(now.getTime() + istOffset * 60 * 1000);
+            const istHours = istTime.getUTCHours();
+
+            console.log(`Scheduled cleanup running. UTC: ${utcHours}:${utcMinutes}, IST Hour: ${istHours}`);
+
+            // 1. Hourly: Clean velocity events older than 1 hour
+            const oneHourAgo = new Date(Date.now() - 3600 * 1000).toISOString();
+            const velocityCleanup = await env.DB.prepare(
+                'DELETE FROM velocity_events WHERE requested_at < ?'
+            ).bind(oneHourAgo).run();
+            console.log(`Velocity cleanup: Deleted ${velocityCleanup.meta?.changes || 0} old events`);
+
+            // 2. Daily Reset at midnight IST (when IST hour is 0)
+            // This triggers when UTC is 18:30 (IST midnight)
+            if (istHours === 0) {
+                // Clear daily usage stats
+                const usageCleanup = await env.DB.prepare('DELETE FROM usage_stats').run();
+                console.log(`Daily reset at IST midnight: Cleared ${usageCleanup.meta?.changes || 0} usage stats`);
+
+                // Also clear all velocity events for a fresh start each day
+                const velocityDailyCleanup = await env.DB.prepare('DELETE FROM velocity_events').run();
+                console.log(`Daily reset: Cleared ${velocityDailyCleanup.meta?.changes || 0} velocity events`);
+            }
+
+            console.log('Cleanup completed successfully');
+        } catch (error) {
+            console.error('Scheduled cleanup error:', error.message, error.stack);
+            throw error; // Re-throw so Cloudflare logs the error
+        }
     }
 };
 
@@ -233,32 +275,5 @@ function jsonResponse(data, status, corsHeaders) {
     });
 }
 
-// Scheduled Cleanup
-export async function scheduled(event, env, ctx) {
-    // 1. Hourly: Clean velocity events older than 1 hour
-    const oneHourAgo = new Date(Date.now() - 3600 * 1000).toISOString();
-    await env.DB.prepare(
-        'DELETE FROM velocity_events WHERE requested_at < ?'
-    ).bind(oneHourAgo).run();
 
-    // 2. Daily: Reset usage stats (This is tricky with just 'scheduled', 
-    // ideally we run this specifically at midnight, or we just check the time).
-    // Simple approach: If the Cron is set to run hourly, we need a way to know it's midnight.
-    // OR we rely on the Cron Trigger configuration in wrangler.toml to call this script at 00:00.
 
-    // Assuming wrangler.toml has a trigger for midnight:
-    // [triggers]
-    // crons = ["0 0 * * *"] # Midnight UTC
-
-    // But if we use one script for both, we might just wipe usage if it's near midnight?
-    // Safer: Just delete usage_stats if the trigger implies it (checking current time is roughly 00:00 UTC).
-
-    const now = new Date();
-    if (now.getUTCHours() === 0) {
-        // It's midnight hour, clear daily stats
-        await env.DB.prepare('DELETE FROM usage_stats').run();
-        console.log('Daily usage stats cleared');
-    }
-
-    console.log('Cleanup performed');
-}
