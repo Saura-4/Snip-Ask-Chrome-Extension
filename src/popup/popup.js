@@ -608,6 +608,47 @@ function setupEventListeners() {
     });
   });
 
+  // Support Button (Footer)
+  document.getElementById('supportBtn')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.getElementById('settingsPanel').classList.add('open');
+    document.body.classList.add('settings-open');
+    // Switch to General tab
+    document.querySelector('.tab-btn[data-tab="general"]').click();
+    // Scroll to support section
+    setTimeout(() => {
+      const supportSection = document.querySelector('.settings-section:last-child');
+      if (supportSection) supportSection.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  });
+
+  // Copy UPI ID functionality
+  const copyUpiBtn = document.getElementById('copyUpiBtn');
+  const upiIdDisplay = document.getElementById('upiIdDisplay');
+
+  if (copyUpiBtn && upiIdDisplay) {
+    copyUpiBtn.addEventListener('click', () => {
+      const upiId = upiIdDisplay.textContent;
+      // Don't copy placeholder if user hasn't set it (though buttons are generic now)
+      if (upiId.includes('INSERT')) {
+        alert('Please configure your UPI ID first.'); // Should not happen in prod ideally
+        return;
+      }
+
+      navigator.clipboard.writeText(upiId).then(() => {
+        const originalIcon = copyUpiBtn.innerHTML;
+        copyUpiBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+        copyUpiBtn.style.color = '#4caf50';
+        setTimeout(() => {
+          copyUpiBtn.innerHTML = originalIcon;
+          copyUpiBtn.style.color = '';
+        }, 2000);
+      }).catch(err => {
+        console.error('Failed to copy text: ', err);
+      });
+    });
+  }
+
   // Max compare windows setting
   const maxCompareSelect = document.getElementById('maxCompareWindows');
   if (maxCompareSelect) {

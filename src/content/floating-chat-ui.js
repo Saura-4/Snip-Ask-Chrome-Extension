@@ -8,8 +8,10 @@ class FloatingChatUI {
     constructor() {
         this.chatHistory = [];
         this.currentModel = null;
-        this.currentMode = null; // Track selected mode (short/detailed/code/default)
+        this.currentMode = null; // Track selected mode (short/detailed/code/default/custom)
         this.availableModels = [];
+        this.customModes = [];  // User-created custom modes
+        this.customPrompt = ''; // Custom prompt text for 'custom' mode
         this.isMinimized = false;
         this.hasSavedPosition = false;
         this.initialUserMessage = null;
@@ -48,12 +50,14 @@ class FloatingChatUI {
             ];
         }
 
-        // Get the current selected model from storage
+        // Get the current selected model, mode, and custom modes from storage
         const storage = await new Promise(resolve => {
-            chrome.storage.local.get(['selectedModel', 'selectedMode'], resolve);
+            chrome.storage.local.get(['selectedModel', 'selectedMode', 'customModes', 'customPrompt'], resolve);
         });
         this.currentModel = storage.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
         this.currentMode = storage.selectedMode || 'short';
+        this.customModes = storage.customModes || [];
+        this.customPrompt = storage.customPrompt || '';
 
         // If current model is not in available models, auto-select first available
         const isCurrentModelValid = this.availableModels.some(m => m.value === this.currentModel);
@@ -75,11 +79,26 @@ class FloatingChatUI {
             this._bubbleCleanup();
             this._bubbleCleanup = null;
         }
-        if (this.host) {
-            this.host.remove();
-            this.host = null;
+
+        // Trigger exit animation if container exists
+        if (this.container) {
+            this.container.style.animation = 'slideOut 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) both';
+
+            // Wait for animation to finish
+            setTimeout(() => {
+                if (this.host) {
+                    this.host.remove();
+                    this.host = null;
+                }
+                WindowManager.unregister(this);
+            }, 200); // Match animation duration
+        } else {
+            if (this.host) {
+                this.host.remove();
+                this.host = null;
+            }
+            WindowManager.unregister(this);
         }
-        WindowManager.unregister(this);
     }
 
     /**
@@ -246,11 +265,22 @@ class FloatingChatUI {
             min-width: 320px; min-height: 280px;
             max-width: 90vw; max-height: 90vh;
             backdrop-filter: blur(10px);
+            animation: slideIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
         `;
 
         // Inject UX Polish Styles (Tables, Code Blocks, Typing Indicator)
         const style = document.createElement('style');
         style.textContent = `
+            /* WINDOW TRANSITIONS */
+            @keyframes slideIn {
+                from { opacity: 0; transform: translateY(20px) scale(0.95); }
+                to { opacity: 1; transform: translateY(0) scale(1); }
+            }
+            @keyframes slideOut {
+                from { opacity: 1; transform: translateY(0) scale(1); }
+                to { opacity: 0; transform: translateY(10px) scale(0.95); }
+            }
+
             /* MARKDOWN TABLES */
             .table-container { overflow-x: auto; border-radius: 8px; border: 1px solid #333; background: #111; margin: 10px 0; }
             table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
@@ -335,20 +365,41 @@ class FloatingChatUI {
             transition: all 0.2s; font-weight: 500;
         `;
 
-        const modes = [
-            { value: 'short', name: '⚡ Short' },
-            { value: 'detailed', name: '📚 Detailed' },
-            { value: 'code', name: '💻 Code' },
-            { value: 'default', name: '🎯 Default' }
-        ];
+        // Load all modes from storage (includes built-in and user-created modes)
+        // This matches how popup.js handles modes - storage is the source of truth
+        if (this.customModes && this.customModes.length > 0) {
+            this.customModes.forEach(m => {
+                const opt = document.createElement("option");
+                opt.value = m.id;
+                // Add 📝 prefix only for user-created modes (isDefault !== true)
+                opt.textContent = m.isDefault ? m.name : `📝 ${m.name}`;
+                if (m.id === this.currentMode) opt.selected = true;
+                this.modeSelect.appendChild(opt);
+            });
+        } else {
+            // Fallback if no modes in storage (shouldn't normally happen)
+            const defaultModes = [
+                { id: 'short', name: '⚡ Short Answer' },
+                { id: 'detailed', name: '🧠 Detailed' },
+                { id: 'code', name: '💻 Code Debug' }
+            ];
+            defaultModes.forEach(m => {
+                const opt = document.createElement("option");
+                opt.value = m.id;
+                opt.textContent = m.name;
+                if (m.id === this.currentMode) opt.selected = true;
+                this.modeSelect.appendChild(opt);
+            });
+        }
 
-        modes.forEach(m => {
-            const opt = document.createElement("option");
-            opt.value = m.value;
-            opt.textContent = m.name;
-            if (m.value === this.currentMode) opt.selected = true;
-            this.modeSelect.appendChild(opt);
-        });
+        // Add custom prompt option (only if user has a custom prompt set)
+        if (this.customPrompt) {
+            const customOpt = document.createElement("option");
+            customOpt.value = 'custom';
+            customOpt.textContent = '✍️ Custom Prompt';
+            if (this.currentMode === 'custom') customOpt.selected = true;
+            this.modeSelect.appendChild(customOpt);
+        }
 
         this.modeSelect.addEventListener("change", () => {
             this.currentMode = this.modeSelect.value;
@@ -491,8 +542,9 @@ class FloatingChatUI {
      * @param {boolean} isError - Whether this is an error message
      * @param {string|null} base64Image - Optional base64 image data for this message
      * @param {boolean} isRegenerated - Whether this is a regenerated response
+     * @param {Object|null} tokenUsage - Token usage data from API response
      */
-    addMessage(role, content, modelName = null, isError = false, base64Image = null, isRegenerated = false) {
+    addMessage(role, content, modelName = null, isError = false, base64Image = null, isRegenerated = false, tokenUsage = null) {
         // Track model name for assistant messages
         const msgModel = role === 'assistant' ? (modelName || this.currentModel) : null;
 
@@ -642,10 +694,13 @@ class FloatingChatUI {
             const labelDiv = document.createElement("div");
             labelDiv.style.cssText = "font-size: 10px; color: #ff6b4a; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; display: inline-flex; align-items: center; gap: 4px; background: rgba(255,107,74,0.1); padding: 3px 8px; border-radius: 4px;";
 
+            // Format token count for display
+            const tokenInfo = tokenUsage?.totalTokens ? tokenUsage.totalTokens.toLocaleString() : null;
+
             if (isRegenerated) {
-                labelDiv.innerHTML = `<span style="font-size: 11px;">🔄</span> ${modelLabel} <span style="font-size: 9px; color: #888; margin-left: 4px; font-weight: 500;">Regenerated</span>`;
+                labelDiv.innerHTML = `<span style="font-size: 11px;">🔄</span> ${modelLabel}${tokenInfo ? ` <span style="font-size: 9px; color: #888; margin-left: 6px;">• ${tokenInfo} tokens</span>` : ''} <span style="font-size: 9px; color: #888; margin-left: 4px; font-weight: 500;">Regenerated</span>`;
             } else {
-                labelDiv.innerHTML = `<span style="font-size: 11px;">✨</span> ${modelLabel}`;
+                labelDiv.innerHTML = `<span style="font-size: 11px;">✨</span> ${modelLabel}${tokenInfo ? ` <span style="font-size: 9px; color: #888; margin-left: 6px;">• ${tokenInfo} tokens</span>` : ''}`;
             }
             msgDiv.appendChild(labelDiv);
 
@@ -933,8 +988,8 @@ class FloatingChatUI {
             if (response && response.success) {
                 // Add regenerated indicator to the response
                 this._addRegeneratedMessage(response.answer, this.currentModel);
-                if (response.demoInfo) {
-                    updateLocalDemoCache(response.demoInfo);
+                if (response.guestInfo) {
+                    updateLocalGuestCache(response.guestInfo);
                 }
             } else {
                 this.addMessage('assistant', "⚠️ Regenerate failed: " + (response?.error || "Unknown error"), this.currentModel, true);
@@ -1183,9 +1238,9 @@ class FloatingChatUI {
             }, (response) => {
                 this.removeTypingIndicator();
                 if (response && response.success) {
-                    this.addMessage('assistant', response.answer, this.currentModel);
-                    if (response.demoInfo) {
-                        updateLocalDemoCache(response.demoInfo);
+                    this.addMessage('assistant', response.answer, this.currentModel, false, null, false, response.tokenUsage);
+                    if (response.guestInfo) {
+                        updateLocalGuestCache(response.guestInfo);
                     }
                 } else {
                     this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), this.currentModel, true);
@@ -1204,9 +1259,9 @@ class FloatingChatUI {
                     }, (response) => {
                         this.removeTypingIndicator();
                         if (response && response.success) {
-                            this.addMessage('assistant', response.answer, this.currentModel);
-                            if (response.demoInfo) {
-                                updateLocalDemoCache(response.demoInfo);
+                            this.addMessage('assistant', response.answer, this.currentModel, false, null, false, response.tokenUsage);
+                            if (response.guestInfo) {
+                                updateLocalGuestCache(response.guestInfo);
                             }
                         } else {
                             this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), this.currentModel, true);
@@ -1420,9 +1475,9 @@ class FloatingChatUI {
 
             newUI.removeTypingIndicator();
             if (response && response.success) {
-                newUI.addMessage('assistant', response.answer, newUI.currentModel);
-                if (response.demoInfo) {
-                    updateLocalDemoCache(response.demoInfo);
+                newUI.addMessage('assistant', response.answer, newUI.currentModel, false, null, false, response.tokenUsage);
+                if (response.guestInfo) {
+                    updateLocalGuestCache(response.guestInfo);
                 }
             } else {
                 newUI.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), newUI.currentModel, true);
@@ -1561,9 +1616,9 @@ class FloatingChatUI {
             this.removeTypingIndicator();
 
             if (response && response.success) {
-                this.addMessage('assistant', response.answer, modelToUse);
-                if (response.demoInfo) {
-                    updateLocalDemoCache(response.demoInfo);
+                this.addMessage('assistant', response.answer, modelToUse, false, null, false, response.tokenUsage);
+                if (response.guestInfo) {
+                    updateLocalGuestCache(response.guestInfo);
                 }
             } else {
                 this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), modelToUse, true);
@@ -1593,26 +1648,63 @@ class FloatingChatUI {
     makeDraggable(header) {
         let isDragging = false;
         let offsetX, offsetY;
+        let animationFrameId = null;
+        let containerWidth, containerHeight;
 
         header.addEventListener('mousedown', (e) => {
             if (e.target.id === 'closeBtn') return;
+            // Prevent drag when clicking controls
+            if (e.target.closest('button') || e.target.closest('select')) return;
+
             isDragging = true;
+
+            // Cache dimensions and offsets
             const rect = this.container.getBoundingClientRect();
+            containerWidth = rect.width;
+            containerHeight = rect.height;
             offsetX = e.clientX - rect.left;
             offsetY = e.clientY - rect.top;
+
+            // Optimization: Remove transitions during drag
+            this.container.style.transition = 'none';
         });
 
         const onMouseMove = (e) => {
-            if (isDragging) {
-                e.preventDefault();
-                this.container.style.left = (e.clientX - offsetX) + "px";
-                this.container.style.top = (e.clientY - offsetY) + "px";
-            }
+            if (!isDragging) return;
+            e.preventDefault();
+
+            if (animationFrameId) return;
+
+            animationFrameId = requestAnimationFrame(() => {
+                const mouseX = e.clientX;
+                const mouseY = e.clientY;
+
+                let newLeft = mouseX - offsetX;
+                let newTop = mouseY - offsetY;
+
+                // Viewport boundary checks (keep fully on screen)
+                const winWidth = window.innerWidth;
+                const winHeight = window.innerHeight;
+
+                newLeft = Math.max(0, Math.min(newLeft, winWidth - containerWidth));
+                newTop = Math.max(0, Math.min(newTop, winHeight - containerHeight));
+
+                this.container.style.left = newLeft + "px";
+                this.container.style.top = newTop + "px";
+                this.container.style.right = 'auto'; // Ensure right doesn't conflict
+
+                animationFrameId = null;
+            });
         };
 
         const onMouseUp = () => {
             if (isDragging) {
                 isDragging = false;
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                    animationFrameId = null;
+                }
+                this.container.style.transition = ''; // Restore transitions
                 this.saveState();
             }
         };
@@ -1623,6 +1715,7 @@ class FloatingChatUI {
         this._dragCleanup = () => {
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
         };
     }
 

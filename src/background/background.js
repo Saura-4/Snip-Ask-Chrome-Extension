@@ -201,12 +201,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                     // Use mode from request (mode selector), fallback to storage
                     const mode = request.mode || storage.selectedMode || storage.interactionMode || 'short';
+                    const customModes = storage.customModes || null;
 
                     // Build system prompt based on mode (guest mode doesn't use aiService, so we add manually)
                     let systemPrompt = 'This is a POPUP WINDOW. Analyze the input and provide a helpful, concise response (under 200 words). Be direct and focused.';
                     if (mode === 'short') systemPrompt = "POPUP WINDOW: Concise answer engine. Keep under 100 words. For MCQs: 'Answer: <option>. <one-sentence explanation>'. For other questions: direct answer only. No preamble, no elaboration.";
                     else if (mode === 'detailed') systemPrompt = "POPUP TUTOR: Provide a focused, step-by-step answer. Use concise bullet points. Limit to 3-5 key steps max. Use Markdown sparingly (bold for emphasis only).";
                     else if (mode === 'code') systemPrompt = "POPUP CODE ASSISTANT: Provide ESSENTIAL CODE ONLY - no exhaustive examples. Output ONE clean code block + 1-2 sentences explaining the key fix/concept. Be concise.";
+                    else if (mode === 'custom' && storage.customPrompt) {
+                        // Use user's custom prompt
+                        systemPrompt = storage.customPrompt;
+                    } else if (customModes) {
+                        // Check for user-created custom mode
+                        const customMode = customModes.find(m => m.id === mode);
+                        if (customMode) systemPrompt = customMode.prompt;
+                    }
 
                     // Prepend system message to history
                     const messagesWithSystem = [
@@ -227,7 +236,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     // Strip thinking tags from Qwen models
                     answer = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-                    sendResponse({ success: true, answer: answer, demoInfo: guestResponse._demo });
+                    // Extract token usage from Groq response
+                    const tokenUsage = guestResponse.usage ? {
+                        promptTokens: guestResponse.usage.prompt_tokens || 0,
+                        completionTokens: guestResponse.usage.completion_tokens || 0,
+                        totalTokens: guestResponse.usage.total_tokens || 0
+                    } : null;
+
+                    sendResponse({ success: true, answer: answer, guestInfo: guestResponse._demo, tokenUsage: tokenUsage });
                     return;
                 }
 
@@ -246,8 +262,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const mode = request.mode || storage.selectedMode || storage.interactionMode || 'short';
                 const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
 
-                const answer = await aiService.chat(request.history);
-                sendResponse({ success: true, answer: answer });
+                const result = await aiService.chat(request.history);
+                sendResponse({ success: true, answer: result.text, tokenUsage: result.tokenUsage });
 
             } catch (err) {
                 sendResponse({ success: false, error: err.message });
@@ -415,7 +431,10 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
             if (mode === 'short') systemPrompt = "POPUP WINDOW: Concise answer engine. Keep under 100 words. For MCQs: 'Answer: <option>. <one-sentence explanation>'. For other questions: direct answer only. No preamble, no elaboration.";
             else if (mode === 'detailed') systemPrompt = "POPUP TUTOR: Provide a focused, step-by-step answer. Use concise bullet points. Limit to 3-5 key steps max. Use Markdown sparingly (bold for emphasis only).";
             else if (mode === 'code') systemPrompt = "POPUP CODE ASSISTANT: Provide ESSENTIAL CODE ONLY - no exhaustive examples. Output ONE clean code block + 1-2 sentences explaining the key fix/concept. Be concise.";
-            else if (customModes) {
+            else if (mode === 'custom' && storage.customPrompt) {
+                // Use user's custom prompt
+                systemPrompt = storage.customPrompt;
+            } else if (customModes) {
                 const customMode = customModes.find(m => m.id === mode);
                 if (customMode) systemPrompt = customMode.prompt;
             }
@@ -448,7 +467,14 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
             // Strip thinking tags from Qwen models
             answer = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-            const demoInfo = guestResponse._demo || null;
+            const guestInfo = guestResponse._demo || null;
+
+            // Extract token usage from Groq response
+            const tokenUsage = guestResponse.usage ? {
+                promptTokens: guestResponse.usage.prompt_tokens || 0,
+                completionTokens: guestResponse.usage.completion_tokens || 0,
+                totalTokens: guestResponse.usage.total_tokens || 0
+            } : null;
 
             sendResponse({
                 success: true,
@@ -457,7 +483,8 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
                 usedOCR: type === 'text',
                 ocrConfidence,
                 base64Image: type === 'image' ? inputContent : null,
-                demoInfo: demoInfo
+                guestInfo: guestInfo,
+                tokenUsage: tokenUsage
             });
             return;
         }
@@ -493,6 +520,8 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
         sendResponse({
             success: true,
             answer: result.answer,
+            model: result.model,
+            tokenUsage: result.tokenUsage,
             initialUserMessage: result.initialUserMessage,
             usedOCR: type === 'text',
             ocrConfidence,
@@ -539,7 +568,10 @@ async function handleMultiImageRequest(images, explicitModel, textContext, sendR
             if (mode === 'short') systemPrompt = "POPUP WINDOW: Concise answer engine. Keep under 100 words. For MCQs: 'Answer: <option>. <one-sentence explanation>'. For other questions: direct answer only. No preamble, no elaboration.";
             else if (mode === 'detailed') systemPrompt = "POPUP TUTOR: Provide a focused, step-by-step answer. Use concise bullet points. Limit to 3-5 key steps max. Use Markdown sparingly (bold for emphasis only).";
             else if (mode === 'code') systemPrompt = "POPUP CODE ASSISTANT: Provide ESSENTIAL CODE ONLY - no exhaustive examples. Output ONE clean code block + 1-2 sentences explaining the key fix/concept. Be concise.";
-            else if (customModes) {
+            else if (mode === 'custom' && storage.customPrompt) {
+                // Use user's custom prompt
+                systemPrompt = storage.customPrompt;
+            } else if (customModes) {
                 const customMode = customModes.find(m => m.id === mode);
                 if (customMode) systemPrompt = customMode.prompt;
             }
@@ -576,14 +608,22 @@ async function handleMultiImageRequest(images, explicitModel, textContext, sendR
             // Strip thinking tags from Qwen models
             answer = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-            const demoInfo = guestResponse._demo || null;
+            const guestInfo = guestResponse._demo || null;
+
+            // Extract token usage from Groq response
+            const tokenUsage = guestResponse.usage ? {
+                promptTokens: guestResponse.usage.prompt_tokens || 0,
+                completionTokens: guestResponse.usage.completion_tokens || 0,
+                totalTokens: guestResponse.usage.total_tokens || 0
+            } : null;
 
             sendResponse({
                 success: true,
                 answer: answer,
                 initialUserMessage: messages[messages.length - 1],
                 imageCount: images.length,
-                demoInfo: demoInfo
+                guestInfo: guestInfo,
+                tokenUsage: tokenUsage
             });
             return;
         }

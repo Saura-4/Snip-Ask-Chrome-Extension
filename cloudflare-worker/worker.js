@@ -1,5 +1,13 @@
 // Snip & Ask Guest Mode - Anti-Abuse Worker with Role-Based Access
 // Deploy: wrangler deploy
+//
+// REQUIRED DB SCHEMA MIGRATIONS (run these in D1 console before deploying):
+// 
+// 1. Add 'tokens' column to velocity_events (rowid is built-in to SQLite):
+//    ALTER TABLE velocity_events ADD COLUMN tokens INTEGER DEFAULT 0;
+//
+// 2. Add 'token_count' column to usage_stats:
+//    ALTER TABLE usage_stats ADD COLUMN token_count INTEGER DEFAULT 0;
 
 export default {
     async fetch(request, env) {
@@ -157,10 +165,12 @@ export default {
             // EXECUTION
             // =================================================================
 
-            // Log velocity event
-            await env.DB.prepare(
-                'INSERT INTO velocity_events (user_id) VALUES (?)'
-            ).bind(userId).run();
+            // Log velocity event (tokens will be updated after API response)
+            // Use RETURNING to get the id of the inserted row
+            const velocityResult = await env.DB.prepare(
+                'INSERT INTO velocity_events (user_id) VALUES (?) RETURNING id'
+            ).bind(userId).first();
+            const velocityEventId = velocityResult?.id;
 
             // Prepare request body
             const groqBody = { ...body };
@@ -199,17 +209,7 @@ export default {
                 }, 503, corsHeaders);
             }
 
-            // Update usage stats (if success and not unlimited)
-            if (groqResponse.ok && parallelCount > 0 && !isUnlimited) {
-                const incrementBy = parallelCount > 0 ? parallelCount : 1;
-                // Upsert usage
-                await env.DB.prepare(`
-                    INSERT INTO usage_stats (user_id, usage_count)
-                    VALUES (?, ?)
-                    ON CONFLICT(user_id) 
-                    DO UPDATE SET usage_count = usage_count + ?
-                `).bind(userId, incrementBy, incrementBy).run();
-            }
+            // NOTE: Usage stats (including token count) are now updated after API response below
 
             // Update last seen
             await env.DB.prepare(
@@ -217,6 +217,29 @@ export default {
             ).bind(userId).run();
 
             const responseData = await groqResponse.json();
+
+            // Extract token usage from Groq response
+            const tokenUsage = responseData.usage?.total_tokens || 0;
+
+            // Update velocity event with token count
+            if (velocityEventId && tokenUsage > 0) {
+                await env.DB.prepare(
+                    'UPDATE velocity_events SET tokens = ? WHERE id = ?'
+                ).bind(tokenUsage, velocityEventId).run();
+            }
+
+            // Update usage stats for ALL users (including admins) with token tracking
+            if (groqResponse.ok) {
+                const incrementBy = parallelCount > 0 ? parallelCount : 1;
+                // Upsert usage with token count
+                await env.DB.prepare(`
+                    INSERT INTO usage_stats (user_id, usage_count, token_count)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(user_id) 
+                    DO UPDATE SET usage_count = usage_count + ?, token_count = token_count + ?
+                `).bind(userId, incrementBy, tokenUsage, incrementBy, tokenUsage).run();
+            }
+
             return jsonResponse({ ...responseData, _guest: { ok: true } }, groqResponse.status, corsHeaders);
 
         } catch (error) {
