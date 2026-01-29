@@ -173,7 +173,19 @@ class GroqService extends AbstractAIService {
 
         // Strip thinking tags from Qwen models
         const rawContent = data.choices?.[0]?.message?.content || "No answer.";
-        return stripThinkingTags(rawContent);
+        const text = stripThinkingTags(rawContent);
+
+        // Extract token usage from Groq's OpenAI-compatible response
+        const usage = data.usage || {};
+        return {
+            text,
+            model: data.model || this.actualModel,
+            tokenUsage: {
+                promptTokens: usage.prompt_tokens || 0,
+                completionTokens: usage.completion_tokens || 0,
+                totalTokens: usage.total_tokens || 0
+            }
+        };
     }
 
     async askImage(base64Image) {
@@ -185,8 +197,8 @@ class GroqService extends AbstractAIService {
                 { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
             ]
         };
-        const answer = await this.chat([userMsg]);
-        return { answer, initialUserMessage: userMsg };
+        const result = await this.chat([userMsg]);
+        return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 
     async askText(rawText) {
@@ -195,8 +207,8 @@ class GroqService extends AbstractAIService {
             .replace(/</g, "\\<")
             .replace(/>/g, "\\>");
         const userMsg = { role: "user", content: `<user_snip>\n${sanitized}\n</user_snip>` };
-        const answer = await this.chat([userMsg]);
-        return { answer, initialUserMessage: userMsg };
+        const result = await this.chat([userMsg]);
+        return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 }
 
@@ -269,7 +281,19 @@ class GeminiService extends AbstractAIService {
         const data = await response.json();
         if (!response.ok) throw new Error(normalizeErrorMessage(response, data, 'Google Gemini'));
 
-        return data.candidates?.[0]?.content?.parts?.[0]?.text || "No answer returned.";
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "No answer returned.";
+
+        // Extract token usage from Gemini's usageMetadata
+        const usage = data.usageMetadata || {};
+        return {
+            text,
+            model: this.modelName,
+            tokenUsage: {
+                promptTokens: usage.promptTokenCount || 0,
+                completionTokens: usage.candidatesTokenCount || 0,
+                totalTokens: usage.totalTokenCount || 0
+            }
+        };
     }
 
     async askImage(base64Image) {
@@ -281,8 +305,8 @@ class GeminiService extends AbstractAIService {
                 { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
             ]
         };
-        const answer = await this.chat([userMsg]);
-        return { answer, initialUserMessage: userMsg };
+        const result = await this.chat([userMsg]);
+        return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 
     async askText(rawText) {
@@ -291,8 +315,8 @@ class GeminiService extends AbstractAIService {
             .replace(/</g, "\\<")
             .replace(/>/g, "\\>");
         const userMsg = { role: "user", content: `<user_snip>\n${sanitized}\n</user_snip>` };
-        const answer = await this.chat([userMsg]);
-        return { answer, initialUserMessage: userMsg };
+        const result = await this.chat([userMsg]);
+        return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 }
 
@@ -366,7 +390,19 @@ class OpenRouterService extends AbstractAIService {
         }
 
         // Strip thinking tags from DeepSeek/Qwen models
-        return stripThinkingTags(answer);
+        const text = stripThinkingTags(answer);
+
+        // Extract token usage from OpenRouter's OpenAI-compatible response
+        const usage = data.usage || {};
+        return {
+            text,
+            model: data.model || this.actualModel,
+            tokenUsage: {
+                promptTokens: usage.prompt_tokens || 0,
+                completionTokens: usage.completion_tokens || 0,
+                totalTokens: usage.total_tokens || 0
+            }
+        };
     }
 
     _isVisionModel() {
@@ -389,22 +425,22 @@ class OpenRouterService extends AbstractAIService {
                     { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                 ]
             };
-            const answer = await this.chat([userMsg]);
-            return { answer, initialUserMessage: userMsg };
+            const result = await this.chat([userMsg]);
+            return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
         } else {
             // For non-vision models, we shouldn't be here (OCR should handle it)
             // But just in case, send just the prompt
             const userMsg = { role: "user", content: promptText + "\n\n[Image provided but model doesn't support vision]" };
-            const answer = await this.chat([userMsg]);
-            return { answer, initialUserMessage: userMsg };
+            const result = await this.chat([userMsg]);
+            return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
         }
     }
 
     async askText(rawText) {
         // Simpler format - don't use XML tags that might confuse some models
         const userMsg = { role: "user", content: rawText };
-        const answer = await this.chat([userMsg]);
-        return { answer, initialUserMessage: userMsg };
+        const result = await this.chat([userMsg]);
+        return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 }
 
@@ -508,7 +544,17 @@ class OllamaService extends AbstractAIService {
 
             if (!response.ok) throw new Error("Ollama Connection Failed. Is it running?");
             const data = await response.json();
-            return data.message.content;
+
+            // Extract token usage from Ollama's response
+            return {
+                text: data.message.content,
+                model: data.model || this.actualModel,
+                tokenUsage: {
+                    promptTokens: data.prompt_eval_count || 0,
+                    completionTokens: data.eval_count || 0,
+                    totalTokens: (data.prompt_eval_count || 0) + (data.eval_count || 0)
+                }
+            };
 
         } catch (e) {
             throw new Error(`Ollama Error: ${e.message}. Ensure 'OLLAMA_ORIGINS="*"' is set.`);
@@ -524,8 +570,8 @@ class OllamaService extends AbstractAIService {
                 { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
             ]
         };
-        const answer = await this.chat([userMsg]);
-        return { answer, initialUserMessage: userMsg };
+        const result = await this.chat([userMsg]);
+        return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 
     async askText(rawText) {
@@ -534,8 +580,8 @@ class OllamaService extends AbstractAIService {
             .replace(/</g, "\\<")
             .replace(/>/g, "\\>");
         const userMsg = { role: "user", content: `<user_snip>\n${sanitized}\n</user_snip>` };
-        const answer = await this.chat([userMsg]);
-        return { answer, initialUserMessage: userMsg };
+        const result = await this.chat([userMsg]);
+        return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 }
 

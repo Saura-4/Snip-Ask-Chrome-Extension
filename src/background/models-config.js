@@ -16,9 +16,10 @@ export const ALL_MODELS = {
         { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B (Text)' }
     ],
     google: [
+        { value: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
         { value: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-        { value: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-        { value: 'gemini-2.0-flash-lite-preview-02-05', name: 'Gemini 2.0 Flash Lite' },
+        { value: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
+        { value: 'gemini-2.5-flash-tts', name: 'Gemini 2.5 Flash TTS' },
         { value: 'gemma-3-27b-it', name: 'Gemma 3 27B (Vision)' },
         { value: 'gemma-3-12b-it', name: 'Gemma 3 12B (Vision)' },
         { value: 'gemma-3-4b-it', name: 'Gemma 3 4B' },
@@ -53,8 +54,9 @@ export const CHAT_WINDOW_MODELS = {
         { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B' }
     ],
     google: [
+        { value: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
         { value: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-        { value: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+        { value: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
         { value: 'gemma-3-27b-it', name: 'Gemma 3 27B' }
     ],
     openrouter: [
@@ -214,13 +216,14 @@ export function getPopupModels(enabledProviders, enabledModels, isGuestMode) {
 
 /**
  * Get available models for chat window dropdown based on guest mode status
+ * Uses ALL_MODELS to show all enabled models (not a subset)
  * @param {Object} enabledProviders - User's provider settings
  * @param {Object} enabledModels - User's model settings
  * @param {boolean} isGuestMode - Whether in guest mode
- * @returns {Array} List of available models (compact names)
+ * @returns {Array} List of available models
  */
 export function getChatWindowModels(enabledProviders, enabledModels, isGuestMode) {
-    return getFilteredModels(enabledProviders, enabledModels, isGuestMode, CHAT_WINDOW_MODELS);
+    return getFilteredModels(enabledProviders, enabledModels, isGuestMode, ALL_MODELS);
 }
 
 /**

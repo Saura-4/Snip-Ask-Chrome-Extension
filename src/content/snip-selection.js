@@ -109,7 +109,7 @@ const SnipSelection = {
         this.selectionBox = document.createElement("div");
         this.selectionBox.style.cssText = `
             position: fixed; 
-            border: 2px dashed #f55036; 
+            border: 2px solid #f55036; 
             background-color: rgba(245, 80, 54, 0.2); 
             z-index: 2147483647; 
             pointer-events: none; 

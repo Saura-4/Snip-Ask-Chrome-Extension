@@ -4,8 +4,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Setup Guide - Snip & Ask</title>
+    <title>Setup & User Guide - Snip & Ask</title>
     <style>
+        /* Theme Variables aligned with popup.css */
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --card-border: 1px solid rgba(255, 255, 255, 0.08);
+            --card-hover-bg: rgba(255, 255, 255, 0.05);
+            --card-hover-border: rgba(255, 255, 255, 0.12);
+            --accent-primary: #ff6b4a;
+            --accent-gradient: linear-gradient(135deg, #ff6b4a 0%, #ff8c69 100%);
+            --btn-bg: #ee4b06;
+            --btn-hover: #e64a2e;
+            --text-primary: #e8e8e8;
+            --text-secondary: #888;
+            --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
@@ -13,203 +29,329 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            font-family: var(--font-family);
+            background: var(--bg-gradient);
             min-height: 100vh;
-            color: #e0e0e0;
+            color: var(--text-primary);
             display: flex;
             justify-content: center;
-            align-items: center;
             padding: 40px 20px;
+            overflow-x: hidden;
         }
 
         .container {
-            max-width: 700px;
+            max-width: 800px;
             width: 100%;
+            animation: fadeIn 0.4s ease-out;
         }
 
-        .card {
-            background: rgba(30, 30, 30, 0.95);
-            border-radius: 16px;
-            padding: 40px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-            border: 1px solid #333;
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
+        /* Header */
         .header {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 40px;
         }
 
-        .logo {
-            font-size: 48px;
-            margin-bottom: 10px;
+        .logo-img {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 15px;
+            display: inline-block;
+            filter: drop-shadow(0 0 20px rgba(255, 107, 74, 0.3));
         }
 
         h1 {
-            color: #f55036;
-            font-size: 28px;
-            margin-bottom: 10px;
+            background: var(--accent-gradient);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-size: 36px;
+            font-weight: 800;
+            margin-bottom: 12px;
+            letter-spacing: -1px;
         }
 
         .tagline {
-            color: #888;
-            font-size: 16px;
+            color: var(--text-secondary);
+            font-size: 18px;
+            max-width: 500px;
+            margin: 0 auto;
+            line-height: 1.5;
         }
 
-        .steps {
-            margin-top: 30px;
+        /* Main Setup Card */
+        .card {
+            background: var(--card-bg);
+            border: var(--card-border);
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
+            margin-bottom: 30px;
         }
 
+        /* Steps */
         .step {
             display: flex;
-            gap: 20px;
-            margin-bottom: 25px;
-            align-items: flex-start;
+            gap: 24px;
+            margin-bottom: 32px;
+            position: relative;
+        }
+
+        .step:last-child {
+            margin-bottom: 0;
         }
 
         .step-number {
-            background: #f55036;
-            color: white;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
+            background: rgba(255, 107, 74, 0.1);
+            color: var(--accent-primary);
+            border: 1px solid rgba(255, 107, 74, 0.3);
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: bold;
+            font-size: 18px;
+            font-weight: 800;
             flex-shrink: 0;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
         }
 
         .step-content {
             flex: 1;
+            padding-top: 5px;
         }
 
         .step-title {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 8px;
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 10px;
             color: #fff;
         }
 
         .step-desc {
-            color: #aaa;
-            font-size: 14px;
+            color: #b0b0b0;
+            font-size: 15px;
             line-height: 1.6;
         }
 
-        .step-desc a {
-            color: #f55036;
-            text-decoration: none;
+        code {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 2px 8px;
+            border-radius: 6px;
+            color: #ff9e80;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9em;
         }
 
-        .step-desc a:hover {
-            text-decoration: underline;
+        /* Buttons */
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 16px;
         }
 
         .btn {
-            display: inline-block;
-            padding: 12px 24px;
-            background: #f55036;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            background: var(--btn-bg);
             color: #ffffff !important;
             border: none;
-            border-radius: 8px;
-            font-size: 14px;
+            border-radius: 10px;
+            font-size: 13px;
             font-weight: 600;
             cursor: pointer;
             text-decoration: none !important;
             transition: all 0.2s;
-            margin-top: 10px;
+            box-shadow: 0 4px 12px rgba(238, 75, 6, 0.3);
+            border: 1px solid transparent;
         }
 
         .btn:hover {
-            background: #d43d25;
+            background: var(--btn-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(238, 75, 6, 0.4);
+        }
+
+        /* Unified Provider Buttons */
+        .btn-provider {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            box-shadow: none;
+        }
+
+        .btn-provider:hover {
+            background: #333;
+            border-color: #666;
             transform: translateY(-2px);
         }
 
-        .btn-secondary {
-            background: #333;
-            color: #ccc;
+        .btn-primary-action {
+            background: #ee4b06;
+            border: none;
         }
 
-        .btn-secondary:hover {
-            background: #444;
+        .btn-primary-action:hover {
+            background: #e64a2e;
         }
 
-        .tip-box {
-            background: #252526;
-            border-left: 3px solid #4caf50;
-            padding: 15px;
-            border-radius: 0 8px 8px 0;
+
+        /* Feautures Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
             margin-top: 30px;
         }
 
-        .tip-box strong {
-            color: #4caf50;
+        .feature-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 12px;
+            transition: all 0.2s;
         }
 
-        .tip-box p {
-            color: #aaa;
+        .feature-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .feature-icon {
+            font-size: 24px;
+            margin-bottom: 12px;
+            display: block;
+        }
+
+        .feature-title {
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 6px;
+            font-size: 15px;
+        }
+
+        .feature-text {
             font-size: 13px;
-            margin-top: 5px;
+            color: #888;
+            line-height: 1.5;
         }
 
+        /* Alerts used for Ollama */
+        .alert-box {
+            background: rgba(244, 67, 54, 0.1);
+            border: 1px solid rgba(244, 67, 54, 0.3);
+            padding: 12px 14px;
+            border-radius: 8px;
+            margin-bottom: 14px;
+            color: #ef9a9a;
+            font-size: 13px;
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+        }
+
+        .alert-box strong {
+            color: #ef5350;
+        }
+
+        /* Footer */
         .footer {
+            margin-top: 40px;
+            padding-top: 30px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
             text-align: center;
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #333;
         }
 
-        .footer p {
-            color: #666;
-            font-size: 12px;
+        .provider-badges {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .badge {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #bbb;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 500;
         }
 
         .social-links {
-            margin-top: 15px;
             display: flex;
             justify-content: center;
-            gap: 15px;
+            gap: 20px;
         }
 
         .social-links a {
-            color: #888;
-            font-size: 13px;
+            color: #666;
             text-decoration: none;
+            font-size: 13px;
+            transition: color 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
 
         .social-links a:hover {
-            color: #f55036;
+            color: var(--accent-primary);
         }
 
-        .providers {
-            display: flex;
-            gap: 10px;
-            margin-top: 15px;
-            flex-wrap: wrap;
+        a.link {
+            color: #4fc3f7;
+            text-decoration: none;
         }
 
-        .provider-badge {
-            background: #333;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            color: #ccc;
+        a.link:hover {
+            text-decoration: underline;
+        }
+
+        .key-icon {
+            display: inline-block;
+            vertical-align: middle;
+            color: #ff6b4a;
+            /* background removed to fix "dim" look */
+            padding: 0;
+            margin: 0 2px;
         }
 
         @media (max-width: 600px) {
             .card {
-                padding: 25px;
+                padding: 24px;
+            }
+
+            .logo-img {
+                width: 60px;
+                height: 60px;
             }
 
             h1 {
-                font-size: 22px;
+                font-size: 28px;
             }
 
             .step {
                 flex-direction: column;
-                gap: 10px;
+                gap: 12px;
             }
         }
     </style>
@@ -217,79 +359,275 @@
 
 <body>
     <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <img src="../../assets/icons/icon-128.png" alt="Snip & Ask Logo" class="logo-img">
+            <h1>Snip & Ask</h1>
+            <p class="tagline">Setup Guide & Operations Manual</p>
+        </div>
+
+        <!-- Setup Card -->
         <div class="card">
-            <div class="header">
-                <div class="logo">⚡</div>
-                <h1>Setup Guide - Snip & Ask</h1>
-                <p class="tagline">Instant AI analysis for any screenshot</p>
-            </div>
+            <h2
+                style="font-size: 18px; margin-bottom: 24px; color: #fff; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                Quick Setup</h2>
 
-            <div class="steps">
-                <div class="step">
-                    <div class="step-number">1</div>
-                    <div class="step-content">
-                        <div class="step-title">Get Your Free API Key</div>
-                        <div class="step-desc">
-                            Create a free Groq account to get started. Groq offers the fastest AI inference for free!
-                            <br><br>
-                            <a href="https://console.groq.com/keys" target="_blank" class="btn">Get Free Groq API Key
-                                →</a>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="step">
-                    <div class="step-number">2</div>
-                    <div class="step-content">
-                        <div class="step-title">Add Your Key to the Extension</div>
-                        <div class="step-desc">
-                            Click the Snip & Ask extension icon in your toolbar, expand the <strong>🔐 API Keys</strong>
-                            section,
-                            and paste your key (starts with <code
-                                style="background:#333; padding:2px 6px; border-radius:3px;">gsk_</code>).
-                        </div>
-                    </div>
-                </div>
-
-                <div class="step">
-                    <div class="step-number">3</div>
-                    <div class="step-content">
-                        <div class="step-title">Start Snipping!</div>
-                        <div class="step-desc">
-                            Click <strong>Snip Screen</strong> or set up a keyboard shortcut for instant access.
-                            Draw a box around anything — code, math, diagrams — and get AI-powered answers instantly!
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <div class="step-title">Get an API Key</div>
+                    <div class="step-desc">
+                        Unlock the full power of Snip & Ask with an API key from your preferred provider.
+                        <div class="btn-group">
+                            <a href="https://console.groq.com/keys" target="_blank" class="btn btn-provider">
+                                🚀 Groq
+                            </a>
+                            <a href="https://aistudio.google.com/app/apikey" target="_blank" class="btn btn-provider">
+                                ✨ Google Gemini
+                            </a>
+                            <a href="https://openrouter.ai/keys" target="_blank" class="btn btn-provider">
+                                🌐 OpenRouter
+                            </a>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="tip-box">
-                <strong>💡 Pro Tip: Set a Keyboard Shortcut</strong>
-                <p>
-                    Go to <a href="#" id="shortcutsLink">chrome://extensions/shortcuts</a> and assign a hotkey
-                    like <code style="background:#333; padding:2px 6px; border-radius:3px;">Ctrl+Shift+S</code> for
-                    instant snipping!
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <div class="step-title">Configure Extension</div>
+                    <div class="step-desc">
+                        1. Click the extension icon <img src="../../assets/icons/icon-48.png" width="18" height="18"
+                            style="vertical-align: middle; margin: 0 4px; filter: brightness(1.1);"> in your toolbar.
+                        <br>2. Expand the <strong>
+                            <svg class="key-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2">
+                                <path
+                                    d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
+                            </svg>
+                            API Keys</strong> section.
+                        <br>3. Paste your key into the corresponding field.
+                    </div>
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <div class="step-title">Enable File Access <span
+                            style="font-size: 14px; color: #666; font-weight: 400; margin-left: 8px;">(Optional)</span>
+                    </div>
+                    <div class="step-desc">
+                        To let the AI analyze local PDF or image files on your computer, you must grant permission:
+                        <ol style="margin-left:20px; margin-top:8px; margin-bottom: 10px; color:#ccc;">
+                            <li>Go to <a href="#" id="extensionsLink"
+                                    style="color:#ff6b4a; text-decoration: none; font-weight: 600;">extension
+                                    settings</a>.</li>
+                            <li>Toggle <strong>"Allow access to file URLs"</strong> to ON.</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <div class="step-title">Start Snipping!</div>
+                    <div class="step-desc">
+                        Click <strong>Snip Screen</strong>, use the <svg width="16" height="16" viewBox="0 0 24 24"
+                            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                            stroke-linejoin="round" style="vertical-align:middle">
+                            <path d="M3 10h.01"></path>
+                            <path d="M7 10h.01"></path>
+                            <path d="M11 10h.01"></path>
+                            <path d="M15 10h.01"></path>
+                            <path d="M19 10h.01"></path>
+                            <path
+                                d="M12 22c-3.866 0-7-3.134-7-7V7c0-3.866 3.134-7 7-7s7 3.134 7 7v8c0 3.866-3.134 7-7 7z">
+                            </path>
+                            <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"></path>
+                        </svg> **Right-Click Menu** on any text, or set up a hotkey
+                        at <a href="#" id="shortcutsLink" class="link">chrome://extensions/shortcuts</a> (recommended:
+                        <code>Alt+S</code>).
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Local AI Section -->
+        <h2
+            style="font-size: 18px; margin-bottom: 20px; padding-left: 10px; border-left: 3px solid var(--accent-primary);">
+            Local AI Setup (Ollama)</h2>
+        <div class="card">
+            <div class="step">
+                <div class="step-number">🦙</div>
+                <div class="step-content">
+                    <div class="step-title">Enable Local Models</div>
+                    <div class="step-desc">
+                        Browsers block requests to local servers like Ollama by default due to security (CORS). We
+                        provide a script to safely configure Ollama to accept requests from our extension.
+                        <br><br>
+
+                        <div class="alert-box">
+                            <span style="font-size: 18px;">⚠️</span>
+                            <div>
+                                <strong>CRITICAL:</strong> Before running the script, open <strong>Task
+                                    Manager</strong>, find <code>ollama.exe</code> in the Details tab, and <strong>End
+                                    Task</strong>.
+                                <br>The script will fail if Ollama is currently running in the background.
+                            </div>
+                        </div>
+
+                        <ol style="margin-left:20px; line-height: 1.8; color:#ccc;">
+                            <li>Download the setup script from our <a
+                                    href="https://github.com/Saura-4/Snip-Ask-Chrome-Extension/tree/main/ollama_enable_disable"
+                                    target="_blank" class="link">GitHub Repository</a>.</li>
+                            <li>Run <code>setup-ollama.bat</code> (Windows). This adds the necessary
+                                <code>OLLAMA_ORIGINS</code> variable.
+                            </li>
+                            <li>Restart Ollama.</li>
+                            <li>In the extension, enable the <strong>Ollama</strong> toggle and set your model.</li>
+                        </ol>
+                        <p style="margin-top: 15px; font-size: 13px; color: #666; font-style: italic;">
+                            To revert changes later, you can run the <code>disable-ollama.bat</code> script from the
+                            same repository.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h2
+            style="font-size: 18px; margin-bottom: 20px; padding-left: 10px; border-left: 3px solid var(--accent-primary);">
+            Features & Tips</h2>
+        <div class="features-grid">
+            <div class="feature-item">
+                <span class="feature-icon">🧠</span>
+                <div class="feature-title">Custom Modes & Prompts</div>
+                <p class="feature-text">
+                    Want the AI to act like a specific persona?
+                    <br>1. Open the extension popup.
+                    <br>2. Click <strong>"Edit"</strong> next to any mode or create a new one.
+                    <br>3. Define your own system prompt (e.g., "Roast my code", "Explain like I'm 5").
                 </p>
             </div>
 
-            <div style="text-align: center; margin-top: 25px;">
-                <p style="color: #888; font-size: 13px; margin-bottom: 15px;">Supported AI Providers:</p>
-                <div class="providers" style="justify-content: center;">
-                    <span class="provider-badge">🚀 Groq</span>
-                    <span class="provider-badge">✨ Google Gemini</span>
-                    <span class="provider-badge">🌐 OpenRouter</span>
-                    <span class="provider-badge">🦙 Ollama (Local)</span>
-                </div>
+            <div class="feature-item">
+                <span class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="6" y="3" width="12" height="18" rx="4"></rect>
+                        <line x1="12" y1="3" x2="12" y2="11"></line>
+                        <line x1="6" y1="11" x2="18" y2="11"></line>
+                        <path d="M12 3h2a4 4 0 0 1 4 4v4h-6v-8" fill="currentColor"></path>
+                    </svg>
+                </span>
+                <div class="feature-title">Quick Text Ask</div>
+                <p class="feature-text">Select any text on a webpage, right-click, and choose <strong>"Ask AI about
+                        selection"</strong>. Perfect for quick definitions or translations without snipping.</p>
             </div>
 
-            <div class="footer">
-                <p>Built with ❤️ by Saurav Chourasia</p>
-                <div class="social-links">
-                    <a href="https://github.com/Saura-4/Snip-Ask-Chrome-Extension" target="_blank">GitHub</a>
-                    <a href="https://discord.gg/bppspgkd" target="_blank">Discord</a>
-                    <a href="https://www.linkedin.com/in/saurav-chourasia/" target="_blank">LinkedIn</a>
+            <div class="feature-item">
+                <span class="feature-icon">🔄</span>
+                <div class="feature-title">Model Switching</div>
+                <p class="feature-text">Select your preferred AI model from the dropdown header in the chat window.
+                    Supports Llama (via Groq), Gemini, and more.</p>
+            </div>
+
+            <div class="feature-item">
+                <span class="feature-icon">⚔️</span>
+                <div class="feature-title">Compare Models</div>
+                <p class="feature-text">Click the <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" style="vertical-align:text-bottom">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <line x1="12" y1="8" x2="12" y2="16" />
+                        <line x1="8" y1="12" x2="16" y2="12" />
+                    </svg> icon in the header to spawn a second window. Ask the same question to two different models
+                    side-by-side.</p>
+            </div>
+
+            <div class="feature-item">
+                <span class="feature-icon">✨</span>
+                <div class="feature-title">Guest Mode</div>
+                <p class="feature-text">Just want to try it out? You can use the extension in limited "Guest Mode"
+                    without adding any API keys.</p>
+            </div>
+        </div>
+
+        <!-- Support Section -->
+        <h2
+            style="font-size: 18px; margin-bottom: 20px; padding-left: 10px; border-left: 3px solid var(--accent-primary); margin-top: 40px;">
+            Support the Project ❤️</h2>
+        <div class="card">
+            <div class="step">
+                <div class="step-number" style="background: var(--accent-primary); color: white;">💖</div>
+                <div class="step-content">
+                    <div class="step-title">Keep it Free & Open Source</div>
+                    <div class="step-desc">
+                        Snip & Ask is 100% free and open source. If it saves you time, consider supporting development!
+                        <div class="btn-group" style="margin-top: 15px;">
+                            <a href="https://github.com/sponsors/Saura-4" target="_blank" class="btn btn-provider"
+                                style="border-color: #e3b341; color: #e3b341 !important;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"
+                                    style="margin-right: 4px;">
+                                    <path
+                                        d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                                </svg>
+                                GitHub Sponsor
+                            </a>
+                            <a href="https://paypal.me/saura444" target="_blank" class="btn btn-provider"
+                                style="border-color: #00457C; color: #0079C1 !important;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"
+                                    style="margin-right: 4px;">
+                                    <path
+                                        d="M7.076 21.337H2.47a.641.641 0 0 1-.633-.74L4.944.901C5.026.382 5.474 0 5.998 0h7.46c2.57 0 4.578.543 5.69 1.81 1.01 1.15 1.304 2.42 1.012 4.287-.023.143-.047.288-.077.437-.966 5.038-3.35 6.44-8.877 6.44H9.69a.63.63 0 0 0-.623.535l-1.99 12.828">
+                                    </path>
+                                </svg>
+                                PayPal
+                            </a>
+                        </div>
+                        <div
+                            style="margin-top: 15px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 8px; display: inline-block;">
+                            <span style="font-size: 12px; color: #aaa; margin-right: 8px;">UPI (India):</span>
+                            <code style="user-select: all; cursor: pointer;"
+                                title="Click to copy">saurav04042004@okaxis</code>
+                        </div>
+                    </div>
                 </div>
             </div>
+        </div>
+
+        <div class="footer">
+            <div class="provider-badges">
+                <span class="badge">🚀 Groq</span>
+                <span class="badge">✨ Google Gemini</span>
+                <span class="badge">🌐 OpenRouter</span>
+                <span class="badge">🦙 Ollama</span>
+            </div>
+
+            <div class="social-links">
+                <a href="https://github.com/Saura-4/Snip-Ask-Chrome-Extension" target="_blank">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path
+                            d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22">
+                        </path>
+                    </svg>
+                    GitHub
+                </a>
+                <a href="https://discord.gg/bppspgkd" target="_blank">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path
+                            d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z">
+                        </path>
+                    </svg>
+                    Discord
+                </a>
+            </div>
+            <p style="margin-top: 15px; color: #444; font-size: 11px;">Version 1.0 • Built with ❤️</p>
         </div>
     </div>
 

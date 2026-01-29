@@ -1,5 +1,131 @@
 // src/content/ui-helpers.js
-// UI utility functions - toasts, text sanitizers, model helpers
+// UI utility functions - toasts, text sanitizers, model helpers, loading overlay
+
+/**
+ * Global reference for the loading overlay element
+ * @type {HTMLElement|null}
+ */
+let _loadingOverlay = null;
+
+/**
+ * Show a full-screen thinking overlay while processing snip
+ * Called after user snips the screen, before the response window appears
+ */
+function showLoadingCursor() {
+    // Remove existing overlay if any
+    hideLoadingCursor();
+
+    // Create overlay container
+    _loadingOverlay = document.createElement('div');
+    _loadingOverlay.id = 'snip-loading-overlay';
+    _loadingOverlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(4px);
+        z-index: 2147483646;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 12px;
+        animation: overlayFadeIn 0.2s ease;
+    `;
+
+    // Container for bubble and text (similar to .typing-container but centered)
+    const thinkingContainer = document.createElement('div');
+    thinkingContainer.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        opacity: 0.9;
+    `;
+
+    // Bubble (matching .typing-bubble)
+    const bubble = document.createElement('div');
+    bubble.style.cssText = `
+        background: #2a2a2a;
+        padding: 8px 14px;
+        border-radius: 12px;
+        display: flex;
+        gap: 4px;
+        width: fit-content;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    `;
+
+    // Create 3 animated dots
+    for (let i = 0; i < 3; i++) {
+        const dot = document.createElement('span');
+        dot.style.cssText = `
+            width: 6px;
+            height: 6px;
+            background: #666;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out both;
+            animation-delay: ${i === 0 ? '-0.32s' : i === 1 ? '-0.16s' : '0s'};
+        `;
+        bubble.appendChild(dot);
+    }
+
+    // "Thinking..." text (matching .thinking-text)
+    const text = document.createElement('span');
+    text.textContent = 'Thinking...';
+    text.style.cssText = `
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 11px;
+        color: #ddd;
+        font-style: italic;
+        animation: thinkingPulse 1.5s infinite;
+    `;
+
+    thinkingContainer.appendChild(bubble);
+    thinkingContainer.appendChild(text);
+    _loadingOverlay.appendChild(thinkingContainer);
+
+    // Add keyframes animation via style tag
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes overlayFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes bounce { 
+            0%, 80%, 100% { transform: scale(0); } 
+            40% { transform: scale(1); background: #f55036; } 
+        }
+        @keyframes thinkingPulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+    `;
+    _loadingOverlay.appendChild(style);
+
+    document.body.appendChild(_loadingOverlay);
+}
+
+/**
+ * Hide the loading overlay
+ */
+function hideLoadingCursor() {
+    if (_loadingOverlay) {
+        _loadingOverlay.style.animation = 'overlayFadeIn 0.15s ease reverse';
+        setTimeout(() => {
+            if (_loadingOverlay && _loadingOverlay.parentNode) {
+                _loadingOverlay.remove();
+            }
+            _loadingOverlay = null;
+        }, 150);
+    }
+    // Also remove by ID in case of orphaned overlays
+    const existing = document.getElementById('snip-loading-overlay');
+    if (existing && existing !== _loadingOverlay) {
+        existing.remove();
+    }
+}
+
 
 /**
  * Helper to identify Vision Models
@@ -19,15 +145,15 @@ function isVisionModel(modelName) {
 }
 
 /**
- * Update local demo usage cache from server response
+ * Update local guest usage cache from server response
  * Keeps the frontend counter in sync with server-side usage
- * @param {Object} demoInfo - Demo info from API response
+ * @param {Object} guestInfo - Guest info from API response
  */
-function updateLocalDemoCache(demoInfo) {
-    if (!demoInfo) return;
+function updateLocalGuestCache(guestInfo) {
+    if (!guestInfo) return;
     const today = new Date().toISOString().split('T')[0];
     chrome.storage.local.set({
-        guestUsageCount: demoInfo.usage,
+        guestUsageCount: guestInfo.usage,
         guestUsageDate: today
     });
 }

@@ -162,15 +162,15 @@ async function handleResponse(apiResponse) {
 
         // Pass base64Image so image thumbnail appears in chat
         ui.addMessage('user', apiResponse.initialUserMessage, null, false, apiResponse.base64Image || null);
-        ui.addMessage('assistant', apiResponse.answer);
+        ui.addMessage('assistant', apiResponse.answer, null, false, null, false, apiResponse.tokenUsage);
 
         // Store initial state for comparison cloning
         ui.initialUserMessage = apiResponse.initialUserMessage;
         ui.initialBase64Image = apiResponse.base64Image || null;
 
-        // Update local demo usage cache if demoInfo is returned
-        if (apiResponse.demoInfo) {
-            updateLocalDemoCache(apiResponse.demoInfo);
+        // Update local guest usage cache if guestInfo is returned
+        if (apiResponse.guestInfo) {
+            updateLocalGuestCache(apiResponse.guestInfo);
         }
     } else {
         // Show error in a styled toast instead of native alert
