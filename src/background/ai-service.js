@@ -30,6 +30,154 @@ const CLOUD_TIMEOUT_MS = 30000;  // 30 seconds for Groq/Gemini
 const OPENROUTER_TIMEOUT_MS = 90000; // 90 seconds for OpenRouter free tier (slow)
 const LOCAL_TIMEOUT_MS = 120000; // 2 minutes for Ollama (cold start can be slow)
 
+// --- MODEL TOKEN LIMITS (TPM - Tokens Per Minute) ---
+// Based on free tier limits from provider dashboards
+const TYPE_LIMITS = {
+    // Groq Free Tier Limits
+    'groq/compound-mini': 70000, // 70k TPM - Groq Compound Mini (check before 'compound')
+    'groq/compound': 70000,      // 70k TPM - Groq Compound
+    'compound': 70000,           // 70k TPM - Fallback without prefix
+    'scout': 30000,              // 30k TPM - Llama 4 Scout (check before llama-4!)
+    'llama-3.3': 6000,           // 6k TPM - Llama 3.3
+    'llama-4': 6000,             // 6k TPM - Maverick/Other Llama 4s
+    'mixtral': 5000,             // 5k TPM - Groq Mixtral
+
+    // Google Free Tier Limits
+    'gemini': 250000,     // 250k TPM - Flash/Pro
+    'gemma': 15000,       // 15k TPM - Gemma 3
+
+    // Fallbacks
+    'openrouter': 40000,  // Safe default for OpenRouter (varies by model)
+    'default': 4096       // Safety fallback for unknown models
+};
+
+/**
+ * Get safe token limit for a model using priority-based substring matching.
+ * Order matters: specific keys checked before generic ones.
+ * @param {string} modelID - The model identifier
+ * @returns {number} Token limit for the model
+ */
+function getSafeLimit(modelID) {
+    if (!modelID) return TYPE_LIMITS.default;
+
+    const lowerModel = modelID.toLowerCase();
+
+    // Priority order: specific patterns before generic ones
+    // Check 'groq/compound-mini' before 'compound', 'scout' before 'llama-4'
+    const checkOrder = [
+        'groq/compound-mini', // 70k - Groq Compound Mini (most specific)
+        'groq/compound',      // 70k - Groq Compound
+        'compound',           // 70k - Fallback without prefix
+        'scout',              // 30k - Llama 4 Scout (before llama-4 check)
+        'llama-3.3',          // 6k - Llama 3.3
+        'llama-4',            // 6k - Other Llama 4 variants
+        'mixtral',            // 5k - Groq Mixtral
+        'gemini',             // 250k - Google Gemini
+        'gemma',              // 15k - Google Gemma
+        'openrouter'          // 40k - OpenRouter fallback
+    ];
+
+    for (const key of checkOrder) {
+        if (lowerModel.includes(key)) {
+            return TYPE_LIMITS[key];
+        }
+    }
+
+    return TYPE_LIMITS.default;
+}
+
+/**
+ * Estimate token count for a message (rough heuristic: ~4 chars per token).
+ * Images are estimated at 1024 tokens each (typical for vision models).
+ * @param {object} msg - Message object with role and content
+ * @returns {number} Estimated token count
+ */
+function estimateMessageTokens(msg) {
+    if (!msg || !msg.content) return 0;
+
+    if (typeof msg.content === 'string') {
+        return Math.ceil(msg.content.length / 4);
+    }
+
+    if (Array.isArray(msg.content)) {
+        let tokens = 0;
+        for (const part of msg.content) {
+            if (part.type === 'text' && part.text) {
+                tokens += Math.ceil(part.text.length / 4);
+            } else if (part.type === 'image_url') {
+                tokens += 1024; // Estimate for base64 images
+            }
+        }
+        return tokens;
+    }
+
+    return 0;
+}
+
+/**
+ * Optimize message history to stay within model token limits.
+ * Pruning Strategy:
+ *   Step 1: Replace OLD images with text placeholders (preserve system & latest)
+ *   Step 2: Drop oldest text messages (preserve system & latest)
+ * 
+ * @param {Array} messages - Array of message objects
+ * @param {string} targetModel - Primary model ID
+ * @param {Array} comparisonModels - Optional array of model IDs for comparison mode
+ * @returns {Array} Optimized messages array
+ */
+function optimizeMessageHistory(messages, targetModel, comparisonModels = []) {
+    if (!messages || messages.length === 0) return messages;
+
+    // Calculate safe limit - use minimum when comparing models
+    const allModels = [targetModel, ...comparisonModels].filter(Boolean);
+    const limits = allModels.map(m => getSafeLimit(m));
+    const minLimit = Math.min(...limits);
+    const safeLimit = Math.floor(minLimit * 0.90); // 10% buffer
+
+    // Deep clone to avoid mutating original
+    let optimized = JSON.parse(JSON.stringify(messages));
+
+    // Calculate total tokens
+    const calcTotal = (msgs) => msgs.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
+
+    // --- Step 1: Replace OLD images with text placeholders ---
+    if (calcTotal(optimized) > safeLimit) {
+        for (let i = 0; i < optimized.length - 1; i++) { // Skip latest message
+            const msg = optimized[i];
+            if (msg.role === 'system') continue; // Preserve system
+
+            if (Array.isArray(msg.content)) {
+                const hasImage = msg.content.some(p => p.type === 'image_url');
+                if (hasImage) {
+                    // Replace with text placeholder
+                    const textParts = msg.content
+                        .filter(p => p.type === 'text')
+                        .map(p => p.text)
+                        .join('\n');
+                    msg.content = textParts
+                        ? `${textParts}\n[Image was removed to save context]`
+                        : '[Image was removed to save context]';
+
+                    if (calcTotal(optimized) <= safeLimit) break;
+                }
+            }
+        }
+    }
+
+    // --- Step 2: Drop oldest text messages (preserve system & latest) ---
+    while (calcTotal(optimized) > safeLimit && optimized.length > 2) {
+        // Find first non-system message (index 0 or 1)
+        const firstNonSystemIdx = optimized[0].role === 'system' ? 1 : 0;
+
+        // Don't remove if it's the last user message
+        if (firstNonSystemIdx >= optimized.length - 1) break;
+
+        optimized.splice(firstNonSystemIdx, 1);
+    }
+
+    return optimized;
+}
+
 async function fetchWithTimeout(url, options = {}, timeoutMs = CLOUD_TIMEOUT_MS) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -605,3 +753,6 @@ export function getAIService(apiKeyOrHost, modelName, interactionMode, customPro
     // Default to Groq
     return new GroqService(apiKeyOrHost, modelName, interactionMode, customPrompt, customModes);
 }
+
+// Export helper functions for external use
+export { optimizeMessageHistory, getSafeLimit };

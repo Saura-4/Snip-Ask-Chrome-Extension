@@ -85,6 +85,13 @@ This project is 100% free and open-source. If it saves you time or helps you lea
 -   **Have an idea?** [Start a Discussion](https://github.com/Saura-4/Snip-Ask-Chrome-Extension/discussions)
 -   **Chat with us:** [Join our Discord](https://discord.gg/bppspgkd)
 
+## Acknowledgments
+
+Special thanks to the open-source projects that make Snip & Ask possible:
+-   **[Tesseract.js](https://github.com/naptha/tesseract.js)**: For the incredible OCR engine that powers our client-side text extraction.
+-   **[KaTeX](https://katex.org/)**: For fast math rendering.
+-   **[DOMPurify](https://github.com/cure53/DOMPurify)**: For keeping our HTML rendering secure.
+
 ---
 
 <div align="center">

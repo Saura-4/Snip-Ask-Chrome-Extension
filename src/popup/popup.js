@@ -7,7 +7,12 @@ import {
   DEFAULT_PROVIDERS,
   getDefaultEnabledModels,
   GUEST_MODE_PROVIDERS,
-  checkGuestModeStatus
+  checkGuestModeStatus,
+  getCustomSavedModels,
+  saveCustomModel,
+  removeCustomModel,
+  toggleCustomModel,
+  getMergedModelsWithCustom
 } from '../background/models-config.js';
 
 // --- DEFAULT DATA ---
@@ -161,7 +166,7 @@ async function refreshModelsOnly() {
   loadModels(result.enabledProviders || DEFAULT_PROVIDERS, result.enabledModels || getDefaultEnabledModels(), result.selectedModel);
 }
 
-function loadModels(enabledProviders, enabledModels, selectedModel) {
+async function loadModels(enabledProviders, enabledModels, selectedModel) {
   const modelSelect = document.getElementById('modelSelect');
   modelSelect.innerHTML = '';
 
@@ -171,7 +176,13 @@ function loadModels(enabledProviders, enabledModels, selectedModel) {
     ? GUEST_MODE_PROVIDERS
     : enabledProviders;
 
-  for (const [provider, models] of Object.entries(ALL_MODELS)) {
+  // Get saved custom models
+  const customSavedModels = await getCustomSavedModels();
+
+  // Merge static models with custom saved models
+  const mergedModels = getMergedModelsWithCustom(ALL_MODELS, customSavedModels);
+
+  for (const [provider, models] of Object.entries(mergedModels)) {
     if (providersToShow[provider]) {
       // In guest mode, show ALL Groq models regardless of user's model settings
       const enabledModelsInProvider = isGuestModeActive && provider === 'groq'
@@ -221,10 +232,13 @@ function loadModels(enabledProviders, enabledModels, selectedModel) {
   }
 }
 
-function loadModelsList(enabledProviders, enabledModels) {
+async function loadModelsList(enabledProviders, enabledModels) {
   const modelsList = document.getElementById('modelsList');
   if (!modelsList) return;
   modelsList.innerHTML = '';
+
+  // Get saved custom models
+  const customSavedModels = await getCustomSavedModels();
 
   for (const [provider, models] of Object.entries(ALL_MODELS)) {
     // Provider header
@@ -236,8 +250,11 @@ function loadModelsList(enabledProviders, enabledModels) {
     }
     modelsList.appendChild(providerHeader);
 
-    // Models for this provider
+    // Static models for this provider
     models.forEach(model => {
+      // Skip the "Custom Model" option from the settings list
+      if (model.value.endsWith(':custom')) return;
+
       const div = document.createElement('div');
       div.className = 'model-item';
       if (!enabledProviders[provider]) {
@@ -254,9 +271,37 @@ function loadModelsList(enabledProviders, enabledModels) {
       `;
       modelsList.appendChild(div);
     });
+
+    // Custom saved models for this provider
+    if (customSavedModels[provider] && customSavedModels[provider].length > 0) {
+      customSavedModels[provider].forEach(model => {
+        const div = document.createElement('div');
+        div.className = 'model-item';
+        if (!enabledProviders[provider]) {
+          div.classList.add('model-item-disabled');
+        }
+        div.innerHTML = `
+          <div class="model-info" style="flex: 1;">
+            <span class="model-name">${model.name}</span>
+            <span class="custom-model-badge" style="font-size: 9px; background: rgba(255,107,74,0.15); color: #ff6b4a; padding: 2px 6px; border-radius: 4px; margin-left: 6px;">Custom</span>
+          </div>
+          <button class="delete-custom-model-btn" data-model="${model.value}" data-provider="${provider}" title="Delete custom model" style="background: none; border: none; color: #888; cursor: pointer; padding: 4px 8px; transition: color 0.2s;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+          <label class="toggle">
+            <input type="checkbox" class="custom-model-toggle" data-model="${model.value}" data-provider="${provider}" ${model.enabled !== false ? 'checked' : ''} ${!enabledProviders[provider] ? 'disabled' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        `;
+        modelsList.appendChild(div);
+      });
+    }
   }
 
-  // Attach event listeners
+  // Attach event listeners for static model toggles
   modelsList.querySelectorAll('.model-toggle').forEach(toggle => {
     toggle.addEventListener('change', async (e) => {
       const modelValue = e.target.dataset.model;
@@ -265,6 +310,28 @@ function loadModelsList(enabledProviders, enabledModels) {
       enabledModels[modelValue] = e.target.checked;
       await chrome.storage.local.set({ enabledModels });
       await loadSettings();
+    });
+  });
+
+  // Attach event listeners for custom model toggles
+  modelsList.querySelectorAll('.custom-model-toggle').forEach(toggle => {
+    toggle.addEventListener('change', async (e) => {
+      const modelValue = e.target.dataset.model;
+      const provider = e.target.dataset.provider;
+      await toggleCustomModel(provider, modelValue, e.target.checked);
+      await loadSettings();
+    });
+  });
+
+  // Attach event listeners for delete buttons
+  modelsList.querySelectorAll('.delete-custom-model-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const modelValue = e.target.dataset.model;
+      const provider = e.target.dataset.provider;
+      if (confirm('Delete this custom model?')) {
+        await removeCustomModel(provider, modelValue);
+        await loadSettings();
+      }
     });
   });
 }
@@ -467,9 +534,22 @@ function setupEventListeners() {
     if (model === 'ollama:custom') {
       const name = prompt("Enter your Ollama model name:", "llama3");
       if (name && /^[a-zA-Z0-9\-_:.]+$/.test(name)) {
-        await chrome.storage.local.set({ selectedModel: 'ollama:' + name });
+        const modelValue = 'ollama:' + name;
+        // Generate a readable display name (capitalize first letter, replace common patterns)
+        const displayName = name.split(':')[0].charAt(0).toUpperCase() + name.split(':')[0].slice(1) +
+          (name.includes(':') ? ' (' + name.split(':').slice(1).join(':') + ')' : '');
+
+        // Save custom model for future use
+        await saveCustomModel('ollama', modelValue, '📌 ' + displayName);
+        await chrome.storage.local.set({ selectedModel: modelValue });
+        // Reload to show saved model in dropdown
+        await loadSettings();
+      } else if (name) {
+        alert('Invalid model name. Use only letters, numbers, hyphens, underscores, colons, and dots.');
+        await loadSettings();
+        return;
       } else {
-        // User cancelled or invalid input - refresh to show actual saved model
+        // User cancelled - refresh to show actual saved model
         await loadSettings();
         return;
       }
@@ -480,7 +560,17 @@ function setupEventListeners() {
       // More restrictive: only allows alphanumeric, hyphen, underscore for provider
       // Model name allows dots for versions (e.g., gpt-4.0)
       if (slug && /^[a-zA-Z][a-zA-Z0-9_-]*\/[a-zA-Z][a-zA-Z0-9._-]*(:[a-zA-Z0-9_-]+)?$/.test(slug)) {
-        await chrome.storage.local.set({ selectedModel: 'openrouter:' + slug });
+        const modelValue = 'openrouter:' + slug;
+        // Generate a readable display name from slug
+        const parts = slug.split('/');
+        const modelPart = parts[1].split(':')[0]; // Remove :free suffix for name
+        const displayName = modelPart.charAt(0).toUpperCase() + modelPart.slice(1).replace(/-/g, ' ');
+
+        // Save custom model for future use
+        await saveCustomModel('openrouter', modelValue, '📌 ' + displayName);
+        await chrome.storage.local.set({ selectedModel: modelValue });
+        // Reload to show saved model in dropdown
+        await loadSettings();
       } else if (slug) {
         alert('Invalid model slug format. Use format: provider/model-name (e.g., openai/gpt-4, deepseek/deepseek-r1:free)');
         // Refresh to show actual saved model
@@ -776,15 +866,27 @@ async function startSnip() {
     const name = prompt("Enter your Ollama model name:", "llama3");
     if (name && /^[a-zA-Z0-9\-_:.]+$/.test(name)) {
       model = 'ollama:' + name;
+      // Generate display name and save for future use
+      const displayName = name.split(':')[0].charAt(0).toUpperCase() + name.split(':')[0].slice(1) +
+        (name.includes(':') ? ' (' + name.split(':').slice(1).join(':') + ')' : '');
+      await saveCustomModel('ollama', model, '📌 ' + displayName);
       await chrome.storage.local.set({ selectedModel: model });
+    } else if (name) {
+      alert('Invalid model name. Use only letters, numbers, hyphens, underscores, colons, and dots.');
+      return;
     } else {
-      // User cancelled or invalid input
+      // User cancelled
       return;
     }
   } else if (model === 'openrouter:custom') {
     const slug = prompt("Enter OpenRouter model slug (e.g., openai/gpt-4):", "openai/gpt-4");
     if (slug && /^[a-zA-Z][a-zA-Z0-9_-]*\/[a-zA-Z][a-zA-Z0-9._-]*(:[a-zA-Z0-9_-]+)?$/.test(slug)) {
       model = 'openrouter:' + slug;
+      // Generate display name and save for future use
+      const parts = slug.split('/');
+      const modelPart = parts[1].split(':')[0];
+      const displayName = modelPart.charAt(0).toUpperCase() + modelPart.slice(1).replace(/-/g, ' ');
+      await saveCustomModel('openrouter', model, '📌 ' + displayName);
       await chrome.storage.local.set({ selectedModel: model });
     } else if (slug) {
       alert('Invalid model slug format. Use format: provider/model-name (e.g., openai/gpt-4)');

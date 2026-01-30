@@ -11,6 +11,50 @@ function escapeHtml(unsafe) {
     .replace(/'/g, "&#039;");
 }
 
+// Sanitize language identifier to prevent XSS via malformed code fence labels
+// Only allows alphanumeric, underscore, and hyphen (covers all valid language identifiers)
+function sanitizeLanguage(lang) {
+  return (lang || 'text').replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
+// DOMPurify configuration for safe HTML rendering
+// Allows styling and safe elements needed for markdown rendering
+const DOMPURIFY_CONFIG = {
+  ALLOWED_TAGS: [
+    'div', 'span', 'p', 'br', 'hr',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'strong', 'b', 'em', 'i', 'del', 's', 'u',
+    'ul', 'ol', 'li',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+    'pre', 'code', 'blockquote',
+    'a', 'button', 'svg', 'rect', 'path', 'line', 'polyline', 'circle'
+  ],
+  ALLOWED_ATTR: [
+    'style', 'class', 'id', 'href', 'target', 'rel', 'title',
+    'width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width',
+    'stroke-linecap', 'stroke-linejoin', 'd', 'x', 'y', 'rx', 'ry',
+    'x1', 'y1', 'x2', 'y2', 'points', 'cx', 'cy', 'r'
+  ],
+  ALLOW_DATA_ATTR: false,
+  ADD_ATTR: ['target'], // Allow target="_blank" on links
+  FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input'],
+  FORBID_ATTR: ['onerror', 'onclick', 'onload', 'onmouseover', 'onfocus', 'onblur']
+};
+
+/**
+ * Sanitize HTML using DOMPurify if available, otherwise return as-is
+ * This provides defense-in-depth against XSS attacks
+ * @param {string} html - HTML string to sanitize
+ * @returns {string} Sanitized HTML
+ */
+function sanitizeHtml(html) {
+  if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
+    return DOMPurify.sanitize(html, DOMPURIFY_CONFIG);
+  }
+  // Fallback: return as-is (our manual escaping should still protect)
+  return html;
+}
+
 function parseMarkdown(text) {
   if (!text) return "";
   const codeBlocks = [];
@@ -25,7 +69,7 @@ function parseMarkdown(text) {
   //   ```lang\ncode\n``` (multiline with newline after fence)
   //   ```lang code``` (single-line without newline)
   text = text.replace(/```(\w+)?[ \t]*\n?([\s\S]*?)```/g, (match, lang, code) => {
-    const language = lang || 'text';
+    const language = sanitizeLanguage(lang);
     const blockHtml = `
       <div class="code-block-wrapper" style="background: #0d0d0d; border: 1px solid #333; border-radius: 8px; overflow: hidden; margin: 10px 0; font-family: 'JetBrains Mono', monospace;">
         <div class="code-header" style="display: flex; justify-content: space-between; align-items: center; background: #1a1a1a; padding: 6px 12px; border-bottom: 1px solid #333;">
@@ -46,7 +90,7 @@ function parseMarkdown(text) {
   text = text.replace(/```(\w+)?[ \t]*\n?([\s\S]*)$/g, (match, lang, code) => {
     // Only match if there's actual code content (not just the fence at the end)
     if (!code || code.trim().length === 0) return match;
-    const language = lang || 'text';
+    const language = sanitizeLanguage(lang);
     const blockHtml = `
       <div class="code-block-wrapper" style="background: #0d0d0d; border: 1px solid #333; border-radius: 8px; overflow: hidden; margin: 10px 0; font-family: 'JetBrains Mono', monospace;">
         <div class="code-header" style="display: flex; justify-content: space-between; align-items: center; background: #1a1a1a; padding: 6px 12px; border-bottom: 1px solid #333;">
@@ -274,7 +318,10 @@ function parseMarkdown(text) {
   text = text.replace(mathRestoreRegex, (match, index) => mathBlocks[index]);
 
   // Wrap in a styled container for consistent typography
-  return `<div style="font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; line-height: 1.65; color: #d4d4d8;">${text}</div>`;
+  const rawHtml = `<div style="font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; line-height: 1.65; color: #d4d4d8;">${text}</div>`;
+
+  // Final sanitization through DOMPurify for defense-in-depth
+  return sanitizeHtml(rawHtml);
 }
 
 // --- Image Processing ---

@@ -1,6 +1,6 @@
 // src/background/background.js
 
-import { getAIService } from './ai-service.js';
+import { getAIService, optimizeMessageHistory } from './ai-service.js';
 import { isGuestMode, isGuestConfigured, makeGuestRequest, GUEST_DEFAULT_MODEL } from './guest-config.js';
 import { getChatWindowModels, checkGuestModeStatus } from './models-config.js';
 
@@ -20,6 +20,11 @@ function getStorage(keys) {
 
 // Create context menu on install
 chrome.runtime.onInstalled.addListener(async (details) => {
+    // Open setup guide on fresh install only (not on updates)
+    if (details.reason === 'install') {
+        chrome.tabs.create({ url: chrome.runtime.getURL('src/setupguide/setupguide.html') });
+    }
+
     // Check if context menu should be hidden
     const storage = await getStorage(['hideContextMenu']);
     if (!storage.hideContextMenu) {
@@ -55,6 +60,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                 target: { tabId: tab.id },
                 files: [
                     'lib/katex.min.js',
+                    'lib/purify.min.js',
                     'src/content/utils.js',
                     'src/content/ui-helpers.js',
                     'src/content/window-manager.js',
@@ -92,6 +98,7 @@ chrome.commands.onCommand.addListener(async (command) => {
                     target: { tabId: tab.id },
                     files: [
                         'lib/katex.min.js',
+                        'lib/purify.min.js',
                         'src/content/utils.js',
                         'src/content/ui-helpers.js',
                         'src/content/window-manager.js',
@@ -223,9 +230,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         ...request.history
                     ];
 
+                    // Optimize history to stay within model token limits
+                    const optimizedMessages = optimizeMessageHistory(messagesWithSystem, modelName || GUEST_DEFAULT_MODEL);
+
                     const guestResponse = await makeGuestRequest({
                         model: modelName || GUEST_DEFAULT_MODEL,
-                        messages: messagesWithSystem,
+                        messages: optimizedMessages,
                         temperature: 0.3,
                         max_tokens: mode === 'short' ? 512 : (mode === 'code' ? 2048 : 1536),
                         _meta: { parallelCount } // Pass to worker for proper counting
@@ -262,7 +272,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const mode = request.mode || storage.selectedMode || storage.interactionMode || 'short';
                 const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
 
-                const result = await aiService.chat(request.history);
+                // Optimize history to stay within model token limits
+                const optimizedHistory = optimizeMessageHistory(request.history, modelName);
+                const result = await aiService.chat(optimizedHistory);
                 sendResponse({ success: true, answer: result.text, tokenUsage: result.tokenUsage });
 
             } catch (err) {
@@ -384,7 +396,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const enabledModels = storage.enabledModels || {};
 
                 // Get filtered models using centralized logic
-                const models = getChatWindowModels(enabledProviders, enabledModels, inGuestMode);
+                const models = await getChatWindowModels(enabledProviders, enabledModels, inGuestMode);
 
                 sendResponse({
                     success: true,
@@ -595,10 +607,13 @@ async function handleMultiImageRequest(images, explicitModel, textContext, sendR
 
             messages.push({ role: 'user', content: contentArray });
 
+            // Optimize history to stay within model token limits
+            const optimizedMessages = optimizeMessageHistory(messages, modelName);
+
             // Make demo request through Cloudflare Worker
             const guestResponse = await makeGuestRequest({
                 model: modelName,
-                messages: messages,
+                messages: optimizedMessages,
                 temperature: 0.3,
                 max_tokens: mode === 'short' ? 512 : (mode === 'code' ? 2048 : 1536)
             });
@@ -673,7 +688,9 @@ async function handleMultiImageRequest(images, explicitModel, textContext, sendR
             { role: 'user', content: contentArray }
         ];
 
-        const answer = await aiService.chat(messages);
+        // Optimize history to stay within model token limits
+        const optimizedMessages = optimizeMessageHistory(messages, modelName);
+        const answer = await aiService.chat(optimizedMessages);
         const result = { answer: answer, initialUserMessage: messages[0] };
 
         sendResponse({
