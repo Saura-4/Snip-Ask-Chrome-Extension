@@ -495,6 +495,21 @@ class FloatingChatUI {
             this.input.style.height = Math.min(this.input.scrollHeight, 120) + 'px';
         });
 
+        // Prevent host page (GitHub, Gmail, etc.) from capturing keyboard events
+        // These sites have global keyboard shortcuts that can steal focus
+        const stopPropagation = (e) => {
+            e.stopPropagation();
+        };
+        this.input.addEventListener('keydown', stopPropagation);
+        this.input.addEventListener('keyup', stopPropagation);
+        this.input.addEventListener('keypress', stopPropagation);
+
+        // Also prevent focus-related events from bubbling
+        this.input.addEventListener('focus', stopPropagation);
+        this.input.addEventListener('blur', stopPropagation);
+        this.input.addEventListener('focusin', stopPropagation);
+        this.input.addEventListener('focusout', stopPropagation);
+
         this.sendBtn = document.createElement("button");
         this.sendBtn.innerText = "➤";
         this.sendBtn.style.cssText = `
@@ -504,12 +519,18 @@ class FloatingChatUI {
         `;
 
         this.sendBtn.onclick = () => this.handleSend();
-        this.input.onkeydown = (e) => {
+
+        // Consolidated keydown handler for input - handles Enter to send and Escape to close
+        // Note: stopPropagation is already handled by the earlier listener
+        this.input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.handleSend();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                this.close();
             }
-        };
+        });
 
         inputArea.appendChild(this.input);
         inputArea.appendChild(this.sendBtn);
@@ -525,13 +546,14 @@ class FloatingChatUI {
 
         this.container.addEventListener('mouseup', () => this.saveState());
 
-        // Escape key closes the focused chat window
-        this.input.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                this.close();
-            }
-        });
+        // Prevent ALL keyboard events from reaching the host page
+        // This is critical for sites like GitHub/Gmail that have aggressive keyboard shortcuts
+        const preventHostCapture = (e) => {
+            e.stopPropagation();
+        };
+        this.host.addEventListener('keydown', preventHostCapture, true);
+        this.host.addEventListener('keyup', preventHostCapture, true);
+        this.host.addEventListener('keypress', preventHostCapture, true);
     }
 
     /**
@@ -709,6 +731,10 @@ class FloatingChatUI {
             const cleanText = sanitizeModelText(content);
             if (typeof parseMarkdown === 'function') {
                 contentDiv.innerHTML = parseMarkdown(cleanText);
+                // Attach copy handlers to code blocks
+                if (typeof attachCodeBlockCopyHandlers === 'function') {
+                    attachCodeBlockCopyHandlers(contentDiv);
+                }
             } else {
                 contentDiv.innerText = cleanText;
             }
@@ -915,14 +941,16 @@ class FloatingChatUI {
                         response = await chrome.runtime.sendMessage({
                             action: "ASK_AI",
                             model: this.currentModel,
-                            base64Image: imagesToSend[0]
+                            base64Image: imagesToSend[0],
+                            mode: this.currentMode
                         });
                     } else {
                         response = await chrome.runtime.sendMessage({
                             action: "ASK_AI_MULTI_IMAGE",
                             model: this.currentModel,
                             images: imagesToSend,
-                            textContext: this._extractTextFromHistory(userMsgIndex)
+                            textContext: this._extractTextFromHistory(userMsgIndex),
+                            mode: this.currentMode
                         });
                     }
                 } else {
@@ -1425,7 +1453,8 @@ class FloatingChatUI {
                     action: "ASK_AI_MULTI_IMAGE",
                     model: newUI.currentModel,
                     images: imagesToSend,
-                    textContext: fullTextContext
+                    textContext: fullTextContext,
+                    mode: newUI.currentMode
                 });
             } else if (!isVisionModel(newUI.currentModel) && imagesToSend.length > 0) {
                 // Non-vision model with images: Extract text via OCR first
@@ -1545,6 +1574,10 @@ class FloatingChatUI {
             const text = msg.displayText || (typeof msg.content === 'string' ? msg.content : '');
             if (typeof parseMarkdown === 'function') {
                 contentDiv.innerHTML = parseMarkdown(sanitizeModelText(text));
+                // Attach copy handlers to code blocks
+                if (typeof attachCodeBlockCopyHandlers === 'function') {
+                    attachCodeBlockCopyHandlers(contentDiv);
+                }
             } else {
                 contentDiv.innerText = text;
             }
