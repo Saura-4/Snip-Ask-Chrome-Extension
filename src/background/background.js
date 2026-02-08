@@ -175,13 +175,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const content = type === 'text' ? request.text : request.base64Image;
         const ocrConfidence = request.ocrConfidence || null;
 
-        handleAIRequest(content, type, request.model, sendResponse, ocrConfidence);
+        handleAIRequest(content, type, request.model, sendResponse, ocrConfidence, request.mode);
         return true;
     }
 
     // --- C2. MULTI-IMAGE AI REQUEST (for compare window) ---
     if (request.action === "ASK_AI_MULTI_IMAGE") {
-        handleMultiImageRequest(request.images, request.model, request.textContext, sendResponse);
+        handleMultiImageRequest(request.images, request.model, request.textContext, sendResponse, request.mode);
         return true;
     }
 
@@ -413,10 +413,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // --- AI REQUEST HANDLER ---
 
-async function handleAIRequest(inputContent, type, explicitModel, sendResponse, ocrConfidence) {
+async function handleAIRequest(inputContent, type, explicitModel, sendResponse, ocrConfidence, explicitMode) {
     try {
         const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'selectedMode', 'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
-        const mode = storage.selectedMode || storage.interactionMode || 'short';
+        // Prioritize explicit mode from request, then storage values
+        const mode = explicitMode || storage.selectedMode || storage.interactionMode || 'short';
 
         let modelName = explicitModel || storage.selectedModel || "meta-llama/llama-4-scout-17b-16e-instruct";
 
@@ -550,10 +551,11 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
 
 // --- MULTI-IMAGE REQUEST HANDLER ---
 
-async function handleMultiImageRequest(images, explicitModel, textContext, sendResponse) {
+async function handleMultiImageRequest(images, explicitModel, textContext, sendResponse, explicitMode) {
     try {
         const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'selectedMode', 'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
-        const mode = storage.selectedMode || storage.interactionMode || 'short';
+        // Prioritize explicit mode from request, then storage values
+        const mode = explicitMode || storage.selectedMode || storage.interactionMode || 'short';
 
         let modelName = explicitModel || storage.selectedModel || "meta-llama/llama-4-scout-17b-16e-instruct";
 

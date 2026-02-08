@@ -324,6 +324,56 @@ function parseMarkdown(text) {
   return sanitizeHtml(rawHtml);
 }
 
+/**
+ * Attach click event handlers to code block copy buttons within a container.
+ * This should be called AFTER setting innerHTML = parseMarkdown(text)
+ * @param {HTMLElement} container - The container element with parsed markdown
+ */
+function attachCodeBlockCopyHandlers(container) {
+  if (!container) return;
+
+  const copyButtons = container.querySelectorAll('.code-block-wrapper .copy-btn');
+  copyButtons.forEach(btn => {
+    // Skip if already has handler attached
+    if (btn.dataset.handlerAttached) return;
+    btn.dataset.handlerAttached = 'true';
+
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Find the code element within the same code-block-wrapper
+      const wrapper = btn.closest('.code-block-wrapper');
+      if (!wrapper) return;
+
+      const codeElement = wrapper.querySelector('code');
+      if (!codeElement) return;
+
+      const codeText = codeElement.textContent || '';
+
+      try {
+        await navigator.clipboard.writeText(codeText);
+
+        // Visual feedback
+        const originalHTML = btn.innerHTML;
+        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!';
+        btn.style.color = '#4ade80';
+
+        setTimeout(() => {
+          btn.innerHTML = originalHTML;
+          btn.style.color = '#888';
+        }, 2000);
+      } catch (err) {
+        console.error('Failed to copy code:', err);
+        btn.textContent = 'Failed';
+        setTimeout(() => {
+          btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> Copy';
+        }, 2000);
+      }
+    });
+  });
+}
+
 // --- Image Processing ---
 
 // Max dimension to prevent huge payloads on 4K monitors (APIs may reject or timeout)

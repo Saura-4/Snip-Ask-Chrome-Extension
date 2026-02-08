@@ -657,7 +657,7 @@ function setupEventListeners() {
 
   document.getElementById('discordLink')?.addEventListener('click', (e) => {
     e.preventDefault();
-    chrome.tabs.create({ url: 'https://discord.gg/bppspgkd' });
+    chrome.tabs.create({ url: 'https://discord.gg/hUdshmSxET' });
   });
 
   document.getElementById('githubLink')?.addEventListener('click', (e) => {
