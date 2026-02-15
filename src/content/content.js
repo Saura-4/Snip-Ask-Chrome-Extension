@@ -17,10 +17,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "SHOW_AI_RESPONSE_FOR_TEXT") {
         if (typeof showLoadingCursor === 'function') showLoadingCursor();
 
-        chrome.runtime.sendMessage({
-            action: "ASK_AI_TEXT",
-            text: request.text
-        }, handleResponse);
+        // Read mode from storage to pass explicitly
+        chrome.storage.local.get(['selectedMode', 'interactionMode'], (modeStorage) => {
+            const mode = modeStorage.selectedMode || modeStorage.interactionMode || 'short';
+            chrome.runtime.sendMessage({
+                action: "ASK_AI_TEXT",
+                text: request.text,
+                mode: mode
+            }, handleResponse);
+        });
 
         sendResponse({ status: "Processing text" });
     }
@@ -85,6 +90,7 @@ function handleSnipComplete(rect) {
                 }
 
                 const currentModel = configResult.model;
+                const currentMode = configResult.mode || 'short';
 
                 if (!configResult.isConfigured) {
                     showErrorToast(`Please set your ${configResult.providerName} in the extension popup!`);
@@ -97,7 +103,8 @@ function handleSnipComplete(rect) {
                     chrome.runtime.sendMessage({
                         action: "ASK_AI",
                         model: currentModel,
-                        base64Image: croppedBase64
+                        base64Image: croppedBase64,
+                        mode: currentMode
                     }, handleResponse);
                     return;
                 }
@@ -125,7 +132,8 @@ function handleSnipComplete(rect) {
                             action: "ASK_AI_TEXT",
                             model: currentModel,
                             text: ocrResponse.text,
-                            ocrConfidence: ocrResponse.confidence
+                            ocrConfidence: ocrResponse.confidence,
+                            mode: currentMode
                         }, handleResponse);
                     } else {
                         console.warn("OCR Empty or Failed:", ocrResponse.error || 'No readable text');
@@ -133,7 +141,8 @@ function handleSnipComplete(rect) {
                             chrome.runtime.sendMessage({
                                 action: "ASK_AI",
                                 model: currentModel,
-                                base64Image: croppedBase64
+                                base64Image: croppedBase64,
+                                mode: currentMode
                             }, handleResponse);
                         } else {
                             alert(`⚠️ No text found in snippet.\n\nSince '${currentModel}' cannot see images, please try snipping clearer text or switch to a Vision model.`);
