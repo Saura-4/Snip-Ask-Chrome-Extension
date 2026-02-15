@@ -60,7 +60,7 @@ function isGuestConfigured() {
  * @param {Object} requestBody - The request body to send to Groq API
  * @returns {Promise<Object>} - The API response
  */
-async function makeGuestRequest(requestBody) {
+async function makeGuestRequest(requestBody, externalSignal = null) {
     if (!isGuestConfigured()) {
         throw new Error('Guest Mode is not configured. Please add your own API key.');
     }
@@ -88,6 +88,23 @@ async function makeGuestRequest(requestBody) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
 
+    // Track whether cancellation was user-initiated vs timeout
+    let cancelledByUser = false;
+
+    // Link external abort signal to our internal controller
+    let externalAbortHandler;
+    if (externalSignal) {
+        if (externalSignal.aborted) {
+            clearTimeout(timeoutId);
+            throw new Error('Request cancelled.');
+        }
+        externalAbortHandler = () => {
+            cancelledByUser = true;
+            controller.abort();
+        };
+        externalSignal.addEventListener('abort', externalAbortHandler);
+    }
+
     let response;
     try {
         response = await fetch(GUEST_WORKER_URL, {
@@ -102,9 +119,13 @@ async function makeGuestRequest(requestBody) {
     } catch (error) {
         clearTimeout(timeoutId);
         if (error.name === 'AbortError') {
-            throw new Error('Request timed out. Please try again.');
+            throw new Error(cancelledByUser ? 'Request cancelled.' : 'Request timed out. Please try again.');
         }
         throw error;
+    } finally {
+        if (externalSignal && externalAbortHandler) {
+            externalSignal.removeEventListener('abort', externalAbortHandler);
+        }
     }
     clearTimeout(timeoutId);
 

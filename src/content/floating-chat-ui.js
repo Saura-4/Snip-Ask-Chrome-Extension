@@ -306,6 +306,9 @@ class FloatingChatUI {
             @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); background: #f55036; } }
             .thinking-text { font-size: 11px; color: #666; font-style: italic; animation: pulse 1.5s infinite; }
             @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+            .stop-btn { background: none; border: 1px solid #555; color: #999; font-size: 11px; padding: 3px 10px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s; margin-left: auto; }
+            .stop-btn:hover { border-color: #f55036; color: #f55036; background: rgba(245, 80, 54, 0.08); }
+            .stop-btn svg { width: 10px; height: 10px; fill: currentColor; }
             
             /* MATH BLOCKS (LaTeX) */
             .math-block { background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 12px 16px; margin: 10px 0; overflow-x: auto; text-align: center; }
@@ -835,6 +838,7 @@ class FloatingChatUI {
      */
     showTypingIndicator() {
         this.removeTypingIndicator(); // Ensure only one exists
+        this._requestCancelled = false; // Reset cancel flag for new request
 
         const container = document.createElement("div");
         container.className = "typing-container";
@@ -846,10 +850,32 @@ class FloatingChatUI {
                 <span class="dot"></span>
             </div>
             <span class="thinking-text">Thinking...</span>
+            <button class="stop-btn" title="Stop generating">
+                <svg viewBox="0 0 10 10"><rect x="1" y="1" width="8" height="8" rx="1"/></svg>
+                Stop
+            </button>
         `;
+
+        // Wire up stop button
+        const stopBtn = container.querySelector('.stop-btn');
+        stopBtn.addEventListener('click', () => this._handleStopRequest());
 
         this.chatBody.appendChild(container);
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
+    }
+
+    /**
+     * Handle user clicking the Stop button
+     */
+    _handleStopRequest() {
+        this._requestCancelled = true;
+        this.removeTypingIndicator();
+
+        // Tell background to abort all in-progress requests
+        chrome.runtime.sendMessage({ action: "CANCEL_AI_REQUEST" });
+
+        // Show stopped message
+        this.addMessage('assistant', '⏹ Response stopped by user.', this.currentModel, true);
     }
 
     /**
@@ -1013,6 +1039,8 @@ class FloatingChatUI {
 
             this.removeTypingIndicator();
 
+            if (this._requestCancelled) return; // User clicked Stop
+
             if (response && response.success) {
                 // Add regenerated indicator to the response
                 this._addRegeneratedMessage(response.answer, this.currentModel);
@@ -1024,6 +1052,7 @@ class FloatingChatUI {
             }
         } catch (e) {
             this.removeTypingIndicator();
+            if (this._requestCancelled) return;
             this.addMessage('assistant', "⚠️ Network Error: " + e.message, this.currentModel, true);
         }
     }
@@ -1262,9 +1291,11 @@ class FloatingChatUI {
             chrome.runtime.sendMessage({
                 action: "ASK_AI",
                 model: this.currentModel,
-                base64Image: croppedBase64
+                base64Image: croppedBase64,
+                mode: this.currentMode
             }, (response) => {
                 this.removeTypingIndicator();
+                if (this._requestCancelled) return; // User clicked Stop
                 if (response && response.success) {
                     this.addMessage('assistant', response.answer, this.currentModel, false, null, false, response.tokenUsage);
                     if (response.guestInfo) {
@@ -1283,9 +1314,11 @@ class FloatingChatUI {
                     chrome.runtime.sendMessage({
                         action: "ASK_AI_TEXT",
                         model: this.currentModel,
-                        text: ocrResult.text
+                        text: ocrResult.text,
+                        mode: this.currentMode
                     }, (response) => {
                         this.removeTypingIndicator();
+                        if (this._requestCancelled) return; // User clicked Stop
                         if (response && response.success) {
                             this.addMessage('assistant', response.answer, this.currentModel, false, null, false, response.tokenUsage);
                             if (response.guestInfo) {
@@ -1297,6 +1330,7 @@ class FloatingChatUI {
                     });
                 } else {
                     this.removeTypingIndicator();
+                    if (this._requestCancelled) return;
                     this.addMessage('assistant', "⚠️ OCR failed - no text extracted from image", this.currentModel, true);
                 }
             });
@@ -1503,6 +1537,7 @@ class FloatingChatUI {
             }
 
             newUI.removeTypingIndicator();
+            if (newUI._requestCancelled) return; // User clicked Stop
             if (response && response.success) {
                 newUI.addMessage('assistant', response.answer, newUI.currentModel, false, null, false, response.tokenUsage);
                 if (response.guestInfo) {
@@ -1513,6 +1548,7 @@ class FloatingChatUI {
             }
         } catch (e) {
             newUI.removeTypingIndicator();
+            if (newUI._requestCancelled) return;
             newUI.addMessage('assistant', "⚠️ Network Error: " + e.message, newUI.currentModel, true);
         }
     }
@@ -1648,6 +1684,8 @@ class FloatingChatUI {
 
             this.removeTypingIndicator();
 
+            if (this._requestCancelled) return; // User clicked Stop
+
             if (response && response.success) {
                 this.addMessage('assistant', response.answer, modelToUse, false, null, false, response.tokenUsage);
                 if (response.guestInfo) {
@@ -1658,6 +1696,7 @@ class FloatingChatUI {
             }
         } catch (e) {
             this.removeTypingIndicator();
+            if (this._requestCancelled) return;
             this.addMessage('assistant', "⚠️ Network Error: " + e.message, modelToUse, true);
         }
         WindowManager.onResponseReceived();

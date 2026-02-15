@@ -16,6 +16,27 @@ function getStorage(keys) {
     });
 }
 
+// --- ABORT CONTROLLER TRACKING ---
+// Tracks all in-progress AI requests so they can be cancelled by the user
+const activeAbortControllers = new Set();
+
+function createTrackedAbortController() {
+    const controller = new AbortController();
+    activeAbortControllers.add(controller);
+    return controller;
+}
+
+function removeTrackedController(controller) {
+    activeAbortControllers.delete(controller);
+}
+
+function cancelAllActiveRequests() {
+    for (const controller of activeAbortControllers) {
+        controller.abort();
+    }
+    activeAbortControllers.clear();
+}
+
 // --- CONTEXT MENU & KEYBOARD SHORTCUTS ---
 
 // Create context menu on install
@@ -174,19 +195,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const type = request.action === "ASK_AI_TEXT" ? 'text' : 'image';
         const content = type === 'text' ? request.text : request.base64Image;
         const ocrConfidence = request.ocrConfidence || null;
+        const controller = createTrackedAbortController();
 
-        handleAIRequest(content, type, request.model, sendResponse, ocrConfidence, request.mode);
+        handleAIRequest(content, type, request.model, sendResponse, ocrConfidence, request.mode, controller.signal)
+            .finally(() => removeTrackedController(controller));
         return true;
     }
 
     // --- C2. MULTI-IMAGE AI REQUEST (for compare window) ---
     if (request.action === "ASK_AI_MULTI_IMAGE") {
-        handleMultiImageRequest(request.images, request.model, request.textContext, sendResponse, request.mode);
+        const controller = createTrackedAbortController();
+        handleMultiImageRequest(request.images, request.model, request.textContext, sendResponse, request.mode, controller.signal)
+            .finally(() => removeTrackedController(controller));
         return true;
     }
 
     // --- D. CHAT CONTINUATION (REPLY) ---
     if (request.action === "CONTINUE_CHAT") {
+        const controller = createTrackedAbortController();
         (async () => {
             try {
                 const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'selectedMode', 'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
@@ -202,35 +228,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 // Check if we should use demo mode for this request
                 if (isGroq && !storage.groqKey && isGuestConfigured()) {
                     // Demo mode: use Cloudflare Worker for follow-up chat
-                    // parallelCount: how many requests to count (for comparison mode)
-                    // 0 means don't count this request (companion in parallel batch)
                     const parallelCount = request.parallelCount ?? 1;
 
-                    // Use mode from request (mode selector), fallback to storage
                     const mode = request.mode || storage.selectedMode || storage.interactionMode || 'short';
                     const customModes = storage.customModes || null;
 
-                    // Build system prompt based on mode (guest mode doesn't use aiService, so we add manually)
                     let systemPrompt = 'This is a POPUP WINDOW. Analyze the input and provide a helpful, concise response (under 200 words). Be direct and focused.';
                     if (mode === 'short') systemPrompt = "POPUP WINDOW: Concise answer engine. Keep under 100 words. For MCQs: 'Answer: <option>. <one-sentence explanation>'. For other questions: direct answer only. No preamble, no elaboration.";
                     else if (mode === 'detailed') systemPrompt = "POPUP TUTOR: Provide a focused, step-by-step answer. Use concise bullet points. Limit to 3-5 key steps max. Use Markdown sparingly (bold for emphasis only).";
                     else if (mode === 'code') systemPrompt = "POPUP CODE ASSISTANT: Provide ESSENTIAL CODE ONLY - no exhaustive examples. Output ONE clean code block + 1-2 sentences explaining the key fix/concept. Be concise.";
                     else if (mode === 'custom' && storage.customPrompt) {
-                        // Use user's custom prompt
                         systemPrompt = storage.customPrompt;
                     } else if (customModes) {
-                        // Check for user-created custom mode
                         const customMode = customModes.find(m => m.id === mode);
                         if (customMode) systemPrompt = customMode.prompt;
                     }
 
-                    // Prepend system message to history
                     const messagesWithSystem = [
                         { role: 'system', content: systemPrompt },
                         ...request.history
                     ];
 
-                    // Optimize history to stay within model token limits
                     const optimizedMessages = optimizeMessageHistory(messagesWithSystem, modelName || GUEST_DEFAULT_MODEL);
 
                     const guestResponse = await makeGuestRequest({
@@ -238,15 +256,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         messages: optimizedMessages,
                         temperature: 0.3,
                         max_tokens: mode === 'short' ? 512 : (mode === 'code' ? 2048 : 1536),
-                        _meta: { parallelCount } // Pass to worker for proper counting
-                    });
+                        _meta: { parallelCount }
+                    }, controller.signal);
 
                     let answer = guestResponse.choices?.[0]?.message?.content || 'No answer returned.';
 
-                    // Strip thinking tags from Qwen models
                     answer = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-                    // Extract token usage from Groq response
                     const tokenUsage = guestResponse.usage ? {
                         promptTokens: guestResponse.usage.prompt_tokens || 0,
                         completionTokens: guestResponse.usage.completion_tokens || 0,
@@ -268,19 +284,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     throw new Error('Missing API key. Please configure your API keys in the extension popup.');
                 }
 
-                // Use mode from request (set by mode selector), fallback to storage
                 const mode = request.mode || storage.selectedMode || storage.interactionMode || 'short';
                 const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
 
-                // Optimize history to stay within model token limits
                 const optimizedHistory = optimizeMessageHistory(request.history, modelName);
-                const result = await aiService.chat(optimizedHistory);
+                const result = await aiService.chat(optimizedHistory, controller.signal);
                 sendResponse({ success: true, answer: result.text, tokenUsage: result.tokenUsage });
 
             } catch (err) {
                 sendResponse({ success: false, error: err.message });
+            } finally {
+                removeTrackedController(controller);
             }
         })();
+        return true;
+    }
+
+    // --- CANCEL AI REQUEST HANDLER ---
+    if (request.action === "CANCEL_AI_REQUEST") {
+        cancelAllActiveRequests();
+        sendResponse({ success: true });
         return true;
     }
 
@@ -318,8 +341,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "CHECK_PROVIDER_CONFIG") {
         (async () => {
             try {
-                const storage = await getStorage(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'selectedModel']);
+                const storage = await getStorage(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'selectedModel', 'selectedMode', 'interactionMode']);
                 let modelName = request.model || storage.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+                // Resolve current mode for the caller
+                const currentMode = storage.selectedMode || storage.interactionMode || 'short';
 
                 // Determine which provider this model needs
                 const isOllama = modelName.startsWith('ollama:');
@@ -356,7 +382,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     success: true,
                     isConfigured,
                     providerName,
-                    model: modelName
+                    model: modelName,
+                    mode: currentMode
                 });
             } catch (err) {
                 sendResponse({ success: false, error: err.message });
@@ -413,7 +440,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // --- AI REQUEST HANDLER ---
 
-async function handleAIRequest(inputContent, type, explicitModel, sendResponse, ocrConfidence, explicitMode) {
+async function handleAIRequest(inputContent, type, explicitModel, sendResponse, ocrConfidence, explicitMode, signal = null) {
     try {
         const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'selectedMode', 'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
         // Prioritize explicit mode from request, then storage values
@@ -473,7 +500,7 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
                 messages: messages,
                 temperature: 0.3,
                 max_tokens: mode === 'short' ? 512 : (mode === 'code' ? 2048 : 1536)
-            });
+            }, signal);
 
             let answer = guestResponse.choices?.[0]?.message?.content || 'No answer returned.';
 
@@ -525,9 +552,9 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
 
         let result;
         if (type === 'image') {
-            result = await aiService.askImage(inputContent);
+            result = await aiService.askImage(inputContent, signal);
         } else {
-            result = await aiService.askText(inputContent);
+            result = await aiService.askText(inputContent, signal);
         }
 
         sendResponse({
@@ -551,7 +578,7 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
 
 // --- MULTI-IMAGE REQUEST HANDLER ---
 
-async function handleMultiImageRequest(images, explicitModel, textContext, sendResponse, explicitMode) {
+async function handleMultiImageRequest(images, explicitModel, textContext, sendResponse, explicitMode, signal = null) {
     try {
         const storage = await getStorage(['interactionMode', 'customPrompt', 'selectedModel', 'selectedMode', 'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
         // Prioritize explicit mode from request, then storage values
@@ -618,7 +645,7 @@ async function handleMultiImageRequest(images, explicitModel, textContext, sendR
                 messages: optimizedMessages,
                 temperature: 0.3,
                 max_tokens: mode === 'short' ? 512 : (mode === 'code' ? 2048 : 1536)
-            });
+            }, signal);
 
             let answer = guestResponse.choices?.[0]?.message?.content || 'No answer returned.';
 
@@ -692,7 +719,7 @@ async function handleMultiImageRequest(images, explicitModel, textContext, sendR
 
         // Optimize history to stay within model token limits
         const optimizedMessages = optimizeMessageHistory(messages, modelName);
-        const answer = await aiService.chat(optimizedMessages);
+        const answer = await aiService.chat(optimizedMessages, signal);
         const result = { answer: answer, initialUserMessage: messages[0] };
 
         sendResponse({

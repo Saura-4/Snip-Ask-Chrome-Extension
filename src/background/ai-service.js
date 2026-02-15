@@ -178,9 +178,26 @@ function optimizeMessageHistory(messages, targetModel, comparisonModels = []) {
     return optimized;
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = CLOUD_TIMEOUT_MS) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = CLOUD_TIMEOUT_MS, externalSignal = null) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    // Track whether cancellation was user-initiated vs timeout
+    let cancelledByUser = false;
+
+    // Link external abort signal to our internal controller
+    let externalAbortHandler;
+    if (externalSignal) {
+        if (externalSignal.aborted) {
+            clearTimeout(timeoutId);
+            throw new Error('Request cancelled.');
+        }
+        externalAbortHandler = () => {
+            cancelledByUser = true;
+            controller.abort();
+        };
+        externalSignal.addEventListener('abort', externalAbortHandler);
+    }
 
     try {
         const response = await fetch(url, {
@@ -192,9 +209,13 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = CLOUD_TIMEOUT_MS)
     } catch (error) {
         clearTimeout(timeoutId);
         if (error.name === 'AbortError') {
-            throw new Error('Request timed out. Please try again.');
+            throw new Error(cancelledByUser ? 'Request cancelled.' : 'Request timed out. Please try again.');
         }
         throw error;
+    } finally {
+        if (externalSignal && externalAbortHandler) {
+            externalSignal.removeEventListener('abort', externalAbortHandler);
+        }
     }
 }
 
@@ -252,7 +273,7 @@ class AbstractAIService {
         return PROMPTS[this.mode]?.image || PROMPTS.short.image;
     }
 
-    async chat(messages) { throw new Error("Method 'chat' must be implemented."); }
+    async chat(messages, signal = null) { throw new Error("Method 'chat' must be implemented."); }
 }
 
 // --- GROQ ---
@@ -297,7 +318,7 @@ class GroqService extends AbstractAIService {
         this.API_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
     }
 
-    async chat(messages) {
+    async chat(messages, signal = null) {
         const finalMessages = [...messages];
         if (finalMessages.length === 0 || finalMessages[0].role !== 'system') {
             finalMessages.unshift({ role: "system", content: this._getSystemInstruction() });
@@ -314,7 +335,7 @@ class GroqService extends AbstractAIService {
             method: "POST",
             headers: { "Authorization": `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
             body: JSON.stringify(requestBody)
-        });
+        }, CLOUD_TIMEOUT_MS, signal);
 
         const data = await response.json();
         if (!response.ok) throw new Error(normalizeErrorMessage(response, data, 'Groq'));
@@ -336,7 +357,7 @@ class GroqService extends AbstractAIService {
         };
     }
 
-    async askImage(base64Image) {
+    async askImage(base64Image, signal = null) {
         const promptText = this._createImagePrompt();
         const userMsg = {
             role: "user",
@@ -345,17 +366,17 @@ class GroqService extends AbstractAIService {
                 { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
             ]
         };
-        const result = await this.chat([userMsg]);
+        const result = await this.chat([userMsg], signal);
         return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 
-    async askText(rawText) {
+    async askText(rawText, signal = null) {
         // Sanitize user input to prevent prompt injection
         const sanitized = rawText
             .replace(/</g, "\\<")
             .replace(/>/g, "\\>");
         const userMsg = { role: "user", content: `<user_snip>\n${sanitized}\n</user_snip>` };
-        const result = await this.chat([userMsg]);
+        const result = await this.chat([userMsg], signal);
         return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 }
@@ -367,7 +388,7 @@ class GeminiService extends AbstractAIService {
         this.baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
     }
 
-    async chat(messages) {
+    async chat(messages, signal = null) {
         const isGemma = this.modelName.toLowerCase().includes('gemma');
         const contents = [];
         let systemPromptText = null;
@@ -424,7 +445,7 @@ class GeminiService extends AbstractAIService {
                 "x-goog-api-key": this.apiKey
             },
             body: JSON.stringify(payload)
-        });
+        }, CLOUD_TIMEOUT_MS, signal);
 
         const data = await response.json();
         if (!response.ok) throw new Error(normalizeErrorMessage(response, data, 'Google Gemini'));
@@ -444,7 +465,7 @@ class GeminiService extends AbstractAIService {
         };
     }
 
-    async askImage(base64Image) {
+    async askImage(base64Image, signal = null) {
         const promptText = this._createImagePrompt();
         const userMsg = {
             role: "user",
@@ -453,17 +474,17 @@ class GeminiService extends AbstractAIService {
                 { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
             ]
         };
-        const result = await this.chat([userMsg]);
+        const result = await this.chat([userMsg], signal);
         return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 
-    async askText(rawText) {
+    async askText(rawText, signal = null) {
         // Sanitize user input to prevent prompt injection
         const sanitized = rawText
             .replace(/</g, "\\<")
             .replace(/>/g, "\\>");
         const userMsg = { role: "user", content: `<user_snip>\n${sanitized}\n</user_snip>` };
-        const result = await this.chat([userMsg]);
+        const result = await this.chat([userMsg], signal);
         return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 }
@@ -476,7 +497,7 @@ class OpenRouterService extends AbstractAIService {
         this.API_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
     }
 
-    async chat(messages) {
+    async chat(messages, signal = null) {
         // Build messages - keep it simple like OpenRouter quickstart
         const finalMessages = [];
 
@@ -524,7 +545,7 @@ class OpenRouterService extends AbstractAIService {
                 "X-Title": "Snip & Ask Extension"
             },
             body: JSON.stringify(requestBody)
-        }, OPENROUTER_TIMEOUT_MS);
+        }, OPENROUTER_TIMEOUT_MS, signal);
 
         const data = await response.json();
 
@@ -561,7 +582,7 @@ class OpenRouterService extends AbstractAIService {
             lower.includes('llama-4');
     }
 
-    async askImage(base64Image) {
+    async askImage(base64Image, signal = null) {
         const promptText = this._createImagePrompt();
 
         // Check if this model supports vision
@@ -573,21 +594,21 @@ class OpenRouterService extends AbstractAIService {
                     { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                 ]
             };
-            const result = await this.chat([userMsg]);
+            const result = await this.chat([userMsg], signal);
             return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
         } else {
             // For non-vision models, we shouldn't be here (OCR should handle it)
             // But just in case, send just the prompt
             const userMsg = { role: "user", content: promptText + "\n\n[Image provided but model doesn't support vision]" };
-            const result = await this.chat([userMsg]);
+            const result = await this.chat([userMsg], signal);
             return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
         }
     }
 
-    async askText(rawText) {
+    async askText(rawText, signal = null) {
         // Simpler format - don't use XML tags that might confuse some models
         const userMsg = { role: "user", content: rawText };
-        const result = await this.chat([userMsg]);
+        const result = await this.chat([userMsg], signal);
         return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 }
@@ -650,7 +671,7 @@ class OllamaService extends AbstractAIService {
         this.baseUrl = hostUrl.replace(/\/$/, "");
     }
 
-    async chat(messages) {
+    async chat(messages, signal = null) {
         const endpoint = `${this.baseUrl}/api/chat`;
 
         const cleanMessages = messages.map(msg => {
@@ -688,7 +709,7 @@ class OllamaService extends AbstractAIService {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
-            }, LOCAL_TIMEOUT_MS);
+            }, LOCAL_TIMEOUT_MS, signal);
 
             if (!response.ok) throw new Error("Ollama Connection Failed. Is it running?");
             const data = await response.json();
@@ -709,7 +730,7 @@ class OllamaService extends AbstractAIService {
         }
     }
 
-    async askImage(base64Image) {
+    async askImage(base64Image, signal = null) {
         const promptText = this._createImagePrompt();
         const userMsg = {
             role: "user",
@@ -718,17 +739,17 @@ class OllamaService extends AbstractAIService {
                 { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
             ]
         };
-        const result = await this.chat([userMsg]);
+        const result = await this.chat([userMsg], signal);
         return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 
-    async askText(rawText) {
+    async askText(rawText, signal = null) {
         // Sanitize user input to prevent prompt injection
         const sanitized = rawText
             .replace(/</g, "\\<")
             .replace(/>/g, "\\>");
         const userMsg = { role: "user", content: `<user_snip>\n${sanitized}\n</user_snip>` };
-        const result = await this.chat([userMsg]);
+        const result = await this.chat([userMsg], signal);
         return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
     }
 }
