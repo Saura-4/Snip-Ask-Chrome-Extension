@@ -3,6 +3,9 @@
 import { getAIService, optimizeMessageHistory } from './ai-service.js';
 import { isGuestMode, isGuestConfigured, makeGuestRequest, GUEST_DEFAULT_MODEL } from './guest-config.js';
 import { getChatWindowModels, checkGuestModeStatus } from './models-config.js';
+import { isGoogleModel, isGroqModel, isOllamaModel, isOpenRouterModel } from './model-routing.js';
+import { buildGuestRequestPayload, buildGuestSystemPrompt } from './guest-request.js';
+import { parseGuestResponse } from './guest-response.js';
 
 // --- UTILITIES ---
 
@@ -84,6 +87,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                     'lib/purify.min.js',
                     'src/content/utils.js',
                     'src/content/ui-helpers.js',
+                    'src/content/chat-message-utils.js',
+                    'src/content/chat-render-utils.js',
                     'src/content/window-manager.js',
                     'src/content/snip-selection.js',
                     'src/content/floating-chat-ui.js',
@@ -122,6 +127,8 @@ chrome.commands.onCommand.addListener(async (command) => {
                         'lib/purify.min.js',
                         'src/content/utils.js',
                         'src/content/ui-helpers.js',
+                        'src/content/chat-message-utils.js',
+                        'src/content/chat-render-utils.js',
                         'src/content/window-manager.js',
                         'src/content/snip-selection.js',
                         'src/content/floating-chat-ui.js',
@@ -220,10 +227,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 let modelName = request.model || storage.selectedModel;
 
                 // Check if this is a Groq model and if we need demo mode
-                const isOllama = modelName && modelName.startsWith('ollama:');
-                const isOpenRouter = modelName && modelName.startsWith('openrouter:');
-                const isGoogle = modelName && (modelName.includes('gemini') || modelName.includes('gemma'));
-                const isGroq = !isOllama && !isOpenRouter && !isGoogle;
+                const isOllama = isOllamaModel(modelName);
+                const isOpenRouter = isOpenRouterModel(modelName);
+                const isGoogle = isGoogleModel(modelName);
+                const isGroq = isGroqModel(modelName);
 
                 // Check if we should use demo mode for this request
                 if (isGroq && !storage.groqKey && isGuestConfigured()) {
@@ -231,45 +238,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     const parallelCount = request.parallelCount ?? 1;
 
                     const mode = request.mode || storage.selectedMode || storage.interactionMode || 'short';
-                    const customModes = storage.customModes || null;
-
-                    let systemPrompt = 'This is a POPUP WINDOW. Analyze the input and provide a helpful, concise response (under 200 words). Be direct and focused.';
-                    if (mode === 'short') systemPrompt = "POPUP WINDOW: Concise answer engine. Keep under 100 words. For MCQs: 'Answer: <option>. <one-sentence explanation>'. For other questions: direct answer only. No preamble, no elaboration.";
-                    else if (mode === 'detailed') systemPrompt = "POPUP TUTOR: Provide a focused, step-by-step answer. Use concise bullet points. Limit to 3-5 key steps max. Use Markdown sparingly (bold for emphasis only).";
-                    else if (mode === 'code') systemPrompt = "POPUP CODE ASSISTANT: Provide ESSENTIAL CODE ONLY - no exhaustive examples. Output ONE clean code block + 1-2 sentences explaining the key fix/concept. Be concise.";
-                    else if (mode === 'custom' && storage.customPrompt) {
-                        systemPrompt = storage.customPrompt;
-                    } else if (customModes) {
-                        const customMode = customModes.find(m => m.id === mode);
-                        if (customMode) systemPrompt = customMode.prompt;
-                    }
+                    const systemPrompt = buildGuestSystemPrompt(mode, storage);
 
                     const messagesWithSystem = [
                         { role: 'system', content: systemPrompt },
                         ...request.history
                     ];
 
-                    const optimizedMessages = optimizeMessageHistory(messagesWithSystem, modelName || GUEST_DEFAULT_MODEL);
+                    const guestRequest = buildGuestRequestPayload({
+                        modelName,
+                        mode,
+                        storage,
+                        messages: messagesWithSystem,
+                        parallelCount,
+                        optimize: true
+                    });
 
-                    const guestResponse = await makeGuestRequest({
-                        model: modelName || GUEST_DEFAULT_MODEL,
-                        messages: optimizedMessages,
-                        temperature: 0.3,
-                        max_tokens: mode === 'short' ? 512 : (mode === 'code' ? 2048 : 1536),
-                        _meta: { parallelCount }
-                    }, controller.signal);
+                    const guestResponse = await makeGuestRequest(guestRequest.payload, controller.signal);
 
-                    let answer = guestResponse.choices?.[0]?.message?.content || 'No answer returned.';
+                    const { answer, guestInfo, tokenUsage } = parseGuestResponse(guestResponse);
 
-                    answer = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-
-                    const tokenUsage = guestResponse.usage ? {
-                        promptTokens: guestResponse.usage.prompt_tokens || 0,
-                        completionTokens: guestResponse.usage.completion_tokens || 0,
-                        totalTokens: guestResponse.usage.total_tokens || 0
-                    } : null;
-
-                    sendResponse({ success: true, answer: answer, guestInfo: guestResponse._demo, tokenUsage: tokenUsage });
+                    sendResponse({
+                        success: true,
+                        answer,
+                        guestInfo,
+                        tokenUsage
+                    });
                     return;
                 }
 
@@ -348,10 +342,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const currentMode = storage.selectedMode || storage.interactionMode || 'short';
 
                 // Determine which provider this model needs
-                const isOllama = modelName.startsWith('ollama:');
-                const isOpenRouter = modelName.startsWith('openrouter:');
-                const isGoogle = modelName.includes('gemini') || modelName.includes('gemma');
-                const isGroq = !isOllama && !isOpenRouter && !isGoogle;
+                const isOllama = isOllamaModel(modelName);
+                const isOpenRouter = isOpenRouterModel(modelName);
+                const isGoogle = isGoogleModel(modelName);
+                const isGroq = isGroqModel(modelName);
 
                 let isConfigured = false;
                 let providerName = 'Groq';
@@ -372,8 +366,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     } else if (isGuestConfigured()) {
                         // Guest Mode mode is available - user can use Groq without their own key
                         isConfigured = true;
-                        // Force model to Groq-compatible in Guest Mode mode
-                        modelName = GUEST_DEFAULT_MODEL;
+                        // Do NOT force a single model here. In guest mode we still want to respect
+                        // the user's selected Groq model if it's already Groq-compatible.
+                        // Background request handlers will still fall back to GUEST_DEFAULT_MODEL
+                        // if the user selected a non-Groq model.
                     }
                     providerName = 'Groq Key';
                 }
@@ -401,6 +397,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                 sendResponse({
                     success: true,
+                    isGuestMode: inGuestMode,
                     isDemoMode: inGuestMode,
                     isConfigured,
                     defaultModel: GUEST_DEFAULT_MODEL
@@ -458,28 +455,7 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
             }
 
             // Force Groq model in demo mode
-            if (!modelName || modelName.startsWith('openrouter:') || modelName.includes('gemini') || modelName.includes('gemma') || modelName.startsWith('ollama:')) {
-                modelName = GUEST_DEFAULT_MODEL;
-            }
-
-            // Build request body for Cloudflare Worker
-            const messages = [];
-
-            // Add system instruction
-            const customModes = storage.customModes || null;
-            let systemPrompt = 'This is a POPUP WINDOW. Analyze the input and provide a helpful, concise response (under 200 words).';
-            if (mode === 'short') systemPrompt = "POPUP WINDOW: Concise answer engine. Keep under 100 words. For MCQs: 'Answer: <option>. <one-sentence explanation>'. For other questions: direct answer only. No preamble, no elaboration.";
-            else if (mode === 'detailed') systemPrompt = "POPUP TUTOR: Provide a focused, step-by-step answer. Use concise bullet points. Limit to 3-5 key steps max. Use Markdown sparingly (bold for emphasis only).";
-            else if (mode === 'code') systemPrompt = "POPUP CODE ASSISTANT: Provide ESSENTIAL CODE ONLY - no exhaustive examples. Output ONE clean code block + 1-2 sentences explaining the key fix/concept. Be concise.";
-            else if (mode === 'custom' && storage.customPrompt) {
-                // Use user's custom prompt
-                systemPrompt = storage.customPrompt;
-            } else if (customModes) {
-                const customMode = customModes.find(m => m.id === mode);
-                if (customMode) systemPrompt = customMode.prompt;
-            }
-
-            messages.push({ role: 'system', content: systemPrompt });
+            const messages = [{ role: 'system', content: buildGuestSystemPrompt(mode, storage) }];
 
             // Add user message
             if (type === 'image') {
@@ -495,36 +471,25 @@ async function handleAIRequest(inputContent, type, explicitModel, sendResponse, 
             }
 
             // Make demo request through Cloudflare Worker
-            const guestResponse = await makeGuestRequest({
-                model: modelName,
-                messages: messages,
-                temperature: 0.3,
-                max_tokens: mode === 'short' ? 512 : (mode === 'code' ? 2048 : 1536)
-            }, signal);
+            const guestRequest = buildGuestRequestPayload({
+                modelName,
+                mode,
+                storage,
+                messages
+            });
+            const guestResponse = await makeGuestRequest(guestRequest.payload, signal);
 
-            let answer = guestResponse.choices?.[0]?.message?.content || 'No answer returned.';
-
-            // Strip thinking tags from Qwen models
-            answer = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-
-            const guestInfo = guestResponse._demo || null;
-
-            // Extract token usage from Groq response
-            const tokenUsage = guestResponse.usage ? {
-                promptTokens: guestResponse.usage.prompt_tokens || 0,
-                completionTokens: guestResponse.usage.completion_tokens || 0,
-                totalTokens: guestResponse.usage.total_tokens || 0
-            } : null;
+            const { answer, guestInfo, tokenUsage } = parseGuestResponse(guestResponse);
 
             sendResponse({
                 success: true,
-                answer: answer,
+                answer,
                 initialUserMessage: messages[messages.length - 1],
                 usedOCR: type === 'text',
                 ocrConfidence,
                 base64Image: type === 'image' ? inputContent : null,
-                guestInfo: guestInfo,
-                tokenUsage: tokenUsage
+                guestInfo,
+                tokenUsage
             });
             return;
         }
@@ -596,28 +561,7 @@ async function handleMultiImageRequest(images, explicitModel, textContext, sendR
             }
 
             // Force Groq model in demo mode
-            if (!modelName || modelName.startsWith('openrouter:') || modelName.includes('gemini') || modelName.includes('gemma') || modelName.startsWith('ollama:')) {
-                modelName = GUEST_DEFAULT_MODEL;
-            }
-
-            // Build request body with multiple images
-            const messages = [];
-
-            // Add system instruction
-            const customModes = storage.customModes || null;
-            let systemPrompt = 'This is a POPUP WINDOW. Analyze the input and provide a helpful, concise response (under 200 words).';
-            if (mode === 'short') systemPrompt = "POPUP WINDOW: Concise answer engine. Keep under 100 words. For MCQs: 'Answer: <option>. <one-sentence explanation>'. For other questions: direct answer only. No preamble, no elaboration.";
-            else if (mode === 'detailed') systemPrompt = "POPUP TUTOR: Provide a focused, step-by-step answer. Use concise bullet points. Limit to 3-5 key steps max. Use Markdown sparingly (bold for emphasis only).";
-            else if (mode === 'code') systemPrompt = "POPUP CODE ASSISTANT: Provide ESSENTIAL CODE ONLY - no exhaustive examples. Output ONE clean code block + 1-2 sentences explaining the key fix/concept. Be concise.";
-            else if (mode === 'custom' && storage.customPrompt) {
-                // Use user's custom prompt
-                systemPrompt = storage.customPrompt;
-            } else if (customModes) {
-                const customMode = customModes.find(m => m.id === mode);
-                if (customMode) systemPrompt = customMode.prompt;
-            }
-
-            messages.push({ role: 'system', content: systemPrompt });
+            const messages = [{ role: 'system', content: buildGuestSystemPrompt(mode, storage) }];
 
             // Build content array with text and all images
             const contentArray = [];
@@ -637,37 +581,24 @@ async function handleMultiImageRequest(images, explicitModel, textContext, sendR
             messages.push({ role: 'user', content: contentArray });
 
             // Optimize history to stay within model token limits
-            const optimizedMessages = optimizeMessageHistory(messages, modelName);
+            const guestRequest = buildGuestRequestPayload({
+                modelName,
+                mode,
+                storage,
+                messages,
+                optimize: true
+            });
+            const guestResponse = await makeGuestRequest(guestRequest.payload, signal);
 
-            // Make demo request through Cloudflare Worker
-            const guestResponse = await makeGuestRequest({
-                model: modelName,
-                messages: optimizedMessages,
-                temperature: 0.3,
-                max_tokens: mode === 'short' ? 512 : (mode === 'code' ? 2048 : 1536)
-            }, signal);
-
-            let answer = guestResponse.choices?.[0]?.message?.content || 'No answer returned.';
-
-            // Strip thinking tags from Qwen models
-            answer = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-
-            const guestInfo = guestResponse._demo || null;
-
-            // Extract token usage from Groq response
-            const tokenUsage = guestResponse.usage ? {
-                promptTokens: guestResponse.usage.prompt_tokens || 0,
-                completionTokens: guestResponse.usage.completion_tokens || 0,
-                totalTokens: guestResponse.usage.total_tokens || 0
-            } : null;
+            const { answer, guestInfo, tokenUsage } = parseGuestResponse(guestResponse);
 
             sendResponse({
                 success: true,
-                answer: answer,
+                answer,
                 initialUserMessage: messages[messages.length - 1],
                 imageCount: images.length,
-                guestInfo: guestInfo,
-                tokenUsage: tokenUsage
+                guestInfo,
+                tokenUsage
             });
             return;
         }

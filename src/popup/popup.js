@@ -14,6 +14,7 @@ import {
   toggleCustomModel,
   getMergedModelsWithCustom
 } from '../background/models-config.js';
+import { getMissingConfigMessage } from './model-validation.js';
 
 // --- DEFAULT DATA ---
 const DEFAULT_MODES = [
@@ -119,7 +120,7 @@ async function loadSettings() {
   loadModelsList(result.enabledProviders || DEFAULT_PROVIDERS, result.enabledModels || getDefaultEnabledModels());
 
   // Load models based on enabled providers and enabled models
-  loadModels(result.enabledProviders || DEFAULT_PROVIDERS, result.enabledModels || getDefaultEnabledModels(), result.selectedModel);
+  await loadModels(result.enabledProviders || DEFAULT_PROVIDERS, result.enabledModels || getDefaultEnabledModels(), result.selectedModel);
 
   // Load API key inputs based on enabled providers
   loadApiKeyInputs(result.enabledProviders || DEFAULT_PROVIDERS, result);
@@ -163,7 +164,7 @@ function loadProviderToggles(enabledProviders) {
 // Used when guest mode status changes during typing to avoid losing input focus
 async function refreshModelsOnly() {
   const result = await chrome.storage.local.get(['enabledProviders', 'enabledModels', 'selectedModel']);
-  loadModels(result.enabledProviders || DEFAULT_PROVIDERS, result.enabledModels || getDefaultEnabledModels(), result.selectedModel);
+  await loadModels(result.enabledProviders || DEFAULT_PROVIDERS, result.enabledModels || getDefaultEnabledModels(), result.selectedModel);
 }
 
 async function loadModels(enabledProviders, enabledModels, selectedModel) {
@@ -219,7 +220,7 @@ async function loadModels(enabledProviders, enabledModels, selectedModel) {
     // IMPORTANT: Save the auto-selected model to storage so startSnip uses it
     const autoSelectedModel = modelSelect.value;
     if (autoSelectedModel) {
-      chrome.storage.local.set({ selectedModel: autoSelectedModel });
+      await chrome.storage.local.set({ selectedModel: autoSelectedModel });
     }
   } else {
     // No models available - all providers disabled
@@ -859,7 +860,12 @@ async function deleteMode(modeId) {
 // --- SNIP FUNCTIONALITY ---
 async function startSnip() {
   const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
-  let model = result.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
+  const modelSelect = document.getElementById('modelSelect');
+  let model = modelSelect?.value || result.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+  if (model && model !== result.selectedModel) {
+    await chrome.storage.local.set({ selectedModel: model });
+  }
 
   // Handle custom model selection - prompt user for model name
   if (model === 'ollama:custom') {
@@ -902,27 +908,10 @@ async function startSnip() {
   if (isGuestModeActive) {
     // Just proceed - if limit is exceeded, server will return 429 error
   } else {
-    // Validate API key based on model
-    if (model.startsWith('ollama')) {
-      if (!result.ollamaHost) {
-        alert('Please set Ollama URL in API Keys');
-        return;
-      }
-    } else if (model.includes('gemini') || model.includes('gemma')) {
-      if (!result.geminiKey) {
-        alert('Please set Google API Key');
-        return;
-      }
-    } else if (model.startsWith('openrouter')) {
-      if (!result.openrouterKey) {
-        alert('Please set OpenRouter API Key');
-        return;
-      }
-    } else {
-      if (!result.groqKey) {
-        alert('Please set Groq API Key');
-        return;
-      }
+    const missingConfigMessage = getMissingConfigMessage(model, result);
+    if (missingConfigMessage) {
+      alert(missingConfigMessage);
+      return;
     }
   }
 
@@ -950,6 +939,8 @@ async function startSnip() {
         files: [
           'src/content/utils.js',
           'src/content/ui-helpers.js',
+          'src/content/chat-message-utils.js',
+          'src/content/chat-render-utils.js',
           'src/content/window-manager.js',
           'src/content/snip-selection.js',
           'src/content/floating-chat-ui.js',

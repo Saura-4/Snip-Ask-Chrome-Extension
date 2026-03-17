@@ -15,6 +15,16 @@ wrangler d1 execute snip-ask-guest-db --file=./schema.sql
 wrangler deploy
 ```
 
+## Live Migration
+
+For an existing live database, add the new columns without resetting data:
+
+```bash
+wrangler d1 execute snip-ask-guest-db --command="ALTER TABLE velocity_events ADD COLUMN tokens INTEGER DEFAULT 0"
+wrangler d1 execute snip-ask-guest-db --command="ALTER TABLE velocity_events ADD COLUMN model TEXT"
+wrangler d1 execute snip-ask-guest-db --command="ALTER TABLE usage_stats ADD COLUMN token_count INTEGER DEFAULT 0"
+```
+
 ## Required Environment Variables
 
 In [Cloudflare Dashboard](https://dash.cloudflare.com) → Workers → Settings → Variables:
@@ -70,6 +80,9 @@ wrangler d1 execute snip-ask-guest-db --command="UPDATE users SET role_id = 1, b
 
 # View top users today
 wrangler d1 execute snip-ask-guest-db --command="SELECT u.client_uuid, d.usage_count FROM daily_usage d JOIN users u ON d.user_id = u.id WHERE d.usage_date = date('now') ORDER BY d.usage_count DESC LIMIT 10"
+
+# View recent requests with model + token usage
+wrangler d1 execute snip-ask-guest-db --command="SELECT v.requested_at, u.client_uuid, v.model, v.tokens FROM velocity_events v JOIN users u ON v.user_id = u.user_id ORDER BY v.id DESC LIMIT 20"
 
 # View all roles
 wrangler d1 execute snip-ask-guest-db --command="SELECT * FROM roles"

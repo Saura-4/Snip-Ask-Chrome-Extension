@@ -6,7 +6,10 @@
 // 1. Add 'tokens' column to velocity_events (rowid is built-in to SQLite):
 //    ALTER TABLE velocity_events ADD COLUMN tokens INTEGER DEFAULT 0;
 //
-// 2. Add 'token_count' column to usage_stats:
+// 2. Add 'model' column to velocity_events:
+//    ALTER TABLE velocity_events ADD COLUMN model TEXT;
+//
+// 3. Add 'token_count' column to usage_stats:
 //    ALTER TABLE usage_stats ADD COLUMN token_count INTEGER DEFAULT 0;
 
 export default {
@@ -118,6 +121,9 @@ export default {
             // =================================================================
             const isUnlimited = dailyLimit === -1 && velocityLimit === -1;
 
+            let currentUsage = 0;
+            const incrementBy = parallelCount > 0 ? parallelCount : 1;
+
             if (!isUnlimited) {
                 // =================================================================
                 // CHECK 3: Velocity (Speed) Detection
@@ -149,8 +155,7 @@ export default {
                     'SELECT usage_count FROM usage_stats WHERE user_id = ?'
                 ).bind(userId).first();
 
-                const currentUsage = usageStat?.usage_count || 0;
-                const incrementBy = parallelCount > 0 ? parallelCount : 1;
+                currentUsage = usageStat?.usage_count || 0;
 
                 if (dailyLimit !== -1 && currentUsage + incrementBy > dailyLimit) {
                     return jsonResponse({
@@ -165,16 +170,24 @@ export default {
             // EXECUTION
             // =================================================================
 
-            // Log velocity event (tokens will be updated after API response)
-            // Use RETURNING to get the id of the inserted row
-            const velocityResult = await env.DB.prepare(
-                'INSERT INTO velocity_events (user_id) VALUES (?) RETURNING id'
-            ).bind(userId).first();
-            const velocityEventId = velocityResult?.id;
-
             // Prepare request body
             const groqBody = { ...body };
             delete groqBody._meta;
+
+            // Hotfix: If a client is pinned to a deprecated/removed Groq model, rewrite to a stable fallback.
+            // This lets us fix Guest Mode immediately without waiting for a Chrome Web Store update.
+            const MODEL_FALLBACKS = {
+                'meta-llama/llama-4-maverick-17b-128e-instruct': 'meta-llama/llama-4-scout-17b-16e-instruct'
+            };
+            if (typeof groqBody.model === 'string' && MODEL_FALLBACKS[groqBody.model]) {
+                groqBody.model = MODEL_FALLBACKS[groqBody.model];
+            }
+
+            const routedModel = typeof groqBody.model === 'string' ? groqBody.model : null;
+            const velocityResult = await env.DB.prepare(
+                'INSERT INTO velocity_events (user_id, model) VALUES (?, ?) RETURNING id'
+            ).bind(userId, routedModel).first();
+            const velocityEventId = velocityResult?.id;
 
             // Get API keys
             const apiKeys = [env.GROQ_API_KEY, env.GROQ_API_KEY_2, env.GROQ_API_KEY_3].filter(Boolean);
@@ -230,7 +243,6 @@ export default {
 
             // Update usage stats for ALL users (including admins) with token tracking
             if (groqResponse.ok) {
-                const incrementBy = parallelCount > 0 ? parallelCount : 1;
                 // Upsert usage with token count
                 await env.DB.prepare(`
                     INSERT INTO usage_stats (user_id, usage_count, token_count)
@@ -240,7 +252,11 @@ export default {
                 `).bind(userId, incrementBy, tokenUsage, incrementBy, tokenUsage).run();
             }
 
-            return jsonResponse({ ...responseData, _guest: { ok: true } }, groqResponse.status, corsHeaders);
+            return jsonResponse({
+                ...responseData,
+                _guest: { ok: true, usage: currentUsage + (parallelCount > 0 ? parallelCount : 1) },
+                _demo: { ok: true, usage: currentUsage + (parallelCount > 0 ? parallelCount : 1) }
+            }, groqResponse.status, corsHeaders);
 
         } catch (error) {
             console.error('Worker error:', error);

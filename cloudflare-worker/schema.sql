@@ -52,6 +52,7 @@ CREATE TABLE users (
 CREATE TABLE velocity_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
+    model TEXT,
     requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
