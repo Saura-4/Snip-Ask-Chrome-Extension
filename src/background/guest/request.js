@@ -1,6 +1,6 @@
-import { optimizeMessageHistory } from './ai-service.js';
-import { GUEST_DEFAULT_MODEL } from './guest-config.js';
-import { resolveGuestModel } from './model-routing.js';
+import { optimizeMessageHistory } from '../ai-service.js';
+import { GUEST_DEFAULT_MODEL } from '../guest-config.js';
+import { resolveGuestModel } from '../models/model-routing.js';
 
 function getGuestMaxTokens(mode) {
     if (mode === 'short') return 512;

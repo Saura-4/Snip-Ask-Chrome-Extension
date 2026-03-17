@@ -1,7 +1,7 @@
 // src/background/models-config.js
 // Centralized model definitions and provider configuration
 
-import { isGuestConfigured } from './guest-config.js';
+import { isGuestConfigured } from '../guest-config.js';
 
 /**
  * All available models organized by provider
@@ -17,21 +17,23 @@ export const ALL_MODELS = {
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
         { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B' },
         { value: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (Text)' },
-        { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B (Text)' }
+        { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B (Text)' },
+        { value: 'groq:custom', name: 'Custom Model' }
     ],
     google: [
+        { value: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite' },
         { value: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
         { value: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
         { value: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
-        { value: 'gemini-2.5-flash-tts', name: 'Gemini 2.5 Flash TTS' },
         { value: 'gemma-3-27b-it', name: 'Gemma 3 27B (Vision)' },
         { value: 'gemma-3-12b-it', name: 'Gemma 3 12B (Vision)' },
         { value: 'gemma-3-4b-it', name: 'Gemma 3 4B' },
-        { value: 'gemma-3-1b-it', name: 'Gemma 3 1B' }
+        { value: 'gemma-3-1b-it', name: 'Gemma 3 1B' },
+        { value: 'google:custom', name: 'Custom Model' }
     ],
     openrouter: [
         { value: 'openrouter:deepseek/deepseek-r1-0528:free', name: 'DeepSeek R1 (Free)' },
-        { value: 'openrouter:custom', name: '⚙️ Custom Model' }
+        { value: 'openrouter:custom', name: 'Custom Model' }
     ],
     ollama: [
         { value: 'ollama:gemma3:4b', name: 'Gemma 3 4B' },
@@ -39,7 +41,7 @@ export const ALL_MODELS = {
         { value: 'ollama:mistral', name: 'Mistral' },
         { value: 'ollama:llava', name: 'LLaVA (Vision)' },
         { value: 'ollama:moondream', name: 'Moondream (Vision)' },
-        { value: 'ollama:custom', name: '⚙️ Custom Model' }
+        { value: 'ollama:custom', name: 'Custom Model' }
     ]
 };
 
@@ -60,6 +62,7 @@ export const CHAT_WINDOW_MODELS = {
         { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B' }
     ],
     google: [
+        { value: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite' },
         { value: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
         { value: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
         { value: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
@@ -126,16 +129,16 @@ export function getDefaultEnabledModels() {
 export async function getCustomSavedModels() {
     try {
         const result = await chrome.storage.local.get(['customSavedModels']);
-        return result.customSavedModels || { ollama: [], openrouter: [] };
+        return result.customSavedModels || { groq: [], google: [], ollama: [], openrouter: [] };
     } catch (e) {
         console.error('Failed to get custom saved models:', e);
-        return { ollama: [], openrouter: [] };
+        return { groq: [], google: [], ollama: [], openrouter: [] };
     }
 }
 
 /**
  * Save a custom model for a provider
- * @param {string} provider - 'ollama' or 'openrouter'
+ * @param {string} provider - 'groq', 'google', 'ollama', or 'openrouter'
  * @param {string} modelValue - Full model value (e.g., 'ollama:deepseek-r1:14b')
  * @param {string} modelName - Display name for the model
  * @returns {Promise<boolean>} Success status
@@ -172,7 +175,7 @@ export async function saveCustomModel(provider, modelValue, modelName) {
 
 /**
  * Remove a custom model
- * @param {string} provider - 'ollama' or 'openrouter'
+ * @param {string} provider - 'groq', 'google', 'ollama', or 'openrouter'
  * @param {string} modelValue - Full model value to remove
  * @returns {Promise<boolean>} Success status
  */
@@ -195,7 +198,7 @@ export async function removeCustomModel(provider, modelValue) {
 
 /**
  * Toggle a custom model's enabled state
- * @param {string} provider - 'ollama' or 'openrouter'
+ * @param {string} provider - 'groq', 'google', 'ollama', or 'openrouter'
  * @param {string} modelValue - Full model value
  * @param {boolean} enabled - New enabled state
  * @returns {Promise<boolean>} Success status
@@ -265,6 +268,12 @@ export function getFilteredModels(enabledProviders, enabledModels, isGuestMode =
     for (const [provider, models] of Object.entries(modelSource)) {
         if (providersToUse[provider]) {
             models.forEach(model => {
+                if (isGuestMode && model.value.endsWith(':custom')) {
+                    return;
+                }
+                if (isGuestMode && model.isCustom) {
+                    return;
+                }
                 // In guest mode, show ALL Groq models; otherwise respect user settings
                 if (isGuestMode || enabledModels[model.value] !== false) {
                     filteredModels.push({ ...model, provider });
@@ -353,7 +362,7 @@ export function getPopupModels(enabledProviders, enabledModels, isGuestMode) {
 
 /**
  * Get available models for chat window dropdown based on guest mode status
- * Uses ALL_MODELS merged with custom saved models
+ * Uses the compact chat-window list merged with saved custom models
  * @param {Object} enabledProviders - User's provider settings
  * @param {Object} enabledModels - User's model settings
  * @param {boolean} isGuestMode - Whether in guest mode
@@ -362,7 +371,7 @@ export function getPopupModels(enabledProviders, enabledModels, isGuestMode) {
 export async function getChatWindowModels(enabledProviders, enabledModels, isGuestMode) {
     // Get custom saved models and merge with static models
     const customSavedModels = await getCustomSavedModels();
-    const mergedModels = getMergedModelsWithCustom(ALL_MODELS, customSavedModels);
+    const mergedModels = getMergedModelsWithCustom(CHAT_WINDOW_MODELS, customSavedModels);
 
     return getFilteredModels(enabledProviders, enabledModels, isGuestMode, mergedModels);
 }

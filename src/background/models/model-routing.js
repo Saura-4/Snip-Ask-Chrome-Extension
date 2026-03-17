@@ -1,5 +1,7 @@
 function getModelProvider(modelName) {
     if (!modelName || typeof modelName !== 'string') return 'groq';
+    if (modelName.startsWith('groq:')) return 'groq';
+    if (modelName.startsWith('google:')) return 'google';
     if (modelName.startsWith('ollama:')) return 'ollama';
     if (modelName.startsWith('openrouter:')) return 'openrouter';
     if (modelName.includes('gemini') || modelName.includes('gemma')) return 'google';
@@ -23,7 +25,17 @@ function isOllamaModel(modelName) {
 }
 
 function resolveGuestModel(modelName, fallbackModel) {
+    if (typeof modelName === 'string' && modelName.startsWith('groq:')) {
+        return fallbackModel;
+    }
     return isGroqModel(modelName) ? modelName : fallbackModel;
+}
+
+function normalizeProviderScopedModelName(modelName) {
+    if (!modelName || typeof modelName !== 'string') return modelName;
+    if (modelName.startsWith('groq:')) return modelName.slice('groq:'.length);
+    if (modelName.startsWith('google:')) return modelName.slice('google:'.length);
+    return modelName;
 }
 
 export {
@@ -32,5 +44,6 @@ export {
     isGoogleModel,
     isOpenRouterModel,
     isOllamaModel,
-    resolveGuestModel
+    resolveGuestModel,
+    normalizeProviderScopedModelName
 };

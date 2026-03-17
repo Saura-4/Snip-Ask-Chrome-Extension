@@ -1,4 +1,4 @@
-// src/content/floating-chat-ui.js
+// src/content/chat/floating-chat-ui.js
 // FloatingChatUI class - the main chat window component
 
 /**
@@ -146,18 +146,28 @@ class FloatingChatUI {
             white-space: nowrap;
             user-select: none;
         `;
-        this.bubble.innerHTML = `
-            <span style="color: #f55036; font-weight: bold;">⚡</span>
-            <span style="color: #ccc; font-size: 12px;">${this._getModelDisplayName(this.currentModel)}</span>
-            <span style="color: #f55036; font-size: 14px; font-weight: bold; margin-left: 6px; padding: 2px 6px; background: #3a3a3a; border-radius: 4px; border: 1px solid #f55036;" title="Click to expand">⬆</span>
-        `;
-        this.bubble.title = "Drag to move, click ⬆ to expand";
+        const bubbleIcon = document.createElement('span');
+        bubbleIcon.style.cssText = 'color: #f55036; font-weight: bold;';
+        bubbleIcon.textContent = 'AI';
+
+        const bubbleLabel = document.createElement('span');
+        bubbleLabel.style.cssText = 'color: #ccc; font-size: 12px;';
+        bubbleLabel.textContent = this._getModelDisplayName(this.currentModel);
+
+        const expandArrow = document.createElement('span');
+        expandArrow.style.cssText = 'color: #f55036; font-size: 14px; font-weight: bold; margin-left: 6px; padding: 2px 6px; background: #3a3a3a; border-radius: 4px; border: 1px solid #f55036;';
+        expandArrow.title = 'Click to expand';
+        expandArrow.textContent = '^';
+
+        this.bubble.appendChild(bubbleIcon);
+        this.bubble.appendChild(bubbleLabel);
+        this.bubble.appendChild(expandArrow);
+        this.bubble.title = 'Drag to move, click ^ to expand';
 
         // Make bubble draggable
         this.makeBubbleDraggable(this.bubble);
 
         // Click on arrow to expand
-        const expandArrow = this.bubble.querySelector('span:last-child');
         expandArrow.style.cursor = 'pointer';
         expandArrow.onclick = (e) => {
             e.stopPropagation();
@@ -585,235 +595,24 @@ class FloatingChatUI {
      * @param {Object|null} tokenUsage - Token usage data from API response
      */
     addMessage(role, content, modelName = null, isError = false, base64Image = null, isRegenerated = false, tokenUsage = null) {
-        // Track model name for assistant messages
         const msgModel = role === 'assistant' ? (modelName || this.currentModel) : null;
-
         const historyEntry = createChatHistoryEntry(role, content, msgModel, base64Image, isRegenerated);
-        const displayText = historyEntry.displayText;
 
         this.chatHistory.push(historyEntry);
         const messageIndex = this.chatHistory.length - 1;
 
-        const msgDiv = document.createElement("div");
-        msgDiv.style.cssText = `max-width: 85%; padding: 12px 14px; border-radius: 10px; line-height: 1.5; word-wrap: break-word; font-size: 13px; position: relative; transition: all 0.2s ease;`;
+        renderChatMessage(this, {
+            role,
+            content,
+            displayText: historyEntry.displayText,
+            base64Image,
+            isError,
+            isRegenerated,
+            messageIndex,
+            modelLabel: role === 'assistant' ? this._getModelDisplayName(msgModel) : null,
+            tokenUsage
+        });
 
-        if (role === 'user') {
-            msgDiv.style.alignSelf = "flex-end";
-            msgDiv.style.background = "linear-gradient(135deg, #3a3a3a 0%, #2d2d2d 100%)";
-            msgDiv.style.color = "#e8e8e8";
-            msgDiv.style.borderRadius = "10px 10px 2px 10px";
-            msgDiv.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
-
-            // Check if this message has an image (from base64Image or content array)
-            const hasImage = base64Image || (Array.isArray(content) && content.some(c => c.type === 'image_url'));
-
-            if (hasImage) {
-                // Create image thumbnail preview
-                const imgContainer = document.createElement('div');
-                imgContainer.style.cssText = `
-                    margin-bottom: 8px; 
-                    border-radius: 6px; 
-                    overflow: hidden; 
-                    border: 1px solid rgba(255,255,255,0.1);
-                    background: #1a1a1a;
-                    position: relative;
-                `;
-
-                const thumbnail = document.createElement('img');
-                // Get image source from base64Image or content array
-                let imgSrc = base64Image ? `data:image/png;base64,${base64Image}` : null;
-                if (!imgSrc && Array.isArray(content)) {
-                    const imgPart = content.find(c => c.type === 'image_url');
-                    if (imgPart?.image_url?.url) {
-                        imgSrc = imgPart.image_url.url;
-                    }
-                }
-
-                thumbnail.src = imgSrc;
-                thumbnail.style.cssText = `
-                    width: 100%; 
-                    max-height: 120px; 
-                    object-fit: cover; 
-                    cursor: pointer;
-                    display: block;
-                    transition: transform 0.2s;
-                `;
-                thumbnail.title = "Click to view full size";
-                thumbnail.alt = "Screenshot thumbnail";
-
-                // Hover effect
-                thumbnail.onmouseenter = () => thumbnail.style.opacity = '0.85';
-                thumbnail.onmouseleave = () => thumbnail.style.opacity = '1';
-
-                // Click to view full size
-                thumbnail.onclick = () => this._showImageModal(imgSrc);
-
-                // Image icon overlay
-                const iconOverlay = document.createElement('div');
-                iconOverlay.style.cssText = `
-                    position: absolute;
-                    bottom: 4px;
-                    right: 4px;
-                    background: rgba(0,0,0,0.6);
-                    border-radius: 4px;
-                    padding: 2px 6px;
-                    font-size: 10px;
-                    color: #ccc;
-                    pointer-events: none;
-                `;
-                iconOverlay.textContent = '📷 Click to expand';
-
-                imgContainer.appendChild(thumbnail);
-                imgContainer.appendChild(iconOverlay);
-                msgDiv.appendChild(imgContainer);
-
-                // Add text label
-                const textLabel = document.createElement('em');
-                textLabel.style.cssText = "opacity: 0.7; font-size: 11px; display: block;";
-                if (Array.isArray(content)) {
-                    const textPart = content.find(c => c.type === 'text');
-                    textLabel.textContent = textPart?.text || '(Screenshot)';
-                } else {
-                    textLabel.textContent = '(Screenshot)';
-                }
-                msgDiv.appendChild(textLabel);
-            } else if (typeof content === 'object' && content.content) {
-                const textPart = Array.isArray(content.content) ? content.content.find(c => c.type === 'text') : { text: content.content };
-                const em = document.createElement('em');
-                em.textContent = '(Snippet)';
-                em.style.opacity = "0.8";
-                em.style.fontSize = "0.9em";
-                msgDiv.appendChild(em);
-                msgDiv.appendChild(document.createElement('br'));
-                const textSpan = document.createElement('span');
-                textSpan.textContent = textPart ? textPart.text : '';
-                msgDiv.appendChild(textSpan);
-            } else {
-                msgDiv.innerText = typeof displayText === 'string' ? displayText : String(content);
-            }
-        } else {
-            msgDiv.style.alignSelf = "flex-start";
-            msgDiv.style.background = "rgba(255,255,255,0.05)";
-            msgDiv.style.color = "#e8e8e8";
-            msgDiv.style.border = "1px solid rgba(255,255,255,0.08)";
-            msgDiv.style.borderRadius = "10px 10px 10px 2px";
-
-            // Add model label for assistant messages (with regenerated indicator if applicable)
-            const modelLabel = this._getModelDisplayName(msgModel);
-            const labelDiv = document.createElement("div");
-            labelDiv.style.cssText = "font-size: 10px; color: #ff6b4a; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; display: inline-flex; align-items: center; gap: 4px; background: rgba(255,107,74,0.1); padding: 3px 8px; border-radius: 4px;";
-
-            // Format token count for display
-            const tokenInfo = tokenUsage?.totalTokens ? tokenUsage.totalTokens.toLocaleString() : null;
-
-            if (isRegenerated) {
-                labelDiv.innerHTML = `<span style="font-size: 11px;">🔄</span> ${modelLabel}${tokenInfo ? ` <span style="font-size: 9px; color: #888; margin-left: 6px;">• ${tokenInfo} tokens</span>` : ''} <span style="font-size: 9px; color: #888; margin-left: 4px; font-weight: 500;">Regenerated</span>`;
-            } else {
-                labelDiv.innerHTML = `<span style="font-size: 11px;">✨</span> ${modelLabel}${tokenInfo ? ` <span style="font-size: 9px; color: #888; margin-left: 6px;">• ${tokenInfo} tokens</span>` : ''}`;
-            }
-            msgDiv.appendChild(labelDiv);
-
-            const contentDiv = document.createElement("div");
-            contentDiv.style.cssText = "max-height: 350px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #404040 transparent;";
-            const cleanText = sanitizeModelText(content);
-            if (typeof parseMarkdown === 'function') {
-                contentDiv.innerHTML = parseMarkdown(cleanText);
-                // Attach copy handlers to code blocks
-                if (typeof attachCodeBlockCopyHandlers === 'function') {
-                    attachCodeBlockCopyHandlers(contentDiv);
-                }
-            } else {
-                contentDiv.innerText = cleanText;
-            }
-            msgDiv.appendChild(contentDiv);
-
-
-
-            // Action buttons container
-            const actionsDiv = document.createElement("div");
-            actionsDiv.style.cssText = "display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08);";
-
-            // Helper to style buttons
-            const createActionButton = (text, icon, title, isPrimary = false) => {
-                const btn = document.createElement("button");
-                btn.innerHTML = `${icon} ${text}`;
-                btn.title = title;
-                btn.style.cssText = `
-                    background: ${isPrimary ? 'rgba(255, 107, 74, 0.15)' : 'rgba(255,255,255,0.05)'}; 
-                    color: ${isPrimary ? '#ff6b4a' : '#888'}; 
-                    border: 1px solid ${isPrimary ? 'rgba(255, 107, 74, 0.3)' : 'rgba(255,255,255,0.1)'}; 
-                    padding: 4px 10px; 
-                    border-radius: 6px; 
-                    font-size: 11px; 
-                    cursor: pointer; 
-                    transition: all 0.2s;
-                    display: flex;
-                    align-items: center;
-                    gap: 5px;
-                    font-weight: 500;
-                `;
-                btn.onmouseenter = () => {
-                    btn.style.background = isPrimary ? 'rgba(245, 80, 54, 0.25)' : 'rgba(255,255,255,0.1)';
-                    btn.style.color = isPrimary ? '#ff6b52' : '#e5e7eb';
-                };
-                btn.onmouseleave = () => {
-                    btn.style.background = isPrimary ? 'rgba(245, 80, 54, 0.15)' : 'rgba(255,255,255,0.05)';
-                    btn.style.color = isPrimary ? '#f55036' : '#9ca3af';
-                };
-                return btn;
-            };
-
-            // Copy entire response button
-            const copyBtn = createActionButton("Copy", '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>', "Copy entire response");
-            copyBtn.onclick = () => {
-                const responseText = contentDiv.textContent;
-                navigator.clipboard.writeText(responseText).then(() => {
-                    const originalHTML = copyBtn.innerHTML;
-                    copyBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied';
-                    copyBtn.style.borderColor = "#4ade80";
-                    copyBtn.style.color = "#4ade80";
-                    setTimeout(() => {
-                        copyBtn.innerHTML = originalHTML;
-                        copyBtn.style.borderColor = "rgba(255,255,255,0.1)";
-                        copyBtn.style.color = "#9ca3af";
-                    }, 2000);
-                });
-            };
-            actionsDiv.appendChild(copyBtn);
-
-            // Regenerate button - pass the message index for targeted regeneration
-            const regenBtn = createActionButton("Regenerate", '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>', "Regenerate from this point");
-            regenBtn.onclick = () => this.regenerateAtIndex(messageIndex);
-            actionsDiv.appendChild(regenBtn);
-
-            // Minimize/Expand button
-            const minimizeBtn = createActionButton("Minimize", '➖', "Minimize response");
-            minimizeBtn.onclick = () => {
-                const isMinimized = contentDiv.style.display === 'none';
-                if (isMinimized) {
-                    // Expand
-                    contentDiv.style.display = 'block';
-                    minimizeBtn.innerHTML = '➖ Minimize';
-                    minimizeBtn.title = 'Minimize response';
-                } else {
-                    // Minimize
-                    contentDiv.style.display = 'none';
-                    minimizeBtn.innerHTML = '➕ Expand';
-                    minimizeBtn.title = 'Expand response';
-                }
-            };
-            actionsDiv.appendChild(minimizeBtn);
-
-            // Retry button for error messages
-            if (isError) {
-                const retryBtn = createActionButton("Retry", '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"></path></svg>', "Retry failed request", true);
-                retryBtn.onclick = () => this.retryLastRequest();
-                actionsDiv.appendChild(retryBtn);
-            }
-
-            msgDiv.appendChild(actionsDiv);
-        }
-        this.chatBody.appendChild(msgDiv);
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
     }
 

@@ -1,4 +1,5 @@
 // src/background/ai-service.js
+import { normalizeProviderScopedModelName } from './models/model-routing.js';
 
 // --- PROMPT DEFINITIONS ---
 const PROMPTS =
@@ -314,7 +315,7 @@ function normalizeErrorMessage(response, data, provider) {
 class GroqService extends AbstractAIService {
     constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
         super(apiKey, modelName, interactionMode, customPrompt, customModes);
-        this.actualModel = modelName || "meta-llama/llama-4-scout-17b-16e-instruct";
+        this.actualModel = normalizeProviderScopedModelName(modelName) || "meta-llama/llama-4-scout-17b-16e-instruct";
         this.API_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
     }
 
@@ -385,11 +386,12 @@ class GroqService extends AbstractAIService {
 class GeminiService extends AbstractAIService {
     constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
         super(apiKey, modelName, interactionMode, customPrompt, customModes);
-        this.baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
+        this.actualModel = normalizeProviderScopedModelName(modelName);
+        this.baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${this.actualModel}:generateContent`;
     }
 
     async chat(messages, signal = null) {
-        const isGemma = this.modelName.toLowerCase().includes('gemma');
+        const isGemma = this.actualModel.toLowerCase().includes('gemma');
         const contents = [];
         let systemPromptText = null;
 
@@ -456,7 +458,7 @@ class GeminiService extends AbstractAIService {
         const usage = data.usageMetadata || {};
         return {
             text,
-            model: this.modelName,
+            model: this.actualModel,
             tokenUsage: {
                 promptTokens: usage.promptTokenCount || 0,
                 completionTokens: usage.candidatesTokenCount || 0,

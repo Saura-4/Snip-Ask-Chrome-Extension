@@ -301,14 +301,18 @@ function showErrorToast(message) {
         lowerMessage.includes('unauthorized');
 
     if (isKeyError) {
-        toast.innerHTML = `
-            <div style="margin-bottom: 8px;">⚠️ ${normalizedMessage}</div>
-            <div style="font-size: 12px; color: #ccc;">
-                Click the extension icon to update your API key.
-            </div>
-        `;
+        const messageLine = document.createElement('div');
+        messageLine.style.marginBottom = '8px';
+        messageLine.textContent = 'Warning: ' + normalizedMessage;
+
+        const helpLine = document.createElement('div');
+        helpLine.style.cssText = 'font-size: 12px; color: #ccc;';
+        helpLine.textContent = 'Click the extension icon to update your API key.';
+
+        toast.appendChild(messageLine);
+        toast.appendChild(helpLine);
     } else {
-        toast.textContent = '⚠️ ' + normalizedMessage;
+        toast.textContent = 'Warning: ' + normalizedMessage;
     }
 
     document.body.appendChild(toast);
