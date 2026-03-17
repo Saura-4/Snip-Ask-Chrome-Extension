@@ -13,8 +13,19 @@ import {
   removeCustomModel,
   toggleCustomModel,
   getMergedModelsWithCustom
-} from '../background/models-config.js';
-import { getMissingConfigMessage } from './model-validation.js';
+} from '../background/models/models-config.js';
+import { getMissingConfigMessage } from './modules/model-validation.js';
+import {
+  getProvidersToShow,
+  populateModelSelect,
+  populateModelsList,
+  promptForCustomModel
+} from './modules/popup-models.js';
+import {
+  populateModeSelect,
+  populateModesList,
+  validateModeInput
+} from './modules/popup-modes.js';
 
 // --- DEFAULT DATA ---
 const DEFAULT_MODES = [
@@ -169,152 +180,50 @@ async function refreshModelsOnly() {
 
 async function loadModels(enabledProviders, enabledModels, selectedModel) {
   const modelSelect = document.getElementById('modelSelect');
-  modelSelect.innerHTML = '';
-
-  // In guest mode, only show Groq models (ignore user's provider settings)
-  // Use shared GUEST_MODE_PROVIDERS for consistency
-  const providersToShow = isGuestModeActive === true
-    ? GUEST_MODE_PROVIDERS
-    : enabledProviders;
-
-  // Get saved custom models
+  const providersToShow = getProvidersToShow(enabledProviders, isGuestModeActive, GUEST_MODE_PROVIDERS);
   const customSavedModels = await getCustomSavedModels();
-
-  // Merge static models with custom saved models
   const mergedModels = getMergedModelsWithCustom(ALL_MODELS, customSavedModels);
 
-  for (const [provider, models] of Object.entries(mergedModels)) {
-    if (providersToShow[provider]) {
-      // In guest mode, show ALL Groq models regardless of user's model settings
-      const enabledModelsInProvider = isGuestModeActive && provider === 'groq'
-        ? models
-        : models.filter(model => enabledModels[model.value] !== false);
+  const selection = populateModelSelect({
+    modelSelect,
+    mergedModels,
+    providersToShow,
+    enabledModels,
+    selectedModel,
+    isGuestModeActive,
+    providerLabels: PROVIDER_LABELS
+  });
 
-      if (enabledModelsInProvider.length > 0) {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = PROVIDER_LABELS[provider];
-
-        // Add Guest Mode indication
-        if (isGuestModeActive && provider === 'groq') {
-          optgroup.label = PROVIDER_LABELS[provider] + ' (Guest Mode)';
-        }
-
-        enabledModelsInProvider.forEach(model => {
-          const option = document.createElement('option');
-          option.value = model.value;
-          option.textContent = model.name;
-          optgroup.appendChild(option);
-        });
-
-        modelSelect.appendChild(optgroup);
-      }
-    }
-  }
-
-  if (selectedModel && [...modelSelect.options].some(opt => opt.value === selectedModel)) {
-    modelSelect.value = selectedModel;
-  } else if (modelSelect.options.length > 0) {
-    // Saved model not available in dropdown - auto-select first available model
-    // This happens when: switching providers, disabling providers, or guest mode
-    modelSelect.selectedIndex = 0;
-    // IMPORTANT: Save the auto-selected model to storage so startSnip uses it
-    const autoSelectedModel = modelSelect.value;
-    if (autoSelectedModel) {
-      await chrome.storage.local.set({ selectedModel: autoSelectedModel });
-    }
-  } else {
-    // No models available - all providers disabled
-    const emptyOption = document.createElement('option');
-    emptyOption.value = '';
-    emptyOption.textContent = '⚠️ Enable a provider in Settings';
-    emptyOption.disabled = true;
-    modelSelect.appendChild(emptyOption);
-    modelSelect.selectedIndex = 0;
+  if (selection.didAutoSelect && selection.selectedModel) {
+    await chrome.storage.local.set({ selectedModel: selection.selectedModel });
   }
 }
 
 async function loadModelsList(enabledProviders, enabledModels) {
   const modelsList = document.getElementById('modelsList');
   if (!modelsList) return;
-  modelsList.innerHTML = '';
 
-  // Get saved custom models
   const customSavedModels = await getCustomSavedModels();
+  populateModelsList({
+    modelsList,
+    allModels: ALL_MODELS,
+    customSavedModels,
+    enabledProviders,
+    enabledModels,
+    providerLabels: PROVIDER_LABELS
+  });
 
-  for (const [provider, models] of Object.entries(ALL_MODELS)) {
-    // Provider header
-    const providerHeader = document.createElement('div');
-    providerHeader.className = 'model-provider-header';
-    providerHeader.innerHTML = `<span>${PROVIDER_LABELS[provider]}</span>`;
-    if (!enabledProviders[provider]) {
-      providerHeader.innerHTML += ' <span class="provider-disabled-badge">(Provider disabled)</span>';
-    }
-    modelsList.appendChild(providerHeader);
-
-    // Static models for this provider
-    models.forEach(model => {
-      // Skip the "Custom Model" option from the settings list
-      if (model.value.endsWith(':custom')) return;
-
-      const div = document.createElement('div');
-      div.className = 'model-item';
-      if (!enabledProviders[provider]) {
-        div.classList.add('model-item-disabled');
-      }
-      div.innerHTML = `
-        <div class="model-info">
-          <span class="model-name">${model.name}</span>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" class="model-toggle" data-model="${model.value}" ${enabledModels[model.value] !== false ? 'checked' : ''} ${!enabledProviders[provider] ? 'disabled' : ''}>
-          <span class="toggle-slider"></span>
-        </label>
-      `;
-      modelsList.appendChild(div);
-    });
-
-    // Custom saved models for this provider
-    if (customSavedModels[provider] && customSavedModels[provider].length > 0) {
-      customSavedModels[provider].forEach(model => {
-        const div = document.createElement('div');
-        div.className = 'model-item';
-        if (!enabledProviders[provider]) {
-          div.classList.add('model-item-disabled');
-        }
-        div.innerHTML = `
-          <div class="model-info" style="flex: 1;">
-            <span class="model-name">${model.name}</span>
-            <span class="custom-model-badge" style="font-size: 9px; background: rgba(255,107,74,0.15); color: #ff6b4a; padding: 2px 6px; border-radius: 4px; margin-left: 6px;">Custom</span>
-          </div>
-          <button class="delete-custom-model-btn" data-model="${model.value}" data-provider="${provider}" title="Delete custom model" style="background: none; border: none; color: #888; cursor: pointer; padding: 4px 8px; transition: color 0.2s;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-          </button>
-          <label class="toggle">
-            <input type="checkbox" class="custom-model-toggle" data-model="${model.value}" data-provider="${provider}" ${model.enabled !== false ? 'checked' : ''} ${!enabledProviders[provider] ? 'disabled' : ''}>
-            <span class="toggle-slider"></span>
-          </label>
-        `;
-        modelsList.appendChild(div);
-      });
-    }
-  }
-
-  // Attach event listeners for static model toggles
   modelsList.querySelectorAll('.model-toggle').forEach(toggle => {
     toggle.addEventListener('change', async (e) => {
       const modelValue = e.target.dataset.model;
       const result = await chrome.storage.local.get(['enabledModels']);
-      const enabledModels = result.enabledModels || getDefaultEnabledModels();
-      enabledModels[modelValue] = e.target.checked;
-      await chrome.storage.local.set({ enabledModels });
+      const nextEnabledModels = result.enabledModels || getDefaultEnabledModels();
+      nextEnabledModels[modelValue] = e.target.checked;
+      await chrome.storage.local.set({ enabledModels: nextEnabledModels });
       await loadSettings();
     });
   });
 
-  // Attach event listeners for custom model toggles
   modelsList.querySelectorAll('.custom-model-toggle').forEach(toggle => {
     toggle.addEventListener('change', async (e) => {
       const modelValue = e.target.dataset.model;
@@ -324,11 +233,11 @@ async function loadModelsList(enabledProviders, enabledModels) {
     });
   });
 
-  // Attach event listeners for delete buttons
   modelsList.querySelectorAll('.delete-custom-model-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
-      const modelValue = e.target.dataset.model;
-      const provider = e.target.dataset.provider;
+      const button = e.currentTarget;
+      const modelValue = button.dataset.model;
+      const provider = button.dataset.provider;
       if (confirm('Delete this custom model?')) {
         await removeCustomModel(provider, modelValue);
         await loadSettings();
@@ -385,44 +294,13 @@ function loadApiKeyInputs(enabledProviders, savedValues) {
 
 function loadModes(modes, selectedMode) {
   const modeSelect = document.getElementById('modeSelect');
-  modeSelect.innerHTML = '';
-
-  modes.forEach(mode => {
-    const option = document.createElement('option');
-    option.value = mode.id;
-    option.textContent = mode.name;
-    modeSelect.appendChild(option);
-  });
-
-  // Add custom prompt option
-  const customOption = document.createElement('option');
-  customOption.value = 'custom';
-  customOption.textContent = '✍️ Custom Prompt';
-  modeSelect.appendChild(customOption);
-
-  if (selectedMode) {
-    modeSelect.value = selectedMode;
-  }
+  populateModeSelect(modeSelect, modes, selectedMode);
 }
 
 function loadModesList(modes) {
   const modesList = document.getElementById('modesList');
-  modesList.innerHTML = '';
+  populateModesList(modesList, modes);
 
-  modes.forEach(mode => {
-    const div = document.createElement('div');
-    div.className = 'mode-item';
-    div.innerHTML = `
-            <span class="mode-name">${mode.name}</span>
-            <div class="mode-actions">
-                <button data-mode-id="${mode.id}" class="edit-mode-btn">Edit</button>
-                ${!mode.isDefault ? `<button data-mode-id="${mode.id}" class="delete-mode-btn">🗑️</button>` : ''}
-            </div>
-        `;
-    modesList.appendChild(div);
-  });
-
-  // Attach event listeners
   modesList.querySelectorAll('.edit-mode-btn').forEach(btn => {
     btn.addEventListener('click', () => editMode(btn.dataset.modeId));
   });
@@ -531,60 +409,27 @@ function setupEventListeners() {
   // Model selection
   document.getElementById('modelSelect').addEventListener('change', async (e) => {
     const model = e.target.value;
+    const customModel = promptForCustomModel(model);
 
-    if (model === 'ollama:custom') {
-      const name = prompt("Enter your Ollama model name:", "llama3");
-      if (name && /^[a-zA-Z0-9\-_:.]+$/.test(name)) {
-        const modelValue = 'ollama:' + name;
-        // Generate a readable display name (capitalize first letter, replace common patterns)
-        const displayName = name.split(':')[0].charAt(0).toUpperCase() + name.split(':')[0].slice(1) +
-          (name.includes(':') ? ' (' + name.split(':').slice(1).join(':') + ')' : '');
-
-        // Save custom model for future use
-        await saveCustomModel('ollama', modelValue, '📌 ' + displayName);
-        await chrome.storage.local.set({ selectedModel: modelValue });
-        // Reload to show saved model in dropdown
-        await loadSettings();
-      } else if (name) {
-        alert('Invalid model name. Use only letters, numbers, hyphens, underscores, colons, and dots.');
-        await loadSettings();
-        return;
-      } else {
-        // User cancelled - refresh to show actual saved model
-        await loadSettings();
-        return;
-      }
-    } else if (model === 'openrouter:custom') {
-      const slug = prompt("Enter OpenRouter model slug (e.g., openai/gpt-4):", "openai/gpt-4");
-      // Validate slug format: provider/model-name with optional :variant suffix
-      // Examples: openai/gpt-4, deepseek/deepseek-r1-0528:free, meta-llama/llama-4
-      // More restrictive: only allows alphanumeric, hyphen, underscore for provider
-      // Model name allows dots for versions (e.g., gpt-4.0)
-      if (slug && /^[a-zA-Z][a-zA-Z0-9_-]*\/[a-zA-Z][a-zA-Z0-9._-]*(:[a-zA-Z0-9_-]+)?$/.test(slug)) {
-        const modelValue = 'openrouter:' + slug;
-        // Generate a readable display name from slug
-        const parts = slug.split('/');
-        const modelPart = parts[1].split(':')[0]; // Remove :free suffix for name
-        const displayName = modelPart.charAt(0).toUpperCase() + modelPart.slice(1).replace(/-/g, ' ');
-
-        // Save custom model for future use
-        await saveCustomModel('openrouter', modelValue, '📌 ' + displayName);
-        await chrome.storage.local.set({ selectedModel: modelValue });
-        // Reload to show saved model in dropdown
-        await loadSettings();
-      } else if (slug) {
-        alert('Invalid model slug format. Use format: provider/model-name (e.g., openai/gpt-4, deepseek/deepseek-r1:free)');
-        // Refresh to show actual saved model
-        await loadSettings();
-        return;
-      } else {
-        // User cancelled - refresh to show actual saved model
-        await loadSettings();
-        return;
-      }
-    } else {
-      await chrome.storage.local.set({ selectedModel: model });
+    if (customModel.cancelled) {
+      await loadSettings();
+      return;
     }
+
+    if (customModel.error) {
+      alert(customModel.error);
+      await loadSettings();
+      return;
+    }
+
+    if (customModel.provider) {
+      await saveCustomModel(customModel.provider, customModel.modelValue, customModel.displayName);
+      await chrome.storage.local.set({ selectedModel: customModel.modelValue });
+      await loadSettings();
+      return;
+    }
+
+    await chrome.storage.local.set({ selectedModel: model });
   });
 
   // Mode selection
@@ -813,20 +658,10 @@ function updateCharCounters() {
 async function saveMode() {
   const name = document.getElementById('modeNameInput').value.trim();
   const prompt = document.getElementById('modePromptInput').value.trim();
+  const validationError = validateModeInput(name, prompt);
 
-  // Validation
-  if (!name || !prompt) {
-    alert('Please fill in both name and prompt');
-    return;
-  }
-
-  if (name.length > 50) {
-    alert('Mode name must be 50 characters or less');
-    return;
-  }
-
-  if (prompt.length > 2000) {
-    alert('Prompt must be 2000 characters or less');
+  if (validationError) {
+    alert(validationError);
     return;
   }
 
@@ -863,51 +698,24 @@ async function startSnip() {
   const modelSelect = document.getElementById('modelSelect');
   let model = modelSelect?.value || result.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
 
+  const customModel = promptForCustomModel(model);
+  if (customModel.cancelled) {
+    return;
+  }
+  if (customModel.error) {
+    alert(customModel.error);
+    return;
+  }
+  if (customModel.provider) {
+    model = customModel.modelValue;
+    await saveCustomModel(customModel.provider, customModel.modelValue, customModel.displayName);
+  }
+
   if (model && model !== result.selectedModel) {
     await chrome.storage.local.set({ selectedModel: model });
   }
 
-  // Handle custom model selection - prompt user for model name
-  if (model === 'ollama:custom') {
-    const name = prompt("Enter your Ollama model name:", "llama3");
-    if (name && /^[a-zA-Z0-9\-_:.]+$/.test(name)) {
-      model = 'ollama:' + name;
-      // Generate display name and save for future use
-      const displayName = name.split(':')[0].charAt(0).toUpperCase() + name.split(':')[0].slice(1) +
-        (name.includes(':') ? ' (' + name.split(':').slice(1).join(':') + ')' : '');
-      await saveCustomModel('ollama', model, '📌 ' + displayName);
-      await chrome.storage.local.set({ selectedModel: model });
-    } else if (name) {
-      alert('Invalid model name. Use only letters, numbers, hyphens, underscores, colons, and dots.');
-      return;
-    } else {
-      // User cancelled
-      return;
-    }
-  } else if (model === 'openrouter:custom') {
-    const slug = prompt("Enter OpenRouter model slug (e.g., openai/gpt-4):", "openai/gpt-4");
-    if (slug && /^[a-zA-Z][a-zA-Z0-9_-]*\/[a-zA-Z][a-zA-Z0-9._-]*(:[a-zA-Z0-9_-]+)?$/.test(slug)) {
-      model = 'openrouter:' + slug;
-      // Generate display name and save for future use
-      const parts = slug.split('/');
-      const modelPart = parts[1].split(':')[0];
-      const displayName = modelPart.charAt(0).toUpperCase() + modelPart.slice(1).replace(/-/g, ' ');
-      await saveCustomModel('openrouter', model, '📌 ' + displayName);
-      await chrome.storage.local.set({ selectedModel: model });
-    } else if (slug) {
-      alert('Invalid model slug format. Use format: provider/model-name (e.g., openai/gpt-4)');
-      return;
-    } else {
-      // User cancelled
-      return;
-    }
-  }
-
-  // In guest mode, skip API key validation (background.js handles it)
-  // Server-side rate limiting is the real gate - cannot be bypassed via devtools
-  if (isGuestModeActive) {
-    // Just proceed - if limit is exceeded, server will return 429 error
-  } else {
+  if (!isGuestModeActive) {
     const missingConfigMessage = getMissingConfigMessage(model, result);
     if (missingConfigMessage) {
       alert(missingConfigMessage);
@@ -919,12 +727,10 @@ async function startSnip() {
   if (tabs.length === 0) return;
 
   const tab = tabs[0];
-
-  // Prevent errors on restricted pages
   if (!tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://") ||
     tab.url.startsWith("https://chrome.google.com/webstore") || tab.url.startsWith("edge://") ||
     tab.url.startsWith("about:")) {
-    alert("⚠️ Cannot run on this restricted page.");
+    alert("Cannot run on this restricted page.");
     return;
   }
 
@@ -932,25 +738,24 @@ async function startSnip() {
     await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP" });
     window.close();
   } catch (err) {
-    // Content script not loaded, inject it first
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         files: [
           'src/content/utils.js',
           'src/content/ui-helpers.js',
-          'src/content/chat-message-utils.js',
-          'src/content/chat-render-utils.js',
+          'src/content/chat/message-utils.js',
+          'src/content/chat/render-utils.js',
           'src/content/window-manager.js',
           'src/content/snip-selection.js',
-          'src/content/floating-chat-ui.js',
+          'src/content/chat/floating-chat-ui.js',
           'src/content/content.js'
         ]
       });
       await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP" });
       window.close();
     } catch (injectErr) {
-      alert("⚠️ Could not start snip. Please refresh the page!");
+      alert("Could not start snip. Please refresh the page!");
     }
   }
 }

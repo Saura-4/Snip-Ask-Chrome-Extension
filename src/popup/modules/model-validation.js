@@ -1,4 +1,4 @@
-import { isGoogleModel, isOllamaModel, isOpenRouterModel } from '../background/model-routing.js';
+import { isGoogleModel, isOllamaModel, isOpenRouterModel } from '../../background/models/model-routing.js';
 
 function getMissingConfigMessage(model, storage) {
     if (isOllamaModel(model) && !storage.ollamaHost) {

@@ -1,0 +1,292 @@
+function createChatActionButton(text, icon, title, isPrimary) {
+    const button = document.createElement("button");
+    button.innerHTML = `${icon} ${text}`;
+    button.title = title;
+    button.style.cssText = `
+        background: ${isPrimary ? 'rgba(255, 107, 74, 0.15)' : 'rgba(255,255,255,0.05)'};
+        color: ${isPrimary ? '#ff6b4a' : '#888'};
+        border: 1px solid ${isPrimary ? 'rgba(255, 107, 74, 0.3)' : 'rgba(255,255,255,0.1)'};
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-weight: 500;
+    `;
+    button.onmouseenter = () => {
+        button.style.background = isPrimary ? 'rgba(245, 80, 54, 0.25)' : 'rgba(255,255,255,0.1)';
+        button.style.color = isPrimary ? '#ff6b52' : '#e5e7eb';
+    };
+    button.onmouseleave = () => {
+        button.style.background = isPrimary ? 'rgba(245, 80, 54, 0.15)' : 'rgba(255,255,255,0.05)';
+        button.style.color = isPrimary ? '#f55036' : '#9ca3af';
+    };
+    return button;
+}
+
+function getMessageImageSource(content, base64Image) {
+    if (base64Image) {
+        return `data:image/png;base64,${base64Image}`;
+    }
+
+    if (!Array.isArray(content)) {
+        return null;
+    }
+
+    const imagePart = content.find((item) => item.type === 'image_url');
+    return imagePart?.image_url?.url || null;
+}
+
+function renderUserMessageContent(msgDiv, content, base64Image, displayText, showImageModal) {
+    const hasImage = Boolean(base64Image) || (Array.isArray(content) && content.some((item) => item.type === 'image_url'));
+
+    if (hasImage) {
+        const imgSrc = getMessageImageSource(content, base64Image);
+        const imgContainer = document.createElement('div');
+        imgContainer.style.cssText = `
+            margin-bottom: 8px;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: #1a1a1a;
+            position: relative;
+        `;
+
+        const thumbnail = document.createElement('img');
+        thumbnail.src = imgSrc;
+        thumbnail.style.cssText = `
+            width: 100%;
+            max-height: 120px;
+            object-fit: cover;
+            cursor: pointer;
+            display: block;
+            transition: transform 0.2s;
+        `;
+        thumbnail.title = "Click to view full size";
+        thumbnail.alt = "Screenshot thumbnail";
+        thumbnail.onmouseenter = () => {
+            thumbnail.style.opacity = '0.85';
+        };
+        thumbnail.onmouseleave = () => {
+            thumbnail.style.opacity = '1';
+        };
+        thumbnail.onclick = () => showImageModal(imgSrc);
+
+        const iconOverlay = document.createElement('div');
+        iconOverlay.style.cssText = `
+            position: absolute;
+            bottom: 4px;
+            right: 4px;
+            background: rgba(0,0,0,0.6);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 10px;
+            color: #ccc;
+            pointer-events: none;
+        `;
+        iconOverlay.textContent = 'Click to expand';
+
+        imgContainer.appendChild(thumbnail);
+        imgContainer.appendChild(iconOverlay);
+        msgDiv.appendChild(imgContainer);
+
+        const textLabel = document.createElement('em');
+        textLabel.style.cssText = "opacity: 0.7; font-size: 11px; display: block;";
+        if (Array.isArray(content)) {
+            const textPart = content.find((item) => item.type === 'text');
+            textLabel.textContent = textPart?.text || '(Screenshot)';
+        } else {
+            textLabel.textContent = '(Screenshot)';
+        }
+        msgDiv.appendChild(textLabel);
+        return;
+    }
+
+    if (typeof content === 'object' && content?.content) {
+        const textPart = Array.isArray(content.content)
+            ? content.content.find((item) => item.type === 'text')
+            : { text: content.content };
+        const label = document.createElement('em');
+        label.textContent = '(Snippet)';
+        label.style.opacity = "0.8";
+        label.style.fontSize = "0.9em";
+        msgDiv.appendChild(label);
+        msgDiv.appendChild(document.createElement('br'));
+
+        const textSpan = document.createElement('span');
+        textSpan.textContent = textPart ? textPart.text : '';
+        msgDiv.appendChild(textSpan);
+        return;
+    }
+
+    msgDiv.innerText = typeof displayText === 'string' ? displayText : String(content);
+}
+
+function buildAssistantLabel(modelLabel, isRegenerated, tokenUsage) {
+    const tokenInfo = tokenUsage?.totalTokens ? tokenUsage.totalTokens.toLocaleString() : null;
+
+    if (isRegenerated) {
+        return `${modelLabel}${tokenInfo ? ` • ${tokenInfo} tokens` : ''} Regenerated`;
+    }
+
+    return `${modelLabel}${tokenInfo ? ` • ${tokenInfo} tokens` : ''}`;
+}
+
+function renderAssistantMessageContent(targetUI, msgDiv, options) {
+    const {
+        content,
+        includeActions = true,
+        isError,
+        isRegenerated,
+        messageIndex,
+        modelLabel,
+        tokenUsage
+    } = options;
+
+    const labelDiv = document.createElement("div");
+    labelDiv.style.cssText = "font-size: 10px; color: #ff6b4a; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; display: inline-flex; align-items: center; gap: 4px; background: rgba(255,107,74,0.1); padding: 3px 8px; border-radius: 4px;";
+    labelDiv.textContent = buildAssistantLabel(modelLabel, isRegenerated, tokenUsage);
+    msgDiv.appendChild(labelDiv);
+
+    const contentDiv = document.createElement("div");
+    contentDiv.style.cssText = "max-height: 350px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #404040 transparent;";
+    const cleanText = sanitizeModelText(content);
+    if (typeof parseMarkdown === 'function') {
+        contentDiv.innerHTML = parseMarkdown(cleanText);
+        if (typeof attachCodeBlockCopyHandlers === 'function') {
+            attachCodeBlockCopyHandlers(contentDiv);
+        }
+    } else {
+        contentDiv.innerText = cleanText;
+    }
+    msgDiv.appendChild(contentDiv);
+
+    if (!includeActions) {
+        return;
+    }
+
+    const actionsDiv = document.createElement("div");
+    actionsDiv.style.cssText = "display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08);";
+
+    const copyBtn = createChatActionButton(
+        "Copy",
+        '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
+        "Copy entire response",
+        false
+    );
+    copyBtn.onclick = () => {
+        const responseText = contentDiv.textContent || '';
+        navigator.clipboard.writeText(responseText).then(() => {
+            const originalHTML = copyBtn.innerHTML;
+            copyBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied';
+            copyBtn.style.borderColor = "#4ade80";
+            copyBtn.style.color = "#4ade80";
+            setTimeout(() => {
+                copyBtn.innerHTML = originalHTML;
+                copyBtn.style.borderColor = "rgba(255,255,255,0.1)";
+                copyBtn.style.color = "#9ca3af";
+            }, 2000);
+        });
+    };
+    actionsDiv.appendChild(copyBtn);
+
+    const regenBtn = createChatActionButton(
+        "Regenerate",
+        '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>',
+        "Regenerate from this point",
+        false
+    );
+    regenBtn.onclick = () => targetUI.regenerateAtIndex(messageIndex);
+    actionsDiv.appendChild(regenBtn);
+
+    const minimizeBtn = createChatActionButton("Minimize", '-', "Minimize response", false);
+    minimizeBtn.onclick = () => {
+        const isMinimized = contentDiv.style.display === 'none';
+        if (isMinimized) {
+            contentDiv.style.display = 'block';
+            minimizeBtn.innerHTML = '- Minimize';
+            minimizeBtn.title = 'Minimize response';
+        } else {
+            contentDiv.style.display = 'none';
+            minimizeBtn.innerHTML = '+ Expand';
+            minimizeBtn.title = 'Expand response';
+        }
+    };
+    actionsDiv.appendChild(minimizeBtn);
+
+    if (isError) {
+        const retryBtn = createChatActionButton(
+            "Retry",
+            '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"></path></svg>',
+            "Retry failed request",
+            true
+        );
+        retryBtn.onclick = () => targetUI.retryLastRequest();
+        actionsDiv.appendChild(retryBtn);
+    }
+
+    msgDiv.appendChild(actionsDiv);
+}
+
+function renderChatMessage(targetUI, options) {
+    const {
+        role,
+        content,
+        displayText,
+        base64Image,
+        includeActions = true,
+        isError,
+        isRegenerated,
+        messageIndex,
+        modelLabel,
+        tokenUsage
+    } = options;
+
+    const msgDiv = document.createElement("div");
+    msgDiv.style.cssText = "max-width: 85%; padding: 12px 14px; border-radius: 10px; line-height: 1.5; word-wrap: break-word; font-size: 13px; position: relative; transition: all 0.2s ease;";
+
+    if (role === 'user') {
+        msgDiv.style.alignSelf = "flex-end";
+        msgDiv.style.background = "linear-gradient(135deg, #3a3a3a 0%, #2d2d2d 100%)";
+        msgDiv.style.color = "#e8e8e8";
+        msgDiv.style.borderRadius = "10px 10px 2px 10px";
+        msgDiv.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
+        renderUserMessageContent(msgDiv, content, base64Image, displayText, (imageSrc) => targetUI._showImageModal(imageSrc));
+    } else {
+        msgDiv.style.alignSelf = "flex-start";
+        msgDiv.style.background = "rgba(255,255,255,0.05)";
+        msgDiv.style.color = "#e8e8e8";
+        msgDiv.style.border = "1px solid rgba(255,255,255,0.08)";
+        msgDiv.style.borderRadius = "10px 10px 10px 2px";
+        renderAssistantMessageContent(targetUI, msgDiv, {
+            content,
+            includeActions,
+            isError,
+            isRegenerated,
+            messageIndex,
+            modelLabel,
+            tokenUsage
+        });
+    }
+
+    targetUI.chatBody.appendChild(msgDiv);
+    return msgDiv;
+}
+
+function renderClonedChatMessage(targetUI, msg) {
+    renderChatMessage(targetUI, {
+        role: msg.role,
+        content: msg.content,
+        displayText: msg.displayText || (typeof msg.content === 'string' ? msg.content : ''),
+        base64Image: msg.base64Image || null,
+        includeActions: false,
+        isError: false,
+        isRegenerated: Boolean(msg.isRegenerated),
+        messageIndex: -1,
+        modelLabel: msg.role === 'assistant' ? targetUI._getModelDisplayName(msg.model) : null,
+        tokenUsage: null
+    });
+}
