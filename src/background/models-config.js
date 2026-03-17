@@ -1,6 +1,8 @@
 // src/background/models-config.js
 // Centralized model definitions and provider configuration
 
+import { isGuestConfigured } from './guest-config.js';
+
 /**
  * All available models organized by provider
  */
@@ -309,7 +311,7 @@ export async function checkGuestModeStatus() {
 
         return {
             isGuestMode,
-            isConfigured: true // Assume configured if GUEST_WORKER_URL is set in guest-config.js
+            isConfigured: isGuestConfigured()
         };
     } catch (e) {
         console.error('Failed to check guest mode status:', e);

@@ -265,6 +265,22 @@ function showErrorToast(message) {
     const existing = document.getElementById('snip-error-toast');
     if (existing) existing.remove();
 
+    const normalizedMessage = (() => {
+        if (typeof message === 'string') return message;
+        if (message == null) return 'Unknown error';
+        if (typeof message === 'object') {
+            const candidates = [message.message, message.error, message.detail, message.code]
+                .filter(value => typeof value === 'string' && value.trim());
+            if (candidates.length > 0) return candidates.join(' ');
+            try {
+                return JSON.stringify(message);
+            } catch {
+                return String(message);
+            }
+        }
+        return String(message);
+    })();
+
     const toast = document.createElement('div');
     toast.id = 'snip-error-toast';
     toast.style.cssText = `
@@ -278,20 +294,21 @@ function showErrorToast(message) {
     `;
 
     // Check if this is an API key error
-    const isKeyError = message.toLowerCase().includes('api key') ||
-        message.toLowerCase().includes('invalid') ||
-        message.toLowerCase().includes('401') ||
-        message.toLowerCase().includes('unauthorized');
+    const lowerMessage = normalizedMessage.toLowerCase();
+    const isKeyError = lowerMessage.includes('api key') ||
+        lowerMessage.includes('invalid') ||
+        lowerMessage.includes('401') ||
+        lowerMessage.includes('unauthorized');
 
     if (isKeyError) {
         toast.innerHTML = `
-            <div style="margin-bottom: 8px;">⚠️ ${message}</div>
+            <div style="margin-bottom: 8px;">⚠️ ${normalizedMessage}</div>
             <div style="font-size: 12px; color: #ccc;">
                 Click the extension icon to update your API key.
             </div>
         `;
     } else {
-        toast.textContent = '⚠️ ' + message;
+        toast.textContent = '⚠️ ' + normalizedMessage;
     }
 
     document.body.appendChild(toast);
@@ -303,3 +320,4 @@ function showErrorToast(message) {
     toast.style.cursor = 'pointer';
     toast.addEventListener('click', () => toast.remove());
 }
+

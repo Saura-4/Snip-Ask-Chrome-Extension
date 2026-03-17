@@ -523,15 +523,30 @@ class FloatingChatUI {
 
         this.sendBtn.onclick = () => this.handleSend();
 
-        // Consolidated keydown handler for input - handles Enter to send and Escape to close
-        // Note: stopPropagation is already handled by the earlier listener
+        // Consolidated keyboard handlers for follow-up input.
+        // We listen on both `keydown` and `beforeinput` so Enter-to-send remains
+        // reliable on pages that aggressively intercept key events.
+        const isPlainEnter = (e) => {
+            if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.isComposing) return false;
+            return e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter';
+        };
+
         this.input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            if (isPlainEnter(e)) {
                 e.preventDefault();
+                e.stopPropagation();
                 this.handleSend();
             } else if (e.key === 'Escape') {
                 e.preventDefault();
+                e.stopPropagation();
                 this.close();
+            }
+        });
+
+        this.input.addEventListener('beforeinput', (e) => {
+            if (e.inputType === 'insertLineBreak' && !e.shiftKey && !e.isComposing) {
+                e.preventDefault();
+                this.handleSend();
             }
         });
 
@@ -573,39 +588,8 @@ class FloatingChatUI {
         // Track model name for assistant messages
         const msgModel = role === 'assistant' ? (modelName || this.currentModel) : null;
 
-        // Store FULL raw content in chatHistory to preserve image data for regeneration
-        // Also extract text for display purposes
-        let rawContent = content; // Keep original for history
-        let displayText = content;
-
-        if (typeof content !== 'string') {
-            if (Array.isArray(content)) {
-                const textPart = content.find(c => c.type === 'text');
-                displayText = textPart ? textPart.text : '(image analyzed)';
-            } else if (content && content.content) {
-                if (Array.isArray(content.content)) {
-                    const textPart = content.content.find(c => c.type === 'text');
-                    displayText = textPart ? textPart.text : '(image analyzed)';
-                } else if (typeof content.content === 'string') {
-                    displayText = content.content;
-                } else {
-                    displayText = '(complex content)';
-                }
-            } else {
-                displayText = '(complex content)';
-            }
-        }
-
-        // Store full message object with raw content AND optional image data
-        const historyEntry = {
-            role: role,
-            content: rawContent, // Keep full raw content
-            displayText: typeof displayText === 'string' ? displayText : String(displayText),
-            model: msgModel,
-            base64Image: base64Image || null, // Store image data if provided
-            isRegenerated: isRegenerated || false,
-            timestamp: Date.now()
-        };
+        const historyEntry = createChatHistoryEntry(role, content, msgModel, base64Image, isRegenerated);
+        const displayText = historyEntry.displayText;
 
         this.chatHistory.push(historyEntry);
         const messageIndex = this.chatHistory.length - 1;
@@ -1073,19 +1057,7 @@ class FloatingChatUI {
      * @returns {Array} History formatted for API calls
      */
     _buildApiHistory(upToIndex) {
-        return this.chatHistory.slice(0, upToIndex + 1).map(m => {
-            // Extract text content for API (some models don't support complex content)
-            let textContent = m.displayText || m.content;
-            if (typeof textContent !== 'string') {
-                if (Array.isArray(textContent)) {
-                    const textPart = textContent.find(c => c.type === 'text');
-                    textContent = textPart ? textPart.text : '';
-                } else {
-                    textContent = String(textContent);
-                }
-            }
-            return { role: m.role, content: textContent };
-        });
+        return buildApiHistoryFromChat(this.chatHistory, upToIndex);
     }
 
     /**
@@ -1094,11 +1066,7 @@ class FloatingChatUI {
      * @returns {string} Combined text content
      */
     _extractTextFromHistory(upToIndex) {
-        return this.chatHistory
-            .slice(0, upToIndex + 1)
-            .filter(m => m.role === 'user')
-            .map(m => m.displayText || (typeof m.content === 'string' ? m.content : ''))
-            .join('\n');
+        return extractUserTextFromHistory(this.chatHistory, upToIndex);
     }
 
     /**
@@ -1559,74 +1527,9 @@ class FloatingChatUI {
      * @param {Object} msg - The message object from chatHistory
      */
     _renderClonedMessage(targetUI, msg) {
-        const msgDiv = document.createElement("div");
-        msgDiv.style.cssText = `max-width: 85%; padding: 12px 14px; border-radius: 10px; line-height: 1.5; word-wrap: break-word; font-size: 13px; position: relative;`;
-
-        if (msg.role === 'user') {
-            msgDiv.style.alignSelf = "flex-end";
-            msgDiv.style.background = "linear-gradient(135deg, #3a3a3a 0%, #2d2d2d 100%)";
-            msgDiv.style.color = "#e8e8e8";
-            msgDiv.style.borderRadius = "10px 10px 2px 10px";
-            msgDiv.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
-
-            // Check for image
-            if (msg.base64Image) {
-                const imgContainer = document.createElement('div');
-                imgContainer.style.cssText = `margin-bottom: 8px; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); background: #1a1a1a; position: relative;`;
-
-                const thumbnail = document.createElement('img');
-                thumbnail.src = `data:image/png;base64,${msg.base64Image}`;
-                thumbnail.style.cssText = `width: 100%; max-height: 120px; object-fit: cover; cursor: pointer; display: block;`;
-                thumbnail.onclick = () => targetUI._showImageModal(`data:image/png;base64,${msg.base64Image}`);
-
-                const overlay = document.createElement('div');
-                overlay.style.cssText = `position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.6); border-radius: 4px; padding: 2px 6px; font-size: 10px; color: #ccc;`;
-                overlay.textContent = '📷';
-
-                imgContainer.appendChild(thumbnail);
-                imgContainer.appendChild(overlay);
-                msgDiv.appendChild(imgContainer);
-            }
-
-            const textLabel = document.createElement('span');
-            textLabel.style.cssText = "opacity: 0.9; font-size: 12px;";
-            textLabel.textContent = msg.displayText || '';
-            msgDiv.appendChild(textLabel);
-        } else {
-            msgDiv.style.alignSelf = "flex-start";
-            msgDiv.style.background = "rgba(255,255,255,0.05)";
-            msgDiv.style.color = "#e8e8e8";
-            msgDiv.style.border = "1px solid rgba(255,255,255,0.08)";
-            msgDiv.style.borderRadius = "10px 10px 10px 2px";
-
-            const modelLabel = targetUI._getModelDisplayName(msg.model);
-            const labelDiv = document.createElement("div");
-            labelDiv.style.cssText = "font-size: 10px; color: #ff6b4a; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; display: inline-flex; align-items: center; gap: 4px; background: rgba(255,107,74,0.1); padding: 3px 8px; border-radius: 4px;";
-            labelDiv.innerHTML = `<span style="font-size: 11px;">✨</span> ${modelLabel}`;
-            msgDiv.appendChild(labelDiv);
-
-            const contentDiv = document.createElement("div");
-            contentDiv.style.cssText = "max-height: 350px; overflow-y: auto;";
-            const text = msg.displayText || (typeof msg.content === 'string' ? msg.content : '');
-            if (typeof parseMarkdown === 'function') {
-                contentDiv.innerHTML = parseMarkdown(sanitizeModelText(text));
-                // Attach copy handlers to code blocks
-                if (typeof attachCodeBlockCopyHandlers === 'function') {
-                    attachCodeBlockCopyHandlers(contentDiv);
-                }
-            } else {
-                contentDiv.innerText = text;
-            }
-            msgDiv.appendChild(contentDiv);
-        }
-
-        targetUI.chatBody.appendChild(msgDiv);
+        renderClonedChatMessage(targetUI, msg);
     }
 
-    /**
-     * Get the next available model not currently in use
-     * @returns {string|null}
-     */
     _getNextAvailableModel() {
         const usedModels = WindowManager.windows.map(w => w.currentModel);
         for (const m of this.availableModels) {
@@ -1665,13 +1568,7 @@ class FloatingChatUI {
         const modeToUse = mode || this.currentMode || 'short';
 
         // Use displayText for API calls (compatible format) while preserving model attribution
-        const formattedHistory = this.chatHistory.map(msg => {
-            const textContent = msg.displayText || (typeof msg.content === 'string' ? msg.content : '');
-            if (msg.model && msg.role === 'assistant') {
-                return { role: msg.role, content: `[Response from ${this._getModelDisplayName(msg.model)}]: ${textContent}` };
-            }
-            return { role: msg.role, content: textContent };
-        });
+        const formattedHistory = formatChatHistoryForApi(this.chatHistory, this._getModelDisplayName.bind(this));
 
         try {
             const response = await chrome.runtime.sendMessage({
@@ -1833,3 +1730,5 @@ class FloatingChatUI {
         });
     }
 }
+
+

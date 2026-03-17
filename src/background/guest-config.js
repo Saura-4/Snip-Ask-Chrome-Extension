@@ -7,7 +7,36 @@ import { getDeviceFingerprint } from './fingerprint.js';
 // --- CONFIGURATION ---
 
 const GUEST_WORKER_URL = 'https://snip-ask-guest.saurav04042004.workers.dev/';
-const GUEST_DEFAULT_MODEL = 'meta-llama/llama-4-maverick-17b-128e-instruct';
+// Keep this aligned with a stable, widely-available Groq model.
+// Guest mode uses this only as a fallback when the user's selection isn't a Groq model.
+const GUEST_DEFAULT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+function extractErrorMessage(errorLike, fallback = 'Guest Mode service error. Please try again later.') {
+    if (!errorLike) return fallback;
+    if (typeof errorLike === 'string') return errorLike;
+
+    if (Array.isArray(errorLike)) {
+        const parts = errorLike
+            .map((item) => extractErrorMessage(item, ''))
+            .filter(Boolean);
+        return parts.join(' ').trim() || fallback;
+    }
+
+    if (typeof errorLike === 'object') {
+        const preferredFields = ['message', 'error', 'detail', 'details', 'status', 'code'];
+        for (const field of preferredFields) {
+            const value = extractErrorMessage(errorLike[field], '');
+            if (value) return value;
+        }
+
+        const values = Object.values(errorLike)
+            .map((value) => extractErrorMessage(value, ''))
+            .filter(Boolean);
+        return values.join(' ').trim() || fallback;
+    }
+
+    return String(errorLike);
+}
 
 // --- INSTANCE ID MANAGEMENT ---
 
@@ -129,7 +158,14 @@ async function makeGuestRequest(requestBody, externalSignal = null) {
     }
     clearTimeout(timeoutId);
 
-    const data = await response.json();
+    let data;
+    try {
+        data = await response.json();
+    } catch {
+        throw new Error(response.ok
+            ? 'Guest Mode returned an invalid response. Please try again.'
+            : 'Guest Mode service error. Please try again later.');
+    }
 
     // Handle errors from anti-abuse system
     if (data.code === 'BANNED') {
@@ -153,7 +189,7 @@ async function makeGuestRequest(requestBody, externalSignal = null) {
     }
 
     if (!response.ok) {
-        throw new Error(data.error || 'Guest Mode service error. Please try again later.');
+        throw new Error(extractErrorMessage(data.error, 'Guest Mode service error. Please try again later.'));
     }
 
     return data;
