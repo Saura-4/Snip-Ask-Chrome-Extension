@@ -491,6 +491,92 @@ class GeminiService extends AbstractAIService {
     }
 }
 
+// --- OPENAI-COMPATIBLE CLOUD PROVIDERS ---
+class OpenAICompatibleService extends AbstractAIService {
+    constructor(apiKey, modelName, interactionMode, customPrompt, customModes, options = {}) {
+        super(apiKey, modelName, interactionMode, customPrompt, customModes);
+        this.actualModel = normalizeProviderScopedModelName(modelName);
+        this.apiEndpoint = options.apiEndpoint;
+        this.providerName = options.providerName;
+        this.headers = options.headers || {};
+        this.timeoutMs = options.timeoutMs || CLOUD_TIMEOUT_MS;
+        this.extraBody = options.extraBody || null;
+    }
+
+    async chat(messages, signal = null) {
+        const finalMessages = [...messages];
+        if (finalMessages.length === 0 || finalMessages[0].role !== 'system') {
+            finalMessages.unshift({ role: "system", content: this._getSystemInstruction() });
+        }
+
+        const requestBody = {
+            messages: finalMessages,
+            model: this.actualModel,
+            temperature: 0.3,
+            max_tokens: 2048
+        };
+        if (this.extraBody) {
+            Object.assign(requestBody, this.extraBody);
+        }
+
+        const response = await fetchWithTimeout(this.apiEndpoint, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${this.apiKey}`,
+                "Content-Type": "application/json",
+                ...this.headers
+            },
+            body: JSON.stringify(requestBody)
+        }, this.timeoutMs, signal);
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(normalizeErrorMessage(response, data, this.providerName));
+
+        const text = data.choices?.[0]?.message?.content || "No answer.";
+        const usage = data.usage || {};
+        return {
+            text,
+            model: data.model || this.actualModel,
+            tokenUsage: {
+                promptTokens: usage.prompt_tokens || 0,
+                completionTokens: usage.completion_tokens || 0,
+                totalTokens: usage.total_tokens || 0
+            }
+        };
+    }
+
+    async askImage(base64Image, signal = null) {
+        const promptText = this._createImagePrompt();
+        const userMsg = {
+            role: "user",
+            content: [
+                { type: "text", text: promptText },
+                { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+            ]
+        };
+        const result = await this.chat([userMsg], signal);
+        return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
+    }
+
+    async askText(rawText, signal = null) {
+        const sanitized = rawText
+            .replace(/</g, "\\<")
+            .replace(/>/g, "\\>");
+        const userMsg = { role: "user", content: `<user_snip>\n${sanitized}\n</user_snip>` };
+        const result = await this.chat([userMsg], signal);
+        return { answer: result.text, model: result.model, tokenUsage: result.tokenUsage, initialUserMessage: userMsg };
+    }
+}
+
+class OpenAIService extends OpenAICompatibleService {
+    constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
+        super(apiKey, modelName, interactionMode, customPrompt, customModes, {
+            apiEndpoint: "https://api.openai.com/v1/chat/completions",
+            providerName: "OpenAI"
+        });
+    }
+}
+
 // --- OPENROUTER ---
 class OpenRouterService extends AbstractAIService {
     constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
@@ -766,6 +852,10 @@ export function getAIService(apiKeyOrHost, modelName, interactionMode, customPro
     // Check OpenRouter second
     if (modelName && modelName.startsWith('openrouter:')) {
         return new OpenRouterService(apiKeyOrHost, modelName, interactionMode, customPrompt, customModes);
+    }
+
+    if (modelName && modelName.startsWith('openai:')) {
+        return new OpenAIService(apiKeyOrHost, modelName, interactionMode, customPrompt, customModes);
     }
 
     // Detect Gemini or Gemma models (Cloud)

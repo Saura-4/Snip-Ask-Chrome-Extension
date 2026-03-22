@@ -295,12 +295,27 @@ function showErrorToast(message) {
 
     // Check if this is an API key error
     const lowerMessage = normalizedMessage.toLowerCase();
-    const isKeyError = lowerMessage.includes('api key') ||
+    const isUnauthorizedExtension = lowerMessage.includes('unauthorized extension') ||
+        lowerMessage.includes('invalid_extension_id') ||
+        lowerMessage.includes('invalid_origin');
+
+    const isKeyError = !isUnauthorizedExtension && (lowerMessage.includes('api key') ||
         lowerMessage.includes('invalid') ||
         lowerMessage.includes('401') ||
-        lowerMessage.includes('unauthorized');
+        lowerMessage.includes('unauthorized'));
 
-    if (isKeyError) {
+    if (isUnauthorizedExtension) {
+        const messageLine = document.createElement('div');
+        messageLine.style.marginBottom = '8px';
+        messageLine.textContent = 'Warning: ' + normalizedMessage;
+
+        const helpLine = document.createElement('div');
+        helpLine.style.cssText = 'font-size: 12px; color: #ccc;';
+        helpLine.textContent = 'This build is not allowlisted for Guest Mode.';
+
+        toast.appendChild(messageLine);
+        toast.appendChild(helpLine);
+    } else if (isKeyError) {
         const messageLine = document.createElement('div');
         messageLine.style.marginBottom = '8px';
         messageLine.textContent = 'Warning: ' + normalizedMessage;

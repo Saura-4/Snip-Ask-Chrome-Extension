@@ -14,6 +14,7 @@ import {
   toggleCustomModel,
   getMergedModelsWithCustom
 } from '../background/models/models-config.js';
+import { CONTENT_SCRIPT_FILES, isRestrictedPage } from '../background/core/content-script-files.js';
 import { getMissingConfigMessage } from './modules/model-validation.js';
 import {
   getProvidersToShow,
@@ -26,6 +27,7 @@ import {
   populateModesList,
   validateModeInput
 } from './modules/popup-modes.js';
+import { PUBLIC_ANALYTICS_URL } from '../background/analytics.js';
 
 // --- DEFAULT DATA ---
 const DEFAULT_MODES = [
@@ -37,6 +39,7 @@ const DEFAULT_MODES = [
 const API_KEY_CONFIG = {
   groq: { id: 'apiKey', placeholder: 'Groq Key (gsk_...)', type: 'password', storageKey: 'groqKey' },
   google: { id: 'geminiKey', placeholder: 'Google Key (AIza...)', type: 'password', storageKey: 'geminiKey' },
+  openai: { id: 'openaiKey', placeholder: 'OpenAI Key (sk-...)', type: 'password', storageKey: 'openaiKey' },
   openrouter: { id: 'openrouterKey', placeholder: 'OpenRouter Key (sk-or-...)', type: 'password', storageKey: 'openrouterKey' },
   ollama: { id: 'ollamaHost', placeholder: 'Ollama URL (http://localhost:11434)', type: 'text', storageKey: 'ollamaHost' }
 };
@@ -117,21 +120,30 @@ async function initializeDefaults() {
 async function loadSettings() {
   const result = await chrome.storage.local.get([
     'customModes', 'enabledProviders', 'enabledModels', 'selectedModel', 'selectedMode',
-    'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'customPrompt',
-    'providerHiddenSince', 'hideContextMenu'
+    'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost', 'customPrompt',
+    'providerHiddenSince', 'hideContextMenu', 'experimentalAnalyticsOptIn', 'hiddenModels'
   ]);
 
   // Check and cleanup old keys
   await checkKeyCleanup(result.enabledProviders || DEFAULT_PROVIDERS, result.providerHiddenSince || {});
+  await checkGuestStatus();
 
   // Load providers into settings panel
   loadProviderToggles(result.enabledProviders || DEFAULT_PROVIDERS);
 
   // Load models list in settings
-  loadModelsList(result.enabledProviders || DEFAULT_PROVIDERS, result.enabledModels || getDefaultEnabledModels());
+  loadModelsList(
+    result.enabledProviders || DEFAULT_PROVIDERS,
+    result.enabledModels || getDefaultEnabledModels()
+  );
 
   // Load models based on enabled providers and enabled models
-  await loadModels(result.enabledProviders || DEFAULT_PROVIDERS, result.enabledModels || getDefaultEnabledModels(), result.selectedModel);
+  await loadModels(
+    result.enabledProviders || DEFAULT_PROVIDERS,
+    result.enabledModels || getDefaultEnabledModels(),
+    result.hiddenModels || {},
+    result.selectedModel
+  );
 
   // Load API key inputs based on enabled providers
   loadApiKeyInputs(result.enabledProviders || DEFAULT_PROVIDERS, result);
@@ -151,6 +163,11 @@ async function loadSettings() {
     hideContextMenuToggle.checked = result.hideContextMenu === true;
   }
 
+  const experimentalAnalyticsOptIn = document.getElementById('experimentalAnalyticsOptIn');
+  if (experimentalAnalyticsOptIn) {
+    experimentalAnalyticsOptIn.checked = result.experimentalAnalyticsOptIn === true;
+  }
+
   // Handle custom prompt visibility
   const modeSelect = document.getElementById('modeSelect');
   const customPromptContainer = document.getElementById('customPromptContainer');
@@ -167,6 +184,7 @@ async function loadSettings() {
 function loadProviderToggles(enabledProviders) {
   document.getElementById('providerGroq').checked = enabledProviders.groq !== false;
   document.getElementById('providerGoogle').checked = enabledProviders.google === true;
+  document.getElementById('providerOpenAI').checked = enabledProviders.openai === true;
   document.getElementById('providerOpenRouter').checked = enabledProviders.openrouter === true;
   document.getElementById('providerOllama').checked = enabledProviders.ollama === true;
 }
@@ -174,11 +192,16 @@ function loadProviderToggles(enabledProviders) {
 // Lightweight refresh that only updates models dropdown without recreating inputs
 // Used when guest mode status changes during typing to avoid losing input focus
 async function refreshModelsOnly() {
-  const result = await chrome.storage.local.get(['enabledProviders', 'enabledModels', 'selectedModel']);
-  await loadModels(result.enabledProviders || DEFAULT_PROVIDERS, result.enabledModels || getDefaultEnabledModels(), result.selectedModel);
+  const result = await chrome.storage.local.get(['enabledProviders', 'enabledModels', 'hiddenModels', 'selectedModel']);
+  await loadModels(
+    result.enabledProviders || DEFAULT_PROVIDERS,
+    result.enabledModels || getDefaultEnabledModels(),
+    result.hiddenModels || {},
+    result.selectedModel
+  );
 }
 
-async function loadModels(enabledProviders, enabledModels, selectedModel) {
+async function loadModels(enabledProviders, enabledModels, hiddenModels, selectedModel) {
   const modelSelect = document.getElementById('modelSelect');
   const providersToShow = getProvidersToShow(enabledProviders, isGuestModeActive, GUEST_MODE_PROVIDERS);
   const customSavedModels = await getCustomSavedModels();
@@ -189,6 +212,7 @@ async function loadModels(enabledProviders, enabledModels, selectedModel) {
     mergedModels,
     providersToShow,
     enabledModels,
+    hiddenModels,
     selectedModel,
     isGuestModeActive,
     providerLabels: PROVIDER_LABELS
@@ -203,6 +227,10 @@ async function loadModelsList(enabledProviders, enabledModels) {
   const modelsList = document.getElementById('modelsList');
   if (!modelsList) return;
 
+  const openProviders = Array.from(modelsList.querySelectorAll('.model-provider-group[open]'))
+    .map((group) => group.dataset.provider);
+  const hiddenStorage = await chrome.storage.local.get(['hiddenModels']);
+  const hiddenModels = hiddenStorage.hiddenModels || {};
   const customSavedModels = await getCustomSavedModels();
   populateModelsList({
     modelsList,
@@ -210,7 +238,9 @@ async function loadModelsList(enabledProviders, enabledModels) {
     customSavedModels,
     enabledProviders,
     enabledModels,
-    providerLabels: PROVIDER_LABELS
+    hiddenModels,
+    providerLabels: PROVIDER_LABELS,
+    openProviders
   });
 
   modelsList.querySelectorAll('.model-toggle').forEach(toggle => {
@@ -218,6 +248,29 @@ async function loadModelsList(enabledProviders, enabledModels) {
       const modelValue = e.target.dataset.model;
       const result = await chrome.storage.local.get(['enabledModels']);
       const nextEnabledModels = result.enabledModels || getDefaultEnabledModels();
+      const modelProvider = Object.entries(ALL_MODELS).find(([, models]) =>
+        models.some((model) => model.value === modelValue)
+      )?.[0];
+
+      if (!e.target.checked && modelProvider) {
+        const customSavedModels = await getCustomSavedModels();
+        const hiddenStorage = await chrome.storage.local.get(['hiddenModels']);
+        const hiddenModels = hiddenStorage.hiddenModels || {};
+        const remainingRegularModels = (ALL_MODELS[modelProvider] || [])
+          .filter((model) => !model.value.endsWith(':custom') && model.value !== modelValue && hiddenModels[model.value] !== true)
+          .filter((model) => nextEnabledModels[model.value] !== false)
+          .length;
+        const remainingCustomModels = (customSavedModels[modelProvider] || [])
+          .filter((model) => model.enabled !== false)
+          .length;
+
+        if (remainingRegularModels + remainingCustomModels <= 0) {
+          e.target.checked = true;
+          alert('Keep at least one model enabled for each provider.');
+          return;
+        }
+      }
+
       nextEnabledModels[modelValue] = e.target.checked;
       await chrome.storage.local.set({ enabledModels: nextEnabledModels });
       await loadSettings();
@@ -236,12 +289,51 @@ async function loadModelsList(enabledProviders, enabledModels) {
   modelsList.querySelectorAll('.delete-custom-model-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const button = e.currentTarget;
+      if (button.disabled) {
+        return;
+      }
       const modelValue = button.dataset.model;
       const provider = button.dataset.provider;
       if (confirm('Delete this custom model?')) {
         await removeCustomModel(provider, modelValue);
         await loadSettings();
       }
+    });
+  });
+
+  modelsList.querySelectorAll('.remove-model-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const button = e.currentTarget;
+      if (button.disabled || button.classList.contains('delete-custom-model-btn')) {
+        return;
+      }
+
+      const modelValue = button.dataset.model;
+      const result = await chrome.storage.local.get(['enabledModels', 'hiddenModels']);
+      const nextEnabledModels = result.enabledModels || getDefaultEnabledModels();
+      const nextHiddenModels = result.hiddenModels || {};
+      nextEnabledModels[modelValue] = false;
+      nextHiddenModels[modelValue] = true;
+      await chrome.storage.local.set({ enabledModels: nextEnabledModels, hiddenModels: nextHiddenModels });
+      await loadSettings();
+    });
+  });
+
+  modelsList.querySelectorAll('.restore-provider-models-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const button = e.currentTarget;
+      const provider = button.dataset.provider;
+      const result = await chrome.storage.local.get(['enabledModels', 'hiddenModels']);
+      const nextEnabledModels = result.enabledModels || getDefaultEnabledModels();
+      const nextHiddenModels = { ...(result.hiddenModels || {}) };
+      (ALL_MODELS[provider] || []).forEach((model) => {
+        if (!model.value.endsWith(':custom') && nextHiddenModels[model.value] === true) {
+          delete nextHiddenModels[model.value];
+          nextEnabledModels[model.value] = true;
+        }
+      });
+      await chrome.storage.local.set({ enabledModels: nextEnabledModels, hiddenModels: nextHiddenModels });
+      await loadSettings();
     });
   });
 }
@@ -290,6 +382,19 @@ function loadApiKeyInputs(enabledProviders, savedValues) {
   if (container.children.length === 0) {
     container.innerHTML = '<div style="font-size: 11px; color: #666;">No providers enabled</div>';
   }
+}
+
+async function validateCustomModelBeforeSave(customModel) {
+  const response = await chrome.runtime.sendMessage({
+    action: 'VALIDATE_CUSTOM_MODEL',
+    model: customModel.modelValue
+  });
+
+  if (!response?.success) {
+    throw new Error(response?.error || 'Model validation failed.');
+  }
+
+  return response;
 }
 
 function loadModes(modes, selectedMode) {
@@ -392,7 +497,7 @@ function setupEventListeners() {
   });
 
   // Provider toggles
-  ['Groq', 'Google', 'OpenRouter', 'Ollama'].forEach(provider => {
+  ['Groq', 'Google', 'OpenAI', 'OpenRouter', 'Ollama'].forEach(provider => {
     const checkbox = document.getElementById('provider' + provider);
     checkbox?.addEventListener('change', async () => {
       const result = await chrome.storage.local.get(['enabledProviders']);
@@ -423,6 +528,13 @@ function setupEventListeners() {
     }
 
     if (customModel.provider) {
+      try {
+        await validateCustomModelBeforeSave(customModel);
+      } catch (error) {
+        alert(`Unable to validate this model before saving.\n\n${error.message}`);
+        await loadSettings();
+        return;
+      }
       await saveCustomModel(customModel.provider, customModel.modelValue, customModel.displayName);
       await chrome.storage.local.set({ selectedModel: customModel.modelValue });
       await loadSettings();
@@ -482,8 +594,8 @@ function setupEventListeners() {
   // Reset All Keys
   document.getElementById('resetAllKeys')?.addEventListener('click', async (e) => {
     e.preventDefault();
-    if (confirm('⚠️ Are you sure you want to reset all API keys? This will clear all stored keys (Groq, Google, OpenRouter, and Ollama host).')) {
-      await chrome.storage.local.remove(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
+    if (confirm('⚠️ Are you sure you want to reset all API keys? This will clear all stored keys (Groq, Google, OpenAI, OpenRouter, and Ollama host).')) {
+      await chrome.storage.local.remove(['groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost']);
       alert('✅ All API keys have been cleared.');
       await loadSettings(); // Reload to clear the input fields
     }
@@ -607,6 +719,18 @@ function setupEventListeners() {
     });
   }
 
+  const experimentalAnalyticsOptIn = document.getElementById('experimentalAnalyticsOptIn');
+  if (experimentalAnalyticsOptIn) {
+    experimentalAnalyticsOptIn.addEventListener('change', async () => {
+      await chrome.storage.local.set({ experimentalAnalyticsOptIn: experimentalAnalyticsOptIn.checked });
+    });
+  }
+
+  document.getElementById('viewPublicAnalyticsLink')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: PUBLIC_ANALYTICS_URL });
+  });
+
   // Guest mode key links
   document.getElementById('getOwnKeyLink')?.addEventListener('click', (e) => {
     e.preventDefault();
@@ -694,9 +818,11 @@ async function deleteMode(modeId) {
 
 // --- SNIP FUNCTIONALITY ---
 async function startSnip() {
-  const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
+  const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'selectedMode', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost']);
   const modelSelect = document.getElementById('modelSelect');
+  const modeSelect = document.getElementById('modeSelect');
   let model = modelSelect?.value || result.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
+  const mode = modeSelect?.value || result.selectedMode || 'short';
 
   const customModel = promptForCustomModel(model);
   if (customModel.cancelled) {
@@ -707,6 +833,12 @@ async function startSnip() {
     return;
   }
   if (customModel.provider) {
+    try {
+      await validateCustomModelBeforeSave(customModel);
+    } catch (error) {
+      alert(`Unable to validate this model before saving.\n\n${error.message}`);
+      return;
+    }
     model = customModel.modelValue;
     await saveCustomModel(customModel.provider, customModel.modelValue, customModel.displayName);
   }
@@ -727,32 +859,21 @@ async function startSnip() {
   if (tabs.length === 0) return;
 
   const tab = tabs[0];
-  if (!tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://") ||
-    tab.url.startsWith("https://chrome.google.com/webstore") || tab.url.startsWith("edge://") ||
-    tab.url.startsWith("about:")) {
+  if (isRestrictedPage(tab.url)) {
     alert("Cannot run on this restricted page.");
     return;
   }
 
   try {
-    await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP" });
+    await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP", model, mode });
     window.close();
   } catch (err) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: [
-          'src/content/utils.js',
-          'src/content/ui-helpers.js',
-          'src/content/chat/message-utils.js',
-          'src/content/chat/render-utils.js',
-          'src/content/window-manager.js',
-          'src/content/snip-selection.js',
-          'src/content/chat/floating-chat-ui.js',
-          'src/content/content.js'
-        ]
+        files: CONTENT_SCRIPT_FILES
       });
-      await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP" });
+      await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP", model, mode });
       window.close();
     } catch (injectErr) {
       alert("Could not start snip. Please refresh the page!");

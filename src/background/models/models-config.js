@@ -11,7 +11,6 @@ export const ALL_MODELS = {
         { value: 'groq/compound', name: 'Compound' },
         { value: 'groq/compound-mini', name: 'Compound Mini' },
         { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout (Vision)' },
-        { value: 'meta-llama/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick (Vision)' },
         { value: 'moonshotai/kimi-k2-instruct', name: 'Kimi k2 Instruct' },
         { value: 'moonshotai/kimi-k2-instruct-0905', name: 'Kimi k2 Instruct (0905)' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
@@ -30,6 +29,16 @@ export const ALL_MODELS = {
         { value: 'gemma-3-4b-it', name: 'Gemma 3 4B' },
         { value: 'gemma-3-1b-it', name: 'Gemma 3 1B' },
         { value: 'google:custom', name: 'Custom Model' }
+    ],
+    openai: [
+        { value: 'openai:gpt-5', name: 'GPT-5 (Vision)' },
+        { value: 'openai:gpt-5-mini', name: 'GPT-5 Mini (Vision)' },
+        { value: 'openai:gpt-5-nano', name: 'GPT-5 Nano (Vision)' },
+        { value: 'openai:gpt-4.1', name: 'GPT-4.1 (Vision)' },
+        { value: 'openai:gpt-4o', name: 'GPT-4o (Vision)' },
+        { value: 'openai:gpt-4o-mini', name: 'GPT-4o Mini (Vision)' },
+        { value: 'openai:gpt-4.1-mini', name: 'GPT-4.1 Mini' },
+        { value: 'openai:custom', name: 'Custom Model' }
     ],
     openrouter: [
         { value: 'openrouter:deepseek/deepseek-r1-0528:free', name: 'DeepSeek R1 (Free)' },
@@ -53,7 +62,6 @@ export const CHAT_WINDOW_MODELS = {
         { value: 'groq/compound', name: 'Compound' },
         { value: 'groq/compound-mini', name: 'Compound Mini' },
         { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout' },
-        { value: 'meta-llama/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick' },
         { value: 'moonshotai/kimi-k2-instruct', name: 'Kimi k2' },
         { value: 'moonshotai/kimi-k2-instruct-0905', name: 'Kimi k2 (0905)' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
@@ -68,6 +76,15 @@ export const CHAT_WINDOW_MODELS = {
         { value: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
         { value: 'gemma-3-27b-it', name: 'Gemma 3 27B' }
     ],
+    openai: [
+        { value: 'openai:gpt-5', name: 'GPT-5' },
+        { value: 'openai:gpt-5-mini', name: 'GPT-5 Mini' },
+        { value: 'openai:gpt-5-nano', name: 'GPT-5 Nano' },
+        { value: 'openai:gpt-4.1', name: 'GPT-4.1' },
+        { value: 'openai:gpt-4o', name: 'GPT-4o' },
+        { value: 'openai:gpt-4o-mini', name: 'GPT-4o Mini' },
+        { value: 'openai:gpt-4.1-mini', name: 'GPT-4.1 Mini' }
+    ],
     openrouter: [
         { value: 'openrouter:deepseek/deepseek-r1-0528:free', name: 'DeepSeek R1' }
     ],
@@ -81,10 +98,11 @@ export const CHAT_WINDOW_MODELS = {
  * Provider display labels
  */
 export const PROVIDER_LABELS = {
-    groq: '🚀 Groq (Fast)',
-    google: '✨ Google (Gemini)',
-    openrouter: '🌐 OpenRouter',
-    ollama: '🦙 Ollama (Local)'
+    groq: 'Groq',
+    google: 'Google (Gemini)',
+    openai: 'OpenAI',
+    openrouter: 'OpenRouter',
+    ollama: 'Ollama (Local)'
 };
 
 /**
@@ -93,6 +111,7 @@ export const PROVIDER_LABELS = {
 export const DEFAULT_PROVIDERS = {
     groq: true,
     google: false,
+    openai: false,
     openrouter: false,
     ollama: false
 };
@@ -103,6 +122,7 @@ export const DEFAULT_PROVIDERS = {
 export const GUEST_MODE_PROVIDERS = {
     groq: true,
     google: false,
+    openai: false,
     openrouter: false,
     ollama: false
 };
@@ -129,10 +149,10 @@ export function getDefaultEnabledModels() {
 export async function getCustomSavedModels() {
     try {
         const result = await chrome.storage.local.get(['customSavedModels']);
-        return result.customSavedModels || { groq: [], google: [], ollama: [], openrouter: [] };
+        return result.customSavedModels || { groq: [], google: [], openai: [], ollama: [], openrouter: [] };
     } catch (e) {
         console.error('Failed to get custom saved models:', e);
-        return { groq: [], google: [], ollama: [], openrouter: [] };
+        return { groq: [], google: [], openai: [], ollama: [], openrouter: [] };
     }
 }
 
@@ -259,7 +279,7 @@ export function getMergedModelsWithCustom(modelSource, customSavedModels) {
  * @param {Object} modelSource - Which model list to use (ALL_MODELS or CHAT_WINDOW_MODELS)
  * @returns {Array} Filtered list of models
  */
-export function getFilteredModels(enabledProviders, enabledModels, isGuestMode = false, modelSource = ALL_MODELS) {
+export function getFilteredModels(enabledProviders, enabledModels, hiddenModels = {}, isGuestMode = false, modelSource = ALL_MODELS) {
     // In guest mode, force only Groq provider
     const providersToUse = isGuestMode ? GUEST_MODE_PROVIDERS : enabledProviders;
 
@@ -272,6 +292,9 @@ export function getFilteredModels(enabledProviders, enabledModels, isGuestMode =
                     return;
                 }
                 if (isGuestMode && model.isCustom) {
+                    return;
+                }
+                if (hiddenModels[model.value] === true) {
                     return;
                 }
                 // In guest mode, show ALL Groq models; otherwise respect user settings
@@ -307,16 +330,29 @@ export function getFirstAvailableModel(filteredModels, preferredModel = null) {
  */
 export async function checkGuestModeStatus() {
     try {
-        const storage = await chrome.storage.local.get(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
+        const storage = await chrome.storage.local.get([
+            'enabledProviders',
+            'groqKey',
+            'geminiKey',
+            'openaiKey',
+            'openrouterKey',
+            'ollamaHost'
+        ]);
 
-        // Check if any key has actual content (even if invalid)
-        const hasGroqKey = storage.groqKey && storage.groqKey.trim().length > 0;
-        const hasGeminiKey = storage.geminiKey && storage.geminiKey.trim().length > 0;
-        const hasOpenRouterKey = storage.openrouterKey && storage.openrouterKey.trim().length > 0;
-        const hasOllamaHost = storage.ollamaHost && storage.ollamaHost.trim().length > 0;
+        const enabledProviders = {
+            ...DEFAULT_PROVIDERS,
+            ...(storage.enabledProviders || {})
+        };
+
+        // Only count fields that are visible in the API key section.
+        const hasGroqKey = enabledProviders.groq && storage.groqKey && storage.groqKey.trim().length > 0;
+        const hasGeminiKey = enabledProviders.google && storage.geminiKey && storage.geminiKey.trim().length > 0;
+        const hasOpenAIKey = enabledProviders.openai && storage.openaiKey && storage.openaiKey.trim().length > 0;
+        const hasOpenRouterKey = enabledProviders.openrouter && storage.openrouterKey && storage.openrouterKey.trim().length > 0;
+        const hasOllamaHost = enabledProviders.ollama && storage.ollamaHost && storage.ollamaHost.trim().length > 0;
 
         // Guest mode = NO keys entered at all
-        const isGuestMode = !hasGroqKey && !hasGeminiKey && !hasOpenRouterKey && !hasOllamaHost;
+        const isGuestMode = !hasGroqKey && !hasGeminiKey && !hasOpenAIKey && !hasOpenRouterKey && !hasOllamaHost;
 
         return {
             isGuestMode,
@@ -356,8 +392,8 @@ export function getEffectiveProviders(userProviders, isGuestMode) {
  * @param {boolean} isGuestMode - Whether in guest mode
  * @returns {Array} List of available models
  */
-export function getPopupModels(enabledProviders, enabledModels, isGuestMode) {
-    return getFilteredModels(enabledProviders, enabledModels, isGuestMode, ALL_MODELS);
+export function getPopupModels(enabledProviders, enabledModels, hiddenModels, isGuestMode) {
+    return getFilteredModels(enabledProviders, enabledModels, hiddenModels, isGuestMode, ALL_MODELS);
 }
 
 /**
@@ -368,12 +404,12 @@ export function getPopupModels(enabledProviders, enabledModels, isGuestMode) {
  * @param {boolean} isGuestMode - Whether in guest mode
  * @returns {Promise<Array>} List of available models
  */
-export async function getChatWindowModels(enabledProviders, enabledModels, isGuestMode) {
+export async function getChatWindowModels(enabledProviders, enabledModels, hiddenModels, isGuestMode) {
     // Get custom saved models and merge with static models
     const customSavedModels = await getCustomSavedModels();
     const mergedModels = getMergedModelsWithCustom(CHAT_WINDOW_MODELS, customSavedModels);
 
-    return getFilteredModels(enabledProviders, enabledModels, isGuestMode, mergedModels);
+    return getFilteredModels(enabledProviders, enabledModels, hiddenModels, isGuestMode, mergedModels);
 }
 
 /**

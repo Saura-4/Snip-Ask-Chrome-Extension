@@ -9,7 +9,15 @@ import { getDeviceFingerprint } from './fingerprint.js';
 const GUEST_WORKER_URL = 'https://snip-ask-guest.saurav04042004.workers.dev/';
 // Keep this aligned with a stable, widely-available Groq model.
 // Guest mode uses this only as a fallback when the user's selection isn't a Groq model.
-const GUEST_DEFAULT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+const GUEST_DEFAULT_MODEL = 'groq/compound';
+const DEFAULT_PROVIDER_VISIBILITY = {
+    groq: true,
+    google: false,
+    openai: false,
+    openrouter: false,
+    ollama: false
+};
+const GUEST_SAFE_PAYLOAD_LIMIT_BYTES = 700 * 1024;
 
 function extractErrorMessage(errorLike, fallback = 'Guest Mode service error. Please try again later.') {
     if (!errorLike) return fallback;
@@ -62,17 +70,29 @@ async function getInstanceId() {
  * Returns true only if ALL API key fields are empty or contain only whitespace
  */
 async function isGuestMode() {
-    const storage = await chrome.storage.local.get(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost']);
+    const storage = await chrome.storage.local.get([
+        'enabledProviders',
+        'groqKey',
+        'geminiKey',
+        'openaiKey',
+        'openrouterKey',
+        'ollamaHost'
+    ]);
 
-    // Check if any key has actual content (even if it's invalid)
-    // If user enters ANY text, we consider them NOT in guest mode
-    const hasGroqKey = storage.groqKey && storage.groqKey.trim().length > 0;
-    const hasGeminiKey = storage.geminiKey && storage.geminiKey.trim().length > 0;
-    const hasOpenRouterKey = storage.openrouterKey && storage.openrouterKey.trim().length > 0;
-    const hasOllamaHost = storage.ollamaHost && storage.ollamaHost.trim().length > 0;
+    const enabledProviders = {
+        ...DEFAULT_PROVIDER_VISIBILITY,
+        ...(storage.enabledProviders || {})
+    };
+
+    // Only count fields that are visible in the API key section.
+    const hasGroqKey = enabledProviders.groq && storage.groqKey && storage.groqKey.trim().length > 0;
+    const hasGeminiKey = enabledProviders.google && storage.geminiKey && storage.geminiKey.trim().length > 0;
+    const hasOpenAIKey = enabledProviders.openai && storage.openaiKey && storage.openaiKey.trim().length > 0;
+    const hasOpenRouterKey = enabledProviders.openrouter && storage.openrouterKey && storage.openrouterKey.trim().length > 0;
+    const hasOllamaHost = enabledProviders.ollama && storage.ollamaHost && storage.ollamaHost.trim().length > 0;
 
     // Guest mode = NO keys entered at all
-    return !hasGroqKey && !hasGeminiKey && !hasOpenRouterKey && !hasOllamaHost;
+    return !hasGroqKey && !hasGeminiKey && !hasOpenAIKey && !hasOpenRouterKey && !hasOllamaHost;
 }
 
 /**
@@ -108,6 +128,12 @@ async function makeGuestRequest(requestBody, externalSignal = null) {
         }
     };
 
+    const payloadJson = JSON.stringify(enrichedBody);
+    const payloadBytes = new TextEncoder().encode(payloadJson).length;
+    if (payloadBytes > GUEST_SAFE_PAYLOAD_LIMIT_BYTES) {
+        throw new Error(`Guest request too large (${Math.round(payloadBytes / 1024)} KB). Try a smaller snip or shorter chat context.`);
+    }
+
     // Use chrome.runtime.id as origin validation token
     // This is dynamic - no hardcoding needed
     // After publishing, this will be your consistent extension ID
@@ -142,7 +168,7 @@ async function makeGuestRequest(requestBody, externalSignal = null) {
                 'Content-Type': 'application/json',
                 'X-Extension-Id': extensionId  // Dynamic origin validation
             },
-            body: JSON.stringify(enrichedBody),
+            body: payloadJson,
             signal: controller.signal
         });
     } catch (error) {
@@ -186,6 +212,10 @@ async function makeGuestRequest(requestBody, externalSignal = null) {
 
     if (data.code === 'MISSING_ID') {
         throw new Error('Please update your extension to the latest version.');
+    }
+
+    if (data.code === 'INVALID_EXTENSION_ID' || data.code === 'INVALID_ORIGIN') {
+        throw new Error('Unauthorized extension. This build is not allowed to use Guest Mode.');
     }
 
     if (!response.ok) {

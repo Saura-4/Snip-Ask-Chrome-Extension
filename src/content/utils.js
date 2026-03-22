@@ -51,7 +51,8 @@ function sanitizeHtml(html) {
   if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
     return DOMPurify.sanitize(html, DOMPURIFY_CONFIG);
   }
-  // Fallback: return as-is (our manual escaping should still protect)
+  // parseMarkdown already escapes untrusted input before generating our own
+  // limited HTML wrappers, so DOMPurify is optional enhancement here.
   return html;
 }
 
@@ -119,6 +120,7 @@ function parseMarkdown(text) {
         return katex.renderToString(mathContent, {
           displayMode: isBlock,
           throwOnError: false,
+          strict: false,
           output: 'html'
         });
       } catch (e) {

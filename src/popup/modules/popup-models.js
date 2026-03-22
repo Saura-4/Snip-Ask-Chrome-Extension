@@ -7,6 +7,7 @@ export function populateModelSelect({
   mergedModels,
   providersToShow,
   enabledModels,
+  hiddenModels,
   selectedModel,
   isGuestModeActive,
   providerLabels
@@ -20,7 +21,7 @@ export function populateModelSelect({
 
     const visibleModels = isGuestModeActive
       ? models.filter((model) => !model.value.endsWith(':custom') && !model.isCustom)
-      : models;
+      : models.filter((model) => hiddenModels?.[model.value] !== true);
 
     const enabledModelsInProvider = isGuestModeActive && provider === 'groq'
       ? visibleModels
@@ -70,30 +71,97 @@ export function populateModelsList({
   customSavedModels,
   enabledProviders,
   enabledModels,
-  providerLabels
+  hiddenModels,
+  providerLabels,
+  openProviders = []
 }) {
   modelsList.innerHTML = '';
 
+  const getActiveModelCount = (provider) => {
+    const regularEnabledCount = (allModels[provider] || [])
+      .filter((model) => !model.value.endsWith(':custom') && hiddenModels?.[model.value] !== true)
+      .filter((model) => enabledModels[model.value] !== false)
+      .length;
+    const customEnabledCount = (customSavedModels[provider] || [])
+      .filter((model) => model.enabled !== false)
+      .length;
+    return regularEnabledCount + customEnabledCount;
+  };
+
+  const createRemoveButton = ({ modelValue, provider, disabled, title }) => {
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'remove-model-btn';
+    deleteButton.dataset.model = modelValue;
+    deleteButton.dataset.provider = provider;
+    deleteButton.title = title;
+    deleteButton.disabled = disabled;
+    deleteButton.style.cssText = `background: none; border: none; color: ${disabled ? '#555' : '#888'}; cursor: ${disabled ? 'not-allowed' : 'pointer'}; padding: 4px 8px; transition: color 0.2s;`;
+    deleteButton.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+    `;
+    return deleteButton;
+  };
+
   for (const [provider, models] of Object.entries(allModels)) {
-    const providerHeader = document.createElement('div');
+    const providerGroup = document.createElement('details');
+    providerGroup.className = 'model-provider-group';
+    providerGroup.dataset.provider = provider;
+    providerGroup.open = openProviders.includes(provider);
+
+    const providerHeader = document.createElement('summary');
     providerHeader.className = 'model-provider-header';
+    const providerHeaderLeft = document.createElement('div');
+    providerHeaderLeft.className = 'model-provider-header-left';
+
     const providerLabel = document.createElement('span');
+    providerLabel.className = 'model-provider-title';
     providerLabel.textContent = providerLabels[provider];
-    providerHeader.appendChild(providerLabel);
+
+    const visibleBuiltInModels = models.filter((model) =>
+      !model.value.endsWith(':custom') && hiddenModels?.[model.value] !== true
+    ).length;
+    const visibleCustomModels = (customSavedModels[provider] || []).length;
+
+    const providerCount = document.createElement('span');
+    providerCount.className = 'model-provider-count';
+    providerCount.textContent = `${visibleBuiltInModels + visibleCustomModels} models`;
+
+    providerHeaderLeft.appendChild(providerLabel);
+    providerHeaderLeft.appendChild(providerCount);
+    providerHeader.appendChild(providerHeaderLeft);
+
     if (!enabledProviders[provider]) {
       const badge = document.createElement('span');
       badge.className = 'provider-disabled-badge';
       badge.textContent = '(Provider disabled)';
-      providerHeader.appendChild(document.createTextNode(' '));
       providerHeader.appendChild(badge);
     }
-    modelsList.appendChild(providerHeader);
+
+    const chevron = document.createElement('span');
+    chevron.className = 'model-provider-chevron';
+    chevron.textContent = '▾';
+    providerHeader.appendChild(chevron);
+    providerGroup.appendChild(providerHeader);
+
+    const providerContent = document.createElement('div');
+    providerContent.className = 'model-provider-content';
+
+    const removedModels = models.filter((model) =>
+      !model.value.endsWith(':custom') && hiddenModels?.[model.value] === true
+    );
 
     models.forEach((model) => {
       if (model.value.endsWith(':custom')) {
         return;
       }
+      if (hiddenModels?.[model.value] === true) {
+        return;
+      }
 
+      const activeModelCount = getActiveModelCount(provider);
       const div = document.createElement('div');
       div.className = 'model-item';
       if (!enabledProviders[provider]) {
@@ -119,13 +187,26 @@ export function populateModelsList({
       toggleLabel.appendChild(input);
       toggleLabel.appendChild(slider);
 
+      const removeButton = createRemoveButton({
+        modelValue: model.value,
+        provider,
+        disabled: activeModelCount <= 1 || !enabledProviders[provider],
+        title: activeModelCount <= 1 ? 'Keep at least one model in this provider' : 'Hide model from selector'
+      });
+
+      const actions = document.createElement('div');
+      actions.className = 'model-actions';
+      actions.appendChild(removeButton);
+      actions.appendChild(toggleLabel);
+
       div.appendChild(info);
-      div.appendChild(toggleLabel);
-      modelsList.appendChild(div);
+      div.appendChild(actions);
+      providerContent.appendChild(div);
     });
 
     if (customSavedModels[provider] && customSavedModels[provider].length > 0) {
       customSavedModels[provider].forEach((model) => {
+        const activeModelCount = getActiveModelCount(provider);
         const div = document.createElement('div');
         div.className = 'model-item';
         if (!enabledProviders[provider]) {
@@ -144,18 +225,13 @@ export function populateModelsList({
         info.appendChild(name);
         info.appendChild(badge);
 
-        const deleteButton = document.createElement('button');
+        const deleteButton = createRemoveButton({
+          modelValue: model.value,
+          provider,
+          disabled: activeModelCount <= 1 || !enabledProviders[provider],
+          title: activeModelCount <= 1 ? 'Keep at least one model in this provider' : 'Delete custom model'
+        });
         deleteButton.className = 'delete-custom-model-btn';
-        deleteButton.dataset.model = model.value;
-        deleteButton.dataset.provider = provider;
-        deleteButton.title = 'Delete custom model';
-        deleteButton.style.cssText = 'background: none; border: none; color: #888; cursor: pointer; padding: 4px 8px; transition: color 0.2s;';
-        deleteButton.innerHTML = `
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="3 6 5 6 21 6"></polyline>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          </svg>
-        `;
 
         const toggleLabel = document.createElement('label');
         toggleLabel.className = 'toggle';
@@ -171,12 +247,27 @@ export function populateModelsList({
         toggleLabel.appendChild(input);
         toggleLabel.appendChild(slider);
 
+        const actions = document.createElement('div');
+        actions.className = 'model-actions';
+        actions.appendChild(deleteButton);
+        actions.appendChild(toggleLabel);
+
         div.appendChild(info);
-        div.appendChild(deleteButton);
-        div.appendChild(toggleLabel);
-        modelsList.appendChild(div);
+        div.appendChild(actions);
+        providerContent.appendChild(div);
       });
     }
+
+    if (removedModels.length > 0) {
+      const restoreButton = document.createElement('button');
+      restoreButton.className = 'restore-provider-models-btn';
+      restoreButton.dataset.provider = provider;
+      restoreButton.textContent = `Restore Removed Models (${removedModels.length})`;
+      providerContent.appendChild(restoreButton);
+    }
+
+    providerGroup.appendChild(providerContent);
+    modelsList.appendChild(providerGroup);
   }
 }
 
@@ -201,6 +292,10 @@ function isLikelyValidGroqModelId(name) {
 
 function isLikelyValidGoogleModelId(name) {
   return /^(gemini|gemma)-[a-zA-Z0-9][a-zA-Z0-9._-]*$/i.test(name);
+}
+
+function isLikelyValidOpenAIModelId(name) {
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name);
 }
 
 export function promptForCustomModel(model) {
@@ -238,6 +333,25 @@ export function promptForCustomModel(model) {
       cancelled: false,
       provider: 'google',
       modelValue: `google:${name}`,
+      displayName: formatSimpleCustomDisplayName(name)
+    };
+  }
+
+  if (model === 'openai:custom') {
+    const name = prompt("Enter your OpenAI model ID:", "gpt-4.1-mini");
+    if (!name) {
+      return { cancelled: true };
+    }
+    if (!isLikelyValidOpenAIModelId(name)) {
+      return {
+        cancelled: false,
+        error: 'Invalid OpenAI model ID. Use an ID like gpt-4.1-mini or gpt-4o.'
+      };
+    }
+    return {
+      cancelled: false,
+      provider: 'openai',
+      modelValue: `openai:${name}`,
       displayName: formatSimpleCustomDisplayName(name)
     };
   }

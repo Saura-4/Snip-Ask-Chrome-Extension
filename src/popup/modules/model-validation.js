@@ -1,4 +1,4 @@
-import { isGoogleModel, isOllamaModel, isOpenRouterModel } from '../../background/models/model-routing.js';
+import { isGoogleModel, isOllamaModel, isOpenAIModel, isOpenRouterModel } from '../../background/models/model-routing.js';
 
 function getMissingConfigMessage(model, storage) {
     if (isOllamaModel(model) && !storage.ollamaHost) {
@@ -13,7 +13,11 @@ function getMissingConfigMessage(model, storage) {
         return 'Please set OpenRouter API Key';
     }
 
-    if (!isOllamaModel(model) && !isGoogleModel(model) && !isOpenRouterModel(model) && !storage.groqKey) {
+    if (isOpenAIModel(model) && !storage.openaiKey) {
+        return 'Please set OpenAI API Key';
+    }
+
+    if (!isOllamaModel(model) && !isGoogleModel(model) && !isOpenRouterModel(model) && !isOpenAIModel(model) && !storage.groqKey) {
         return 'Please set Groq API Key';
     }
 
