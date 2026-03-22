@@ -3,6 +3,7 @@ import {
     handleAIRequest,
     handleChatWindowModels,
     handleContinueChat,
+    handleCustomModelValidation,
     handleGuestStatusCheck,
     handleMultiImageRequest,
     handleProviderConfigCheck
@@ -118,6 +119,13 @@ export function createRuntimeMessageListener() {
 
         if (request.action === "GET_CHAT_WINDOW_MODELS") {
             handleChatWindowModels(sendResponse);
+            return true;
+        }
+
+        if (request.action === "VALIDATE_CUSTOM_MODEL") {
+            const controller = createTrackedAbortController();
+            handleCustomModelValidation(request, sendResponse, controller.signal)
+                .finally(() => removeTrackedController(controller));
             return true;
         }
 

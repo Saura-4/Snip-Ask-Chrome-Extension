@@ -1,10 +1,13 @@
 import { getAIService, optimizeMessageHistory } from '../ai-service.js';
 import { isGuestMode, isGuestConfigured, makeGuestRequest, GUEST_DEFAULT_MODEL } from '../guest-config.js';
 import { getChatWindowModels, checkGuestModeStatus } from '../models/models-config.js';
-import { isGoogleModel, isGroqModel, isOllamaModel, isOpenRouterModel } from '../models/model-routing.js';
+import { isGoogleModel, isGroqModel, isOllamaModel, isOpenAIModel, isOpenRouterModel } from '../models/model-routing.js';
 import { buildGuestRequestPayload, buildGuestSystemPrompt } from '../guest/request.js';
 import { parseGuestResponse } from '../guest/response.js';
 import { getStorage } from '../core/storage.js';
+import { trackAnalyticsEvent } from '../analytics.js';
+
+const GUEST_TEXT_LIMIT = 4000;
 
 function getProviderCredential(modelName, storage) {
     if (isOllamaModel(modelName)) {
@@ -16,14 +19,72 @@ function getProviderCredential(modelName, storage) {
     if (isGoogleModel(modelName)) {
         return storage.geminiKey;
     }
+    if (isOpenAIModel(modelName)) {
+        return storage.openaiKey;
+    }
     return storage.groqKey;
+}
+
+function truncateGuestText(text, maxLength = GUEST_TEXT_LIMIT) {
+    if (typeof text !== 'string') {
+        return text;
+    }
+
+    if (text.length <= maxLength) {
+        return text;
+    }
+
+    const slice = text.slice(0, maxLength);
+    const lastBreak = Math.max(slice.lastIndexOf('\n'), slice.lastIndexOf(' '));
+    const trimmed = lastBreak > maxLength - 300 ? slice.slice(0, lastBreak) : slice;
+    return `${trimmed}\n\n[truncated for guest mode]`;
+}
+
+export async function handleCustomModelValidation(request, sendResponse, signal) {
+    try {
+        const modelName = request.model;
+        if (!modelName) {
+            throw new Error('Missing model for validation.');
+        }
+
+        const storage = await getStorage([
+            'customModes',
+            'customPrompt',
+            'selectedMode',
+            'interactionMode',
+            'groqKey',
+            'geminiKey',
+            'openaiKey',
+            'openrouterKey',
+            'ollamaHost'
+        ]);
+
+        const activeKeyOrHost = getProviderCredential(modelName, storage);
+        if (!activeKeyOrHost) {
+            throw new Error('Missing provider configuration. Add the API key or host first.');
+        }
+
+        const mode = storage.selectedMode || storage.interactionMode || 'short';
+        const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
+        const result = await aiService.askText('Reply with OK only.', signal);
+
+        sendResponse({
+            success: true,
+            model: result.model || modelName
+        });
+    } catch (error) {
+        sendResponse({
+            success: false,
+            error: error.message || String(error)
+        });
+    }
 }
 
 export async function handleContinueChat(request, sendResponse, signal) {
     try {
         const storage = await getStorage([
             'interactionMode', 'customPrompt', 'selectedModel', 'selectedMode',
-            'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost'
+            'customModes', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost'
         ]);
 
         const modelName = request.model || storage.selectedModel;
@@ -63,16 +124,22 @@ export async function handleContinueChat(request, sendResponse, signal) {
         const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
         const optimizedHistory = optimizeMessageHistory(request.history, modelName);
         const result = await aiService.chat(optimizedHistory, signal);
+        void trackAnalyticsEvent({ modelName, success: true, tokenUsage: result.tokenUsage });
 
         sendResponse({ success: true, answer: result.text, tokenUsage: result.tokenUsage });
     } catch (error) {
+        const storage = await getStorage(['selectedModel']);
+        const fallbackModel = request.model || storage.selectedModel;
+        if (fallbackModel) {
+            void trackAnalyticsEvent({ modelName: fallbackModel, success: false });
+        }
         sendResponse({ success: false, error: error.message });
     }
 }
 
 export async function handleProviderConfigCheck(request, sendResponse) {
     try {
-        const storage = await getStorage(['groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost', 'selectedModel', 'selectedMode', 'interactionMode']);
+        const storage = await getStorage(['groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost', 'selectedModel', 'selectedMode', 'interactionMode']);
         const modelName = request.model || storage.selectedModel || GUEST_DEFAULT_MODEL;
         const currentMode = storage.selectedMode || storage.interactionMode || 'short';
 
@@ -88,6 +155,9 @@ export async function handleProviderConfigCheck(request, sendResponse) {
         } else if (isGoogleModel(modelName)) {
             isConfigured = !!storage.geminiKey;
             providerName = 'Google Key';
+        } else if (isOpenAIModel(modelName)) {
+            isConfigured = !!storage.openaiKey;
+            providerName = 'OpenAI Key';
         } else {
             isConfigured = !!storage.groqKey || isGuestConfigured();
         }
@@ -121,11 +191,12 @@ export async function handleGuestStatusCheck(sendResponse) {
 
 export async function handleChatWindowModels(sendResponse) {
     try {
-        const storage = await getStorage(['enabledProviders', 'enabledModels']);
+        const storage = await getStorage(['enabledProviders', 'enabledModels', 'hiddenModels']);
         const { isGuestMode: inGuestMode } = await checkGuestModeStatus();
         const enabledProviders = storage.enabledProviders || { groq: true };
         const enabledModels = storage.enabledModels || {};
-        const models = await getChatWindowModels(enabledProviders, enabledModels, inGuestMode);
+        const hiddenModels = storage.hiddenModels || {};
+        const models = await getChatWindowModels(enabledProviders, enabledModels, hiddenModels, inGuestMode);
 
         sendResponse({ success: true, models, isGuestMode: inGuestMode });
     } catch (error) {
@@ -134,13 +205,15 @@ export async function handleChatWindowModels(sendResponse) {
 }
 
 export async function handleAIRequest(inputContent, type, explicitModel, sendResponse, ocrConfidence, explicitMode, signal = null) {
+    let analyticsModelName = explicitModel || null;
     try {
         const storage = await getStorage([
             'interactionMode', 'customPrompt', 'selectedModel', 'selectedMode',
-            'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost'
+            'customModes', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost'
         ]);
         const mode = explicitMode || storage.selectedMode || storage.interactionMode || 'short';
         const modelName = explicitModel || storage.selectedModel || GUEST_DEFAULT_MODEL;
+        analyticsModelName = modelName;
         const inGuestMode = await isGuestMode();
 
         if (inGuestMode) {
@@ -158,7 +231,7 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
                     ]
                 });
             } else {
-                messages.push({ role: 'user', content: inputContent });
+                messages.push({ role: 'user', content: truncateGuestText(inputContent) });
             }
 
             const guestRequest = buildGuestRequestPayload({ modelName, mode, storage, messages });
@@ -187,6 +260,7 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
         const result = type === 'image'
             ? await aiService.askImage(inputContent, signal)
             : await aiService.askText(inputContent, signal);
+        void trackAnalyticsEvent({ modelName: result.model || modelName, success: true, tokenUsage: result.tokenUsage });
 
         sendResponse({
             success: true,
@@ -199,18 +273,23 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
             base64Image: type === 'image' ? inputContent : null
         });
     } catch (error) {
+        if (analyticsModelName) {
+            void trackAnalyticsEvent({ modelName: analyticsModelName, success: false });
+        }
         sendResponse({ success: false, error: error.message || String(error) });
     }
 }
 
 export async function handleMultiImageRequest(images, explicitModel, textContext, sendResponse, explicitMode, signal = null) {
+    let analyticsModelName = explicitModel || null;
     try {
         const storage = await getStorage([
             'interactionMode', 'customPrompt', 'selectedModel', 'selectedMode',
-            'customModes', 'groqKey', 'geminiKey', 'openrouterKey', 'ollamaHost'
+            'customModes', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost'
         ]);
         const mode = explicitMode || storage.selectedMode || storage.interactionMode || 'short';
         const modelName = explicitModel || storage.selectedModel || GUEST_DEFAULT_MODEL;
+        analyticsModelName = modelName;
         const inGuestMode = await isGuestMode();
 
         if (inGuestMode) {
@@ -220,7 +299,7 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
 
             const messages = [{ role: 'system', content: buildGuestSystemPrompt(mode, storage) }];
             const contentArray = [];
-            contentArray.push({ type: 'text', text: textContext || `Analyze these ${images.length} images and provide a helpful response.` });
+            contentArray.push({ type: 'text', text: truncateGuestText(textContext || `Analyze these ${images.length} images and provide a helpful response.`) });
             for (const img of images) {
                 contentArray.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${img}` } });
             }
@@ -261,15 +340,21 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
 
         const messages = [{ role: 'user', content: contentArray }];
         const optimizedMessages = optimizeMessageHistory(messages, modelName);
-        const answer = await aiService.chat(optimizedMessages, signal);
+        const result = await aiService.chat(optimizedMessages, signal);
+        void trackAnalyticsEvent({ modelName: result.model || modelName, success: true, tokenUsage: result.tokenUsage });
 
         sendResponse({
             success: true,
-            answer,
+            answer: result.text,
+            model: result.model,
+            tokenUsage: result.tokenUsage,
             initialUserMessage: messages[0],
             imageCount: images.length
         });
     } catch (error) {
+        if (analyticsModelName) {
+            void trackAnalyticsEvent({ modelName: analyticsModelName, success: false });
+        }
         sendResponse({ success: false, error: error.message || String(error) });
     }
 }

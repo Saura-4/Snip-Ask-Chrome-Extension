@@ -3,6 +3,8 @@
 -- =================================================================
 DROP TABLE IF EXISTS usage_stats;
 DROP TABLE IF EXISTS velocity_events;
+DROP TABLE IF EXISTS analytics_daily_requests;
+DROP TABLE IF EXISTS analytics_users;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS roles;
 -- Cleanup old legacy tables (V1/V2 schema)
@@ -69,9 +71,38 @@ CREATE TABLE usage_stats (
 );
 
 -- =================================================================
+-- EXPERIMENTAL ANALYTICS USERS
+-- Opt-in keyed-mode telemetry only. No prompts, images, OCR, or keys.
+-- =================================================================
+CREATE TABLE analytics_users (
+    user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    install_id TEXT UNIQUE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =================================================================
+-- EXPERIMENTAL ANALYTICS DAILY REQUESTS
+-- Per-request records for provider/model/success/token count.
+-- =================================================================
+CREATE TABLE analytics_daily_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    success INTEGER NOT NULL DEFAULT 0,
+    token_count INTEGER NOT NULL DEFAULT 0,
+    requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES analytics_users(user_id)
+);
+
+-- =================================================================
 -- INDEXES
 -- Essential for performance and grouping.
 -- =================================================================
 CREATE INDEX IF NOT EXISTS idx_users_uuid ON users(client_uuid);
 CREATE INDEX IF NOT EXISTS idx_users_fingerprint ON users(device_fingerprint);
 CREATE INDEX IF NOT EXISTS idx_velocity_user_time ON velocity_events(user_id, requested_at);
+CREATE INDEX IF NOT EXISTS idx_analytics_users_install_id ON analytics_users(install_id);
+CREATE INDEX IF NOT EXISTS idx_analytics_requests_time ON analytics_daily_requests(requested_at);
+CREATE INDEX IF NOT EXISTS idx_analytics_requests_provider_model ON analytics_daily_requests(provider, model);

@@ -5,8 +5,14 @@
 /**
  * Message Listener - Entry point for extension messages
  */
+let pendingSnipConfig = null;
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "START_SNIP") {
+        pendingSnipConfig = {
+            model: request.model || null,
+            mode: request.mode || null
+        };
         if (SnipSelection.isActive()) return true;
 
         SnipSelection.start(handleSnipComplete);
@@ -38,6 +44,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  * @param {DOMRect} rect - The selection rectangle
  */
 function handleSnipComplete(rect) {
+    const requestConfig = pendingSnipConfig || { model: null, mode: null };
+    pendingSnipConfig = null;
+
     // Capture Screenshot
     chrome.runtime.sendMessage({
         action: "CAPTURE_VISIBLE_TAB"
@@ -82,7 +91,10 @@ function handleSnipComplete(rect) {
             }
 
             // Ask background.js to check provider config (keys never touch content script)
-            chrome.runtime.sendMessage({ action: "CHECK_PROVIDER_CONFIG" }, async (configResult) => {
+            chrome.runtime.sendMessage({
+                action: "CHECK_PROVIDER_CONFIG",
+                model: requestConfig.model
+            }, async (configResult) => {
                 if (chrome.runtime.lastError || !configResult?.success) {
                     showErrorToast("Failed to check configuration. Please reload the page.");
                     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
@@ -90,7 +102,7 @@ function handleSnipComplete(rect) {
                 }
 
                 const currentModel = configResult.model;
-                const currentMode = configResult.mode || 'short';
+                const currentMode = requestConfig.mode || configResult.mode || 'short';
 
                 if (!configResult.isConfigured) {
                     showErrorToast(`Please set your ${configResult.providerName} in the extension popup!`);

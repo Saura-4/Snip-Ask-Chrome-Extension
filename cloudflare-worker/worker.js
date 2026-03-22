@@ -11,32 +11,59 @@
 //
 // 3. Add 'token_count' column to usage_stats:
 //    ALTER TABLE usage_stats ADD COLUMN token_count INTEGER DEFAULT 0;
+//
+// 4. Create experimental analytics table:
+//    CREATE TABLE analytics_users (
+//      user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+//      install_id TEXT UNIQUE NOT NULL,
+//      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+//      last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP
+//    );
+//    CREATE TABLE analytics_daily_requests (
+//      id INTEGER PRIMARY KEY AUTOINCREMENT,
+//      user_id INTEGER NOT NULL,
+//      provider TEXT NOT NULL,
+//      model TEXT NOT NULL,
+//      success INTEGER NOT NULL DEFAULT 0,
+//      token_count INTEGER NOT NULL DEFAULT 0,
+//      requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+//      FOREIGN KEY (user_id) REFERENCES analytics_users(user_id)
+//    );
 
 export default {
     async fetch(request, env) {
-        const corsHeaders = {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, X-Extension-Id',
-        };
+        const url = new URL(request.url);
+        const corsHeaders = buildCorsHeaders(request, env, url.pathname === '/analytics/summary');
 
         if (request.method === 'OPTIONS') {
+            const extensionOriginCheck = validateExtensionOrigin(request, env, { preflight: true });
+            if (!extensionOriginCheck.ok) {
+                return jsonResponse({
+                    error: 'Unauthorized',
+                    code: extensionOriginCheck.code
+                }, 403, corsHeaders);
+            }
             return new Response(null, { headers: corsHeaders });
+        }
+
+        if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/analytics/summary') {
+            return handleAnalyticsSummary(env, corsHeaders, request.method === 'HEAD');
         }
 
         if (request.method !== 'POST') {
             return jsonResponse({ error: 'Method not allowed' }, 405, corsHeaders);
         }
 
-        // Origin validation via Extension ID
-        if (env.ALLOWED_EXTENSION_ID) {
-            const providedExtId = request.headers.get('X-Extension-Id');
-            if (providedExtId !== env.ALLOWED_EXTENSION_ID) {
-                return jsonResponse({
-                    error: 'Unauthorized',
-                    code: 'INVALID_ORIGIN'
-                }, 403, corsHeaders);
-            }
+        if (url.pathname === '/analytics') {
+            return handleAnalyticsWrite(request, env, corsHeaders);
+        }
+
+        const extensionOriginCheck = validateExtensionOrigin(request, env);
+        if (!extensionOriginCheck.ok) {
+            return jsonResponse({
+                error: 'Unauthorized',
+                code: extensionOriginCheck.code
+            }, 403, corsHeaders);
         }
 
         try {
@@ -312,6 +339,188 @@ function jsonResponse(data, status, corsHeaders) {
         status,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
+}
+
+async function handleAnalyticsWrite(request, env, corsHeaders) {
+    try {
+        const extensionOriginCheck = validateExtensionOrigin(request, env);
+        if (!extensionOriginCheck.ok) {
+            return jsonResponse({ error: 'Unauthorized', code: extensionOriginCheck.code }, 403, corsHeaders);
+        }
+
+        if (!env.DB) {
+            return jsonResponse({ error: 'Database not configured', code: 'CONFIG_ERROR' }, 500, corsHeaders);
+        }
+
+        const body = await request.json();
+        const installId = typeof body.installId === 'string' ? body.installId.trim() : '';
+        const provider = typeof body.provider === 'string' ? body.provider.trim() : '';
+        const model = typeof body.model === 'string' ? body.model.trim() : '';
+
+        if (!installId || !provider || !model) {
+            return jsonResponse({ error: 'Missing analytics fields', code: 'BAD_REQUEST' }, 400, corsHeaders);
+        }
+
+        let analyticsUser = await env.DB.prepare(
+            'SELECT user_id FROM analytics_users WHERE install_id = ?'
+        ).bind(installId).first();
+
+        if (!analyticsUser) {
+            await env.DB.prepare(
+                'INSERT INTO analytics_users (install_id) VALUES (?)'
+            ).bind(installId).run();
+
+            analyticsUser = await env.DB.prepare(
+                'SELECT user_id FROM analytics_users WHERE install_id = ?'
+            ).bind(installId).first();
+        } else {
+            await env.DB.prepare(
+                'UPDATE analytics_users SET last_seen_at = CURRENT_TIMESTAMP WHERE user_id = ?'
+            ).bind(analyticsUser.user_id).run();
+        }
+
+        await env.DB.prepare(`
+            INSERT INTO analytics_daily_requests (
+                user_id, provider, model, success, token_count
+            ) VALUES (?, ?, ?, ?, ?)
+        `).bind(
+            analyticsUser.user_id,
+            provider,
+            model,
+            body.success ? 1 : 0,
+            Number(body.tokenCount || 0)
+        ).run();
+
+        return jsonResponse({ ok: true }, 200, corsHeaders);
+    } catch (error) {
+        console.error('Analytics write error:', error);
+        return jsonResponse({ error: 'Analytics error', code: 'ANALYTICS_ERROR' }, 500, corsHeaders);
+    }
+}
+
+function buildCorsHeaders(request, env, isPublicRead = false) {
+    const publicReadHeaders = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Extension-Id',
+        'Vary': 'Origin'
+    };
+
+    const allowedIds = getAllowedExtensionIds(env);
+    if (isPublicRead || allowedIds.length === 0) {
+        return publicReadHeaders;
+    }
+
+    const allowedOrigins = getAllowedExtensionOrigins(env);
+    const requestOrigin = request.headers.get('Origin');
+    const allowOrigin = isChromeExtensionOrigin(requestOrigin)
+        ? requestOrigin
+        : (allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0]);
+
+    return {
+        'Access-Control-Allow-Origin': allowOrigin,
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Extension-Id',
+        'Vary': 'Origin'
+    };
+}
+
+function getAllowedExtensionIds(env) {
+    const rawIds = env.ALLOWED_EXTENSION_IDS || env.ALLOWED_EXTENSION_ID || '';
+    return rawIds
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+}
+
+function getAllowedExtensionOrigins(env) {
+    return getAllowedExtensionIds(env).map((id) => `chrome-extension://${id}`);
+}
+
+function isChromeExtensionOrigin(origin) {
+    return typeof origin === 'string' && origin.startsWith('chrome-extension://');
+}
+
+function validateExtensionOrigin(request, env, options = {}) {
+    const { preflight = false } = options;
+    const allowedIds = getAllowedExtensionIds(env);
+    if (allowedIds.length === 0) {
+        return { ok: true };
+    }
+
+    const allowedOrigins = getAllowedExtensionOrigins(env);
+    const origin = request.headers.get('Origin');
+    const providedExtId = request.headers.get('X-Extension-Id');
+
+    if (preflight) {
+        if (origin && !isChromeExtensionOrigin(origin)) {
+            return { ok: false, code: 'INVALID_ORIGIN' };
+        }
+        return { ok: true };
+    }
+
+    if (!allowedIds.includes(providedExtId)) {
+        return { ok: false, code: 'INVALID_EXTENSION_ID' };
+    }
+
+    // Some Chrome extension fetch contexts do not send Origin on the actual POST.
+    // If Origin is present, it must match the allowlist; if it's absent, rely on the
+    // explicit extension header plus preflight/CORS enforcement for browser requests.
+    if (origin && !allowedOrigins.includes(origin)) {
+        return { ok: false, code: 'INVALID_ORIGIN' };
+    }
+
+    return { ok: true };
+}
+
+async function handleAnalyticsSummary(env, corsHeaders, headOnly = false) {
+    try {
+        if (!env.DB) {
+            return jsonResponse({ error: 'Database not configured', code: 'CONFIG_ERROR' }, 500, corsHeaders);
+        }
+
+        const totals = await env.DB.prepare(`
+            SELECT
+                COUNT(*) as total_requests,
+                COUNT(DISTINCT adr.user_id) as total_installs,
+                SUM(CASE WHEN adr.success = 1 THEN 1 ELSE 0 END) as successful_requests,
+                SUM(adr.token_count) as total_tokens
+            FROM analytics_daily_requests adr
+        `).first();
+
+        const byModel = await env.DB.prepare(`
+            SELECT
+                adr.provider,
+                adr.model,
+                COUNT(*) as requests,
+                COUNT(DISTINCT adr.user_id) as installs,
+                SUM(CASE WHEN adr.success = 1 THEN 1 ELSE 0 END) as successes,
+                SUM(CASE WHEN adr.success = 0 THEN 1 ELSE 0 END) as failures,
+                SUM(adr.token_count) as total_tokens
+            FROM analytics_daily_requests adr
+            GROUP BY adr.provider, adr.model
+            ORDER BY requests DESC, adr.provider ASC, adr.model ASC
+            LIMIT 100
+        `).all();
+
+        const payload = {
+            experimental: true,
+            totals: totals || {},
+            byModel: byModel?.results || []
+        };
+
+        if (headOnly) {
+            return new Response(null, {
+                status: 200,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+        }
+
+        return jsonResponse(payload, 200, corsHeaders);
+    } catch (error) {
+        console.error('Analytics summary error:', error);
+        return jsonResponse({ error: 'Analytics summary error', code: 'ANALYTICS_ERROR' }, 500, corsHeaders);
+    }
 }
 
 
