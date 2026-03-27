@@ -27,7 +27,6 @@ import {
   populateModesList,
   validateModeInput
 } from './modules/popup-modes.js';
-import { PUBLIC_ANALYTICS_URL } from '../background/analytics.js';
 
 // --- DEFAULT DATA ---
 const DEFAULT_MODES = [
@@ -43,6 +42,8 @@ const API_KEY_CONFIG = {
   openrouter: { id: 'openrouterKey', placeholder: 'OpenRouter Key (sk-or-...)', type: 'password', storageKey: 'openrouterKey' },
   ollama: { id: 'ollamaHost', placeholder: 'Ollama URL (http://localhost:11434)', type: 'text', storageKey: 'ollamaHost' }
 };
+const DEFAULT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+const DEFAULT_MODE = 'short';
 
 // --- STATE ---
 let editingModeId = null;
@@ -101,7 +102,7 @@ function updateGuestBanner(guestStatus) {
 }
 
 async function initializeDefaults() {
-  const result = await chrome.storage.local.get(['customModes', 'enabledProviders', 'enabledModels']);
+  const result = await chrome.storage.local.get(['customModes', 'enabledProviders', 'enabledModels', 'selectedModel', 'selectedMode']);
 
   if (!result.customModes) {
     await chrome.storage.local.set({ customModes: DEFAULT_MODES });
@@ -114,6 +115,14 @@ async function initializeDefaults() {
   if (!result.enabledModels) {
     await chrome.storage.local.set({ enabledModels: getDefaultEnabledModels() });
   }
+
+  if (!result.selectedModel) {
+    await chrome.storage.local.set({ selectedModel: DEFAULT_MODEL });
+  }
+
+  if (!result.selectedMode) {
+    await chrome.storage.local.set({ selectedMode: DEFAULT_MODE });
+  }
 }
 
 // --- LOAD SETTINGS ---
@@ -121,7 +130,7 @@ async function loadSettings() {
   const result = await chrome.storage.local.get([
     'customModes', 'enabledProviders', 'enabledModels', 'selectedModel', 'selectedMode',
     'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost', 'customPrompt',
-    'providerHiddenSince', 'hideContextMenu', 'experimentalAnalyticsOptIn', 'hiddenModels'
+    'providerHiddenSince', 'hideContextMenu', 'hiddenModels'
   ]);
 
   // Check and cleanup old keys
@@ -161,11 +170,6 @@ async function loadSettings() {
   const hideContextMenuToggle = document.getElementById('hideContextMenu');
   if (hideContextMenuToggle) {
     hideContextMenuToggle.checked = result.hideContextMenu === true;
-  }
-
-  const experimentalAnalyticsOptIn = document.getElementById('experimentalAnalyticsOptIn');
-  if (experimentalAnalyticsOptIn) {
-    experimentalAnalyticsOptIn.checked = result.experimentalAnalyticsOptIn === true;
   }
 
   // Handle custom prompt visibility
@@ -719,18 +723,6 @@ function setupEventListeners() {
     });
   }
 
-  const experimentalAnalyticsOptIn = document.getElementById('experimentalAnalyticsOptIn');
-  if (experimentalAnalyticsOptIn) {
-    experimentalAnalyticsOptIn.addEventListener('change', async () => {
-      await chrome.storage.local.set({ experimentalAnalyticsOptIn: experimentalAnalyticsOptIn.checked });
-    });
-  }
-
-  document.getElementById('viewPublicAnalyticsLink')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    chrome.tabs.create({ url: PUBLIC_ANALYTICS_URL });
-  });
-
   // Guest mode key links
   document.getElementById('getOwnKeyLink')?.addEventListener('click', (e) => {
     e.preventDefault();
@@ -821,8 +813,8 @@ async function startSnip() {
   const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'selectedMode', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost']);
   const modelSelect = document.getElementById('modelSelect');
   const modeSelect = document.getElementById('modeSelect');
-  let model = modelSelect?.value || result.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
-  const mode = modeSelect?.value || result.selectedMode || 'short';
+  let model = modelSelect?.value || result.selectedModel || DEFAULT_MODEL;
+  const mode = modeSelect?.value || result.selectedMode || DEFAULT_MODE;
 
   const customModel = promptForCustomModel(model);
   if (customModel.cancelled) {

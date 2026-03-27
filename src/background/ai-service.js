@@ -52,6 +52,150 @@ const TYPE_LIMITS = {
     'default': 4096       // Safety fallback for unknown models
 };
 
+function getMaxTokensForMode(mode) {
+    if (mode === 'short') return 384;
+    if (mode === 'code') return 1536;
+    return 1024;
+}
+
+function isGPT5Model(modelID) {
+    if (typeof modelID !== 'string') return false;
+    return modelID.toLowerCase().startsWith('gpt-5');
+}
+
+function buildOpenAICompatibleRequestBody(messages, model, mode) {
+    const requestBody = {
+        messages,
+        model
+    };
+
+    if (!isGPT5Model(model)) {
+        requestBody.temperature = 0.3;
+    }
+
+    const maxTokens = getMaxTokensForMode(mode);
+    if (isGPT5Model(model)) {
+        requestBody.max_completion_tokens = maxTokens;
+    } else {
+        requestBody.max_tokens = maxTokens;
+    }
+
+    return requestBody;
+}
+
+function getOpenAIMaxOutputTokens(modelID, mode) {
+    const baseTokens = getMaxTokensForMode(mode);
+
+    // Responses API counts reasoning tokens against the output budget.
+    // Give GPT-5 a bit more headroom so concise answers don't terminate
+    // before visible text is produced.
+    if (!isGPT5Model(modelID)) {
+        return baseTokens;
+    }
+
+    if (mode === 'short') return Math.max(baseTokens, 640);
+    if (mode === 'code') return Math.max(baseTokens, 2048);
+    return Math.max(baseTokens, 1280);
+}
+
+function mapMessagePartToResponsesInput(part) {
+    if (!part || typeof part !== 'object') return null;
+
+    if (part.type === 'text' && typeof part.text === 'string') {
+        return { type: 'input_text', text: part.text };
+    }
+
+    if (part.type === 'image_url' && part.image_url?.url) {
+        return { type: 'input_image', image_url: part.image_url.url };
+    }
+
+    return null;
+}
+
+function mapMessageToResponsesInput(message) {
+    const isAssistant = message.role === 'assistant';
+    const content = [];
+
+    if (typeof message.content === 'string') {
+        content.push({
+            type: isAssistant ? 'output_text' : 'input_text',
+            text: message.content
+        });
+    } else if (Array.isArray(message.content)) {
+        for (const part of message.content) {
+            let mappedPart = mapMessagePartToResponsesInput(part);
+            if (mappedPart && isAssistant && mappedPart.type === 'input_text') {
+                mappedPart = { type: 'output_text', text: mappedPart.text };
+            }
+            if (mappedPart) content.push(mappedPart);
+        }
+    }
+
+    if (content.length === 0) {
+        content.push({
+            type: isAssistant ? 'output_text' : 'input_text',
+            text: ''
+        });
+    }
+
+    return {
+        role: isAssistant ? 'assistant' : 'user',
+        content
+    };
+}
+
+function buildOpenAIResponsesRequestBody(messages, model, mode) {
+    const systemMessages = messages
+        .filter(msg => msg.role === 'system' && typeof msg.content === 'string')
+        .map(msg => msg.content.trim())
+        .filter(Boolean);
+
+    const input = messages
+        .filter(msg => msg.role !== 'system')
+        .map(mapMessageToResponsesInput);
+
+    const requestBody = {
+        model,
+        input: input.length > 0 ? input : [{ role: 'user', content: [{ type: 'input_text', text: '' }] }],
+        max_output_tokens: getOpenAIMaxOutputTokens(model, mode),
+        truncation: 'auto'
+    };
+
+    if (systemMessages.length > 0) {
+        requestBody.instructions = systemMessages.join('\n\n');
+    }
+
+    if (isGPT5Model(model)) {
+        requestBody.reasoning = { effort: 'minimal' };
+        requestBody.text = { verbosity: 'low' };
+    }
+
+    return requestBody;
+}
+
+function extractOpenAIResponsesText(data) {
+    if (typeof data?.output_text === 'string' && data.output_text.trim()) {
+        return data.output_text.trim();
+    }
+
+    const messageTexts = [];
+    const outputItems = Array.isArray(data?.output) ? data.output : [];
+
+    for (const item of outputItems) {
+        if (item?.type !== 'message' || !Array.isArray(item.content)) continue;
+
+        for (const part of item.content) {
+            if (part?.type === 'output_text' && typeof part.text === 'string' && part.text.trim()) {
+                messageTexts.push(part.text.trim());
+            } else if (part?.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
+                messageTexts.push(part.text.trim());
+            }
+        }
+    }
+
+    return messageTexts.join('\n').trim();
+}
+
 /**
  * Get safe token limit for a model using priority-based substring matching.
  * Order matters: specific keys checked before generic ones.
@@ -329,7 +473,7 @@ class GroqService extends AbstractAIService {
             messages: finalMessages,
             model: this.actualModel,
             temperature: 0.3,
-            max_tokens: 2048
+            max_tokens: getMaxTokensForMode(this.mode)
         };
 
         const response = await fetchWithTimeout(this.API_ENDPOINT, {
@@ -435,7 +579,7 @@ class GeminiService extends AbstractAIService {
 
         const payload = {
             contents: contents,
-            generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
+            generationConfig: { temperature: 0.3, maxOutputTokens: getMaxTokensForMode(this.mode) }
         };
 
         if (finalSystemInstruction) payload.system_instruction = finalSystemInstruction;
@@ -509,12 +653,7 @@ class OpenAICompatibleService extends AbstractAIService {
             finalMessages.unshift({ role: "system", content: this._getSystemInstruction() });
         }
 
-        const requestBody = {
-            messages: finalMessages,
-            model: this.actualModel,
-            temperature: 0.3,
-            max_tokens: 2048
-        };
+        const requestBody = buildOpenAICompatibleRequestBody(finalMessages, this.actualModel, this.mode);
         if (this.extraBody) {
             Object.assign(requestBody, this.extraBody);
         }
@@ -571,9 +710,50 @@ class OpenAICompatibleService extends AbstractAIService {
 class OpenAIService extends OpenAICompatibleService {
     constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
         super(apiKey, modelName, interactionMode, customPrompt, customModes, {
-            apiEndpoint: "https://api.openai.com/v1/chat/completions",
+            apiEndpoint: "https://api.openai.com/v1/responses",
             providerName: "OpenAI"
         });
+    }
+
+    async chat(messages, signal = null) {
+        const finalMessages = [...messages];
+        if (finalMessages.length === 0 || finalMessages[0].role !== 'system') {
+            finalMessages.unshift({ role: "system", content: this._getSystemInstruction() });
+        }
+
+        const requestBody = buildOpenAIResponsesRequestBody(finalMessages, this.actualModel, this.mode);
+
+        const response = await fetchWithTimeout(this.apiEndpoint, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${this.apiKey}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(requestBody)
+        }, this.timeoutMs, signal);
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(normalizeErrorMessage(response, data, this.providerName));
+
+        const text = extractOpenAIResponsesText(data);
+        if (!text) {
+            const incompleteReason = data?.incomplete_details?.reason;
+            if (incompleteReason === 'max_output_tokens') {
+                throw new Error('OpenAI stopped before producing visible text. Please try again or use a shorter request.');
+            }
+            throw new Error('No response content from OpenAI');
+        }
+
+        const usage = data.usage || {};
+        return {
+            text,
+            model: data.model || this.actualModel,
+            tokenUsage: {
+                promptTokens: usage.input_tokens || 0,
+                completionTokens: usage.output_tokens || 0,
+                totalTokens: usage.total_tokens || 0
+            }
+        };
     }
 }
 

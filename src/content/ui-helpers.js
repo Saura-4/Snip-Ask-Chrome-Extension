@@ -6,6 +6,7 @@
  * @type {HTMLElement|null}
  */
 let _loadingOverlay = null;
+let _loadingOverlayEscapeHandler = null;
 
 /**
  * Show a full-screen thinking overlay while processing snip
@@ -34,6 +35,72 @@ function showLoadingCursor() {
         gap: 12px;
         animation: overlayFadeIn 0.2s ease;
     `;
+
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.innerHTML = `
+        <span style="font-size: 14px; line-height: 1;">✕</span>
+        <span>Stop</span>
+    `;
+    cancelButton.style.cssText = `
+        position: absolute;
+        top: 18px;
+        left: 18px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(18, 18, 18, 0.92);
+        color: #fff4f1;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-left: 3px solid #f55036;
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        cursor: pointer;
+        transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+    `;
+    cancelButton.addEventListener('mouseenter', () => {
+        cancelButton.style.background = 'rgba(28, 28, 28, 0.98)';
+        cancelButton.style.borderColor = 'rgba(245, 80, 54, 0.45)';
+        cancelButton.style.boxShadow = '0 12px 34px rgba(0, 0, 0, 0.34)';
+        cancelButton.style.transform = 'translateY(-1px)';
+    });
+    cancelButton.addEventListener('mouseleave', () => {
+        cancelButton.style.background = 'rgba(18, 18, 18, 0.92)';
+        cancelButton.style.borderColor = 'rgba(255, 255, 255, 0.14)';
+        cancelButton.style.boxShadow = '0 10px 30px rgba(0, 0, 0, 0.28)';
+        cancelButton.style.transform = 'translateY(0)';
+    });
+    cancelButton.addEventListener('click', () => {
+        cancelButton.disabled = true;
+        cancelButton.style.opacity = '0.75';
+        cancelButton.style.cursor = 'default';
+        cancelButton.innerHTML = `
+            <span style="font-size: 14px; line-height: 1;">…</span>
+            <span>Stopping</span>
+        `;
+        chrome.runtime.sendMessage({ action: 'CANCEL_AI_REQUEST' }, () => {
+            hideLoadingCursor();
+            if (chrome.runtime.lastError) {
+                console.warn('Failed to cancel active AI request:', chrome.runtime.lastError.message);
+            }
+        });
+    });
+    _loadingOverlay.appendChild(cancelButton);
+
+    _loadingOverlayEscapeHandler = (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!cancelButton.disabled) {
+            cancelButton.click();
+        }
+    };
+    document.addEventListener('keydown', _loadingOverlayEscapeHandler, true);
 
     // Container for bubble and text (similar to .typing-container but centered)
     const thinkingContainer = document.createElement('div');
@@ -110,6 +177,10 @@ function showLoadingCursor() {
  * Hide the loading overlay
  */
 function hideLoadingCursor() {
+    if (_loadingOverlayEscapeHandler) {
+        document.removeEventListener('keydown', _loadingOverlayEscapeHandler, true);
+        _loadingOverlayEscapeHandler = null;
+    }
     if (_loadingOverlay) {
         _loadingOverlay.style.animation = 'overlayFadeIn 0.15s ease reverse';
         setTimeout(() => {
@@ -138,10 +209,15 @@ function isVisionModel(modelName) {
     return lower.includes("llama-4") ||
         lower.includes("vision") ||
         lower.includes("gemini") ||
-        lower.includes("gemma") ||
+        lower.includes("gemma-3") ||
+        lower.includes("gpt-5") ||
+        lower.includes("gpt-4o") ||
+        lower.includes("gpt-4.1") ||
         lower.includes("llava") ||
         lower.includes("moondream") ||
-        lower.includes("minicpm");
+        lower.includes("minicpm") ||
+        lower.includes("qwen-vl") ||
+        lower.includes("omni");
 }
 
 /**

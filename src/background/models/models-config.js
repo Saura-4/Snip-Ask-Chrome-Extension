@@ -8,9 +8,9 @@ import { isGuestConfigured } from '../guest-config.js';
  */
 export const ALL_MODELS = {
     groq: [
+        { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout (Vision)' },
         { value: 'groq/compound', name: 'Compound' },
         { value: 'groq/compound-mini', name: 'Compound Mini' },
-        { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout (Vision)' },
         { value: 'moonshotai/kimi-k2-instruct', name: 'Kimi k2 Instruct' },
         { value: 'moonshotai/kimi-k2-instruct-0905', name: 'Kimi k2 Instruct (0905)' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
@@ -59,9 +59,9 @@ export const ALL_MODELS = {
  */
 export const CHAT_WINDOW_MODELS = {
     groq: [
+        { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout' },
         { value: 'groq/compound', name: 'Compound' },
         { value: 'groq/compound-mini', name: 'Compound Mini' },
-        { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout' },
         { value: 'moonshotai/kimi-k2-instruct', name: 'Kimi k2' },
         { value: 'moonshotai/kimi-k2-instruct-0905', name: 'Kimi k2 (0905)' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },

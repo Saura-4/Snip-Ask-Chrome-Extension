@@ -5,7 +5,6 @@ import { isGoogleModel, isGroqModel, isOllamaModel, isOpenAIModel, isOpenRouterM
 import { buildGuestRequestPayload, buildGuestSystemPrompt } from '../guest/request.js';
 import { parseGuestResponse } from '../guest/response.js';
 import { getStorage } from '../core/storage.js';
-import { trackAnalyticsEvent } from '../analytics.js';
 
 const GUEST_TEXT_LIMIT = 4000;
 
@@ -124,15 +123,8 @@ export async function handleContinueChat(request, sendResponse, signal) {
         const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
         const optimizedHistory = optimizeMessageHistory(request.history, modelName);
         const result = await aiService.chat(optimizedHistory, signal);
-        void trackAnalyticsEvent({ modelName, success: true, tokenUsage: result.tokenUsage });
-
         sendResponse({ success: true, answer: result.text, tokenUsage: result.tokenUsage });
     } catch (error) {
-        const storage = await getStorage(['selectedModel']);
-        const fallbackModel = request.model || storage.selectedModel;
-        if (fallbackModel) {
-            void trackAnalyticsEvent({ modelName: fallbackModel, success: false });
-        }
         sendResponse({ success: false, error: error.message });
     }
 }
@@ -205,7 +197,6 @@ export async function handleChatWindowModels(sendResponse) {
 }
 
 export async function handleAIRequest(inputContent, type, explicitModel, sendResponse, ocrConfidence, explicitMode, signal = null) {
-    let analyticsModelName = explicitModel || null;
     try {
         const storage = await getStorage([
             'interactionMode', 'customPrompt', 'selectedModel', 'selectedMode',
@@ -213,7 +204,6 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
         ]);
         const mode = explicitMode || storage.selectedMode || storage.interactionMode || 'short';
         const modelName = explicitModel || storage.selectedModel || GUEST_DEFAULT_MODEL;
-        analyticsModelName = modelName;
         const inGuestMode = await isGuestMode();
 
         if (inGuestMode) {
@@ -260,7 +250,6 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
         const result = type === 'image'
             ? await aiService.askImage(inputContent, signal)
             : await aiService.askText(inputContent, signal);
-        void trackAnalyticsEvent({ modelName: result.model || modelName, success: true, tokenUsage: result.tokenUsage });
 
         sendResponse({
             success: true,
@@ -273,15 +262,11 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
             base64Image: type === 'image' ? inputContent : null
         });
     } catch (error) {
-        if (analyticsModelName) {
-            void trackAnalyticsEvent({ modelName: analyticsModelName, success: false });
-        }
         sendResponse({ success: false, error: error.message || String(error) });
     }
 }
 
 export async function handleMultiImageRequest(images, explicitModel, textContext, sendResponse, explicitMode, signal = null) {
-    let analyticsModelName = explicitModel || null;
     try {
         const storage = await getStorage([
             'interactionMode', 'customPrompt', 'selectedModel', 'selectedMode',
@@ -289,7 +274,6 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
         ]);
         const mode = explicitMode || storage.selectedMode || storage.interactionMode || 'short';
         const modelName = explicitModel || storage.selectedModel || GUEST_DEFAULT_MODEL;
-        analyticsModelName = modelName;
         const inGuestMode = await isGuestMode();
 
         if (inGuestMode) {
@@ -341,7 +325,6 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
         const messages = [{ role: 'user', content: contentArray }];
         const optimizedMessages = optimizeMessageHistory(messages, modelName);
         const result = await aiService.chat(optimizedMessages, signal);
-        void trackAnalyticsEvent({ modelName: result.model || modelName, success: true, tokenUsage: result.tokenUsage });
 
         sendResponse({
             success: true,
@@ -352,9 +335,6 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
             imageCount: images.length
         });
     } catch (error) {
-        if (analyticsModelName) {
-            void trackAnalyticsEvent({ modelName: analyticsModelName, success: false });
-        }
         sendResponse({ success: false, error: error.message || String(error) });
     }
 }
