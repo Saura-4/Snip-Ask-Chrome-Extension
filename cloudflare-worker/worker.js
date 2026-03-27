@@ -9,10 +9,13 @@
 // 2. Add 'model' column to velocity_events:
 //    ALTER TABLE velocity_events ADD COLUMN model TEXT;
 //
-// 3. Add 'token_count' column to usage_stats:
+// 3. Add 'mode' column to velocity_events:
+//    ALTER TABLE velocity_events ADD COLUMN mode TEXT;
+//
+// 4. Add 'token_count' column to usage_stats:
 //    ALTER TABLE usage_stats ADD COLUMN token_count INTEGER DEFAULT 0;
 //
-// 4. Create experimental analytics table:
+// 5. Create experimental analytics table:
 //    CREATE TABLE analytics_users (
 //      user_id INTEGER PRIMARY KEY AUTOINCREMENT,
 //      install_id TEXT UNIQUE NOT NULL,
@@ -75,6 +78,7 @@ export default {
             const clientUuid = body._meta?.clientUuid;
             const deviceFingerprint = body._meta?.deviceFingerprint;
             const parallelCount = body._meta?.parallelCount ?? 1;
+            const requestedMode = typeof body._meta?.mode === 'string' ? body._meta.mode : null;
 
             if (!clientUuid || !deviceFingerprint) {
                 return jsonResponse({
@@ -212,8 +216,8 @@ export default {
 
             const routedModel = typeof groqBody.model === 'string' ? groqBody.model : null;
             const velocityResult = await env.DB.prepare(
-                'INSERT INTO velocity_events (user_id, model) VALUES (?, ?) RETURNING id'
-            ).bind(userId, routedModel).first();
+                'INSERT INTO velocity_events (user_id, model, mode) VALUES (?, ?, ?) RETURNING id'
+            ).bind(userId, routedModel, requestedMode).first();
             const velocityEventId = velocityResult?.id;
 
             // Get API keys

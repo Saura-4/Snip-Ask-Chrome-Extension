@@ -18,6 +18,11 @@
 
 // Cache the fingerprint to avoid regenerating on every request
 let cachedFingerprint = null;
+let fingerprintPromise = null;
+const FINGERPRINT_STORAGE_KEYS = ['deviceFingerprint', 'fingerprintTimestamp'];
+const FAST_FALLBACK_KEY = 'deviceFingerprintFallback';
+const FINGERPRINT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const FINGERPRINT_TIMEOUT_MS = 1200;
 
 /**
  * Generate a hash from a string using SHA-256
@@ -267,6 +272,46 @@ async function generateFingerprint() {
     return fingerprint.substring(0, 32);
 }
 
+async function getFallbackFingerprint() {
+    const storage = await chrome.storage.local.get([FAST_FALLBACK_KEY]);
+    if (storage.deviceFingerprintFallback) {
+        return storage.deviceFingerprintFallback;
+    }
+
+    const fallbackFingerprint = `fallback-${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
+    await chrome.storage.local.set({ deviceFingerprintFallback: fallbackFingerprint });
+    return fallbackFingerprint;
+}
+
+function createTimeoutPromise(timeoutMs) {
+    return new Promise((resolve) => {
+        setTimeout(() => resolve(null), timeoutMs);
+    });
+}
+
+async function persistFingerprint(fingerprint) {
+    cachedFingerprint = fingerprint;
+    await chrome.storage.local.set({
+        deviceFingerprint: fingerprint,
+        fingerprintTimestamp: Date.now()
+    });
+    return fingerprint;
+}
+
+async function generateAndPersistFingerprint() {
+    if (!fingerprintPromise) {
+        fingerprintPromise = (async () => {
+            const fingerprint = await generateFingerprint();
+            await persistFingerprint(fingerprint);
+            return fingerprint;
+        })().finally(() => {
+            fingerprintPromise = null;
+        });
+    }
+
+    return fingerprintPromise;
+}
+
 /**
  * Get or generate the device fingerprint.
  * Cached in chrome.storage.local for persistence.
@@ -284,28 +329,31 @@ async function getDeviceFingerprint() {
     }
 
     // Check storage cache (using local, not sync)
-    const storage = await chrome.storage.local.get(['deviceFingerprint', 'fingerprintTimestamp']);
+    const storage = await chrome.storage.local.get([...FINGERPRINT_STORAGE_KEYS, FAST_FALLBACK_KEY]);
 
     // Fingerprint expires after 7 days (in case hardware changes)
-    const sevenDays = 7 * 24 * 60 * 60 * 1000;
     const isValid = storage.fingerprintTimestamp &&
-        (Date.now() - storage.fingerprintTimestamp) < sevenDays;
+        (Date.now() - storage.fingerprintTimestamp) < FINGERPRINT_MAX_AGE_MS;
 
     if (storage.deviceFingerprint && isValid) {
         cachedFingerprint = storage.deviceFingerprint;
         return cachedFingerprint;
     }
 
-    // Generate new fingerprint
-    cachedFingerprint = await generateFingerprint();
+    const fallbackFingerprint = storage.deviceFingerprintFallback || await getFallbackFingerprint();
+    const fingerprint = await Promise.race([
+        generateAndPersistFingerprint(),
+        createTimeoutPromise(FINGERPRINT_TIMEOUT_MS)
+    ]);
 
-    // Store in local storage
-    await chrome.storage.local.set({
-        deviceFingerprint: cachedFingerprint,
-        fingerprintTimestamp: Date.now()
-    });
+    if (fingerprint) {
+        return fingerprint;
+    }
 
-    return cachedFingerprint;
+    // Do not block the first user-visible request on expensive fingerprint work.
+    void generateAndPersistFingerprint();
+    cachedFingerprint = fallbackFingerprint;
+    return fallbackFingerprint;
 }
 
 /**
@@ -313,12 +361,18 @@ async function getDeviceFingerprint() {
  */
 async function regenerateFingerprint() {
     cachedFingerprint = null;
-    await chrome.storage.local.remove(['deviceFingerprint', 'fingerprintTimestamp']);
+    fingerprintPromise = null;
+    await chrome.storage.local.remove(FINGERPRINT_STORAGE_KEYS);
     return await getDeviceFingerprint();
+}
+
+function warmDeviceFingerprint() {
+    void getDeviceFingerprint().catch(() => {});
 }
 
 // Export functions
 export {
     getDeviceFingerprint,
-    regenerateFingerprint
+    regenerateFingerprint,
+    warmDeviceFingerprint
 };

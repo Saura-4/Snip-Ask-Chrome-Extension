@@ -9,7 +9,8 @@ import { getDeviceFingerprint } from './fingerprint.js';
 const GUEST_WORKER_URL = 'https://snip-ask-guest.saurav04042004.workers.dev/';
 // Keep this aligned with a stable, widely-available Groq model.
 // Guest mode uses this only as a fallback when the user's selection isn't a Groq model.
-const GUEST_DEFAULT_MODEL = 'groq/compound';
+// Prefer a fast default for no-friction first use.
+const GUEST_DEFAULT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
 const DEFAULT_PROVIDER_VISIBILITY = {
     groq: true,
     google: false,
@@ -18,6 +19,7 @@ const DEFAULT_PROVIDER_VISIBILITY = {
     ollama: false
 };
 const GUEST_SAFE_PAYLOAD_LIMIT_BYTES = 700 * 1024;
+const GUEST_REQUEST_TIMEOUT_MS = 60000;
 
 function extractErrorMessage(errorLike, fallback = 'Guest Mode service error. Please try again later.') {
     if (!errorLike) return fallback;
@@ -139,9 +141,9 @@ async function makeGuestRequest(requestBody, externalSignal = null) {
     // After publishing, this will be your consistent extension ID
     const extensionId = chrome.runtime.id;
 
-    // Add timeout to prevent hanging requests (30 seconds, matching ai-service.js)
+    // Allow a bit more time for guest vision requests to complete.
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => controller.abort(), GUEST_REQUEST_TIMEOUT_MS);
 
     // Track whether cancellation was user-initiated vs timeout
     let cancelledByUser = false;

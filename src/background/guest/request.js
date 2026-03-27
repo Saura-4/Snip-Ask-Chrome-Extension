@@ -3,9 +3,24 @@ import { GUEST_DEFAULT_MODEL } from '../guest-config.js';
 import { resolveGuestModel } from '../models/model-routing.js';
 
 function getGuestMaxTokens(mode) {
-    if (mode === 'short') return 512;
-    if (mode === 'code') return 2048;
-    return 1536;
+    if (mode === 'short') return 384;
+    if (mode === 'code') return 1536;
+    return 1024;
+}
+
+function getGuestModeLabel(mode, storage) {
+    if (mode === 'short') return 'Short Answer';
+    if (mode === 'detailed') return 'Detailed';
+    if (mode === 'code') return 'Code Debug';
+    if (mode === 'custom' && storage?.customPrompt) return 'Custom Prompt';
+
+    const customModes = storage?.customModes || [];
+    const matchingMode = customModes.find((item) => item.id === mode);
+    if (matchingMode?.name) {
+        return matchingMode.name;
+    }
+
+    return mode || 'short';
 }
 
 function buildGuestSystemPrompt(mode, storage) {
@@ -46,7 +61,14 @@ function buildGuestRequestPayload({ modelName, mode, storage, messages, parallel
     };
 
     if (parallelCount !== null) {
-        payload._meta = { parallelCount };
+        payload._meta = {
+            parallelCount,
+            mode: getGuestModeLabel(mode, storage)
+        };
+    } else {
+        payload._meta = {
+            mode: getGuestModeLabel(mode, storage)
+        };
     }
 
     return {
