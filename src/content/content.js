@@ -7,9 +7,85 @@
  */
 let pendingSnipConfig = null;
 
+function buildSessionFromApiResponse(apiResponse) {
+    const userEntry = createChatHistoryEntry(
+        'user',
+        apiResponse.initialUserMessage,
+        null,
+        apiResponse.base64Image || null,
+        false
+    );
+    const assistantEntry = createChatHistoryEntry(
+        'assistant',
+        apiResponse.answer,
+        apiResponse.model || null,
+        null,
+        false
+    );
+
+    return {
+        uiId: crypto.randomUUID(),
+        chatHistory: [userEntry, assistantEntry],
+        currentModel: apiResponse.model || null,
+        currentMode: null,
+        availableModels: [],
+        customModes: [],
+        customPrompt: '',
+        initialUserMessage: apiResponse.initialUserMessage,
+        initialBase64Image: apiResponse.base64Image || null,
+        allImages: apiResponse.base64Image ? [apiResponse.base64Image] : [],
+        lastUpdated: Date.now()
+    };
+}
+
+function mergeSidebarSession(existingSession, apiResponse, responseContext = {}) {
+    const priorHistory = Array.isArray(existingSession?.chatHistory)
+        ? existingSession.chatHistory.map((message) => ({ ...message }))
+        : [];
+    const priorImages = Array.isArray(existingSession?.allImages)
+        ? [...existingSession.allImages]
+        : [];
+
+    const userEntry = createChatHistoryEntry(
+        'user',
+        apiResponse.initialUserMessage,
+        null,
+        apiResponse.base64Image || null,
+        false
+    );
+    const assistantEntry = createChatHistoryEntry(
+        'assistant',
+        apiResponse.answer,
+        apiResponse.model || null,
+        null,
+        false
+    );
+
+    if (apiResponse.base64Image && !priorImages.includes(apiResponse.base64Image)) {
+        priorImages.push(apiResponse.base64Image);
+    }
+
+    return {
+        ...(existingSession || {}),
+        chatHistory: [...priorHistory, userEntry, assistantEntry],
+        currentModel: apiResponse.model || existingSession?.currentModel || null,
+        currentMode: responseContext.mode || existingSession?.currentMode || null,
+        initialUserMessage: existingSession?.initialUserMessage || apiResponse.initialUserMessage,
+        initialBase64Image: existingSession?.initialBase64Image || apiResponse.base64Image || null,
+        allImages: priorImages,
+        lastUpdated: Date.now()
+    };
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === '__PING__') {
+        sendResponse({ ok: true });
+        return false;
+    }
+
     if (request.action === "START_SNIP") {
         pendingSnipConfig = {
+            appendToSidebar: request.appendToSidebar === true,
             model: request.model || null,
             mode: request.mode || null
         };
@@ -34,6 +110,54 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
 
         sendResponse({ status: "Processing text" });
+    }
+
+    if (request.action === 'OPEN_FLOATING_CHAT_SESSION') {
+        (async () => {
+            const ui = await FloatingChatUI.createFromSession(request.session || {}, { isSidePanelHost: false });
+            ui.setDisplayMode('popup');
+            WindowManager.register(ui);
+
+            if (request.compare) {
+                // When comparing from the side panel, sourceModel tells us which
+                // model the sidebar is using so we can pick a different one.
+                const sourceModel = request.sourceModel || ui.currentModel;
+                let otherModel = null;
+
+                // Find a model that's different from the source
+                for (const m of ui.availableModels) {
+                    if (m.value !== sourceModel) {
+                        otherModel = m.value;
+                        break;
+                    }
+                }
+
+                if (otherModel && ui.modelSelect) {
+                    ui.currentModel = otherModel;
+                    ui.modelSelect.value = otherModel;
+                }
+                await ui.regenerateLastResponse();
+            }
+        })();
+
+        sendResponse({ status: 'Popup opened' });
+    }
+
+    if (request.action === 'BROADCAST_TO_POPUP_WINDOWS') {
+        if (WindowManager.windows.length === 0) {
+            sendResponse({ success: false });
+            return false;
+        }
+
+        const windowCount = WindowManager.windows.length;
+        WindowManager.pendingResponses = windowCount;
+        WindowManager.windows.forEach((w) => w.setInputDisabled(true));
+        WindowManager.windows.forEach((w, index) => {
+            const windowMode = w.currentMode || 'short';
+            w.sendMessageDirect(request.text, index === 0 ? windowCount : 0, windowMode);
+        });
+        sendResponse({ success: true, count: windowCount });
+        return false;
     }
 
     return true;
@@ -117,7 +241,7 @@ function handleSnipComplete(rect) {
                         model: currentModel,
                         base64Image: croppedBase64,
                         mode: currentMode
-                    }, handleResponse);
+                    }, (apiResponse) => handleResponse(apiResponse, requestConfig));
                     return;
                 }
 
@@ -146,7 +270,7 @@ function handleSnipComplete(rect) {
                             text: ocrResponse.text,
                             ocrConfidence: ocrResponse.confidence,
                             mode: currentMode
-                        }, handleResponse);
+                        }, (apiResponse) => handleResponse(apiResponse, requestConfig));
                     } else {
                         console.warn("OCR Empty or Failed:", ocrResponse.error || 'No readable text');
                         if (isVisionModel(currentModel)) {
@@ -155,7 +279,7 @@ function handleSnipComplete(rect) {
                                 model: currentModel,
                                 base64Image: croppedBase64,
                                 mode: currentMode
-                            }, handleResponse);
+                            }, (apiResponse) => handleResponse(apiResponse, requestConfig));
                         } else {
                             alert(`⚠️ No text found in snippet.\n\nSince '${currentModel}' cannot see images, please try snipping clearer text or switch to a Vision model.`);
                             if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
@@ -171,25 +295,74 @@ function handleSnipComplete(rect) {
  * Handle API response - create chat window with result
  * @param {Object} apiResponse
  */
-async function handleResponse(apiResponse) {
+async function handleResponse(apiResponse, responseContext = {}) {
     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
 
     if (apiResponse && apiResponse.success) {
-        // Close all existing chat windows on new snip
+        const storage = await chrome.storage.local.get(['chatDisplayMode', 'sidePanelSession', 'pendingSidebarSnip']);
+        const preferredMode = storage.chatDisplayMode === 'sidebar' ? 'sidebar' : 'popup';
+
+        if (preferredMode === 'sidebar') {
+            const isAppend = responseContext.appendToSidebar === true || storage.pendingSidebarSnip === true;
+            let session;
+            if (isAppend) {
+                session = mergeSidebarSession(storage.sidePanelSession || null, apiResponse, responseContext);
+            } else {
+                session = buildSessionFromApiResponse(apiResponse);
+            }
+
+            // Use OPEN_SIDE_PANEL_WITH_SESSION for new sessions to ensure the panel
+            // is actually open. For appends the panel should already be open, so use
+            // SET_SIDE_PANEL_SESSION to avoid the user-gesture restriction.
+            const sidePanelAction = isAppend ? 'SET_SIDE_PANEL_SESSION' : 'OPEN_SIDE_PANEL_WITH_SESSION';
+            const sidePanelResult = await chrome.runtime.sendMessage({
+                action: sidePanelAction,
+                session
+            });
+            if (storage.pendingSidebarSnip === true) {
+                await chrome.storage.local.remove('pendingSidebarSnip');
+            }
+
+            if (sidePanelResult?.success) {
+                if (apiResponse.guestInfo) {
+                    updateLocalGuestCache(apiResponse.guestInfo);
+                }
+                return;
+            }
+
+            showErrorToast(sidePanelResult?.error || 'Could not open sidebar. Showing popup instead.');
+        } else {
+            // Close all existing chat windows on new snip
+            WindowManager.closeAll();
+
+            const ui = await FloatingChatUI.create();
+            WindowManager.register(ui);
+
+            // Pass base64Image so image thumbnail appears in chat
+            ui.addMessage('user', apiResponse.initialUserMessage, null, false, apiResponse.base64Image || null);
+            ui.addMessage('assistant', apiResponse.answer, null, false, null, false, apiResponse.tokenUsage);
+
+            // Store initial state for comparison cloning
+            ui.initialUserMessage = apiResponse.initialUserMessage;
+            ui.initialBase64Image = apiResponse.base64Image || null;
+
+            // Update local guest usage cache if guestInfo is returned
+            if (apiResponse.guestInfo) {
+                updateLocalGuestCache(apiResponse.guestInfo);
+            }
+            return;
+        }
+
+        // Fallback popup when sidebar open fails
         WindowManager.closeAll();
 
         const ui = await FloatingChatUI.create();
         WindowManager.register(ui);
-
-        // Pass base64Image so image thumbnail appears in chat
         ui.addMessage('user', apiResponse.initialUserMessage, null, false, apiResponse.base64Image || null);
         ui.addMessage('assistant', apiResponse.answer, null, false, null, false, apiResponse.tokenUsage);
-
-        // Store initial state for comparison cloning
         ui.initialUserMessage = apiResponse.initialUserMessage;
         ui.initialBase64Image = apiResponse.base64Image || null;
 
-        // Update local guest usage cache if guestInfo is returned
         if (apiResponse.guestInfo) {
             updateLocalGuestCache(apiResponse.guestInfo);
         }

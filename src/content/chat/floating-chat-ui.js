@@ -6,9 +6,11 @@
  */
 class FloatingChatUI {
     constructor() {
+        this.uiId = crypto.randomUUID();
         this.chatHistory = [];
         this.currentModel = null;
         this.currentMode = null; // Track selected mode (short/detailed/code/default/custom)
+        this.displayMode = 'popup';
         this.availableModels = [];
         this.customModes = [];  // User-created custom modes
         this.customPrompt = ''; // Custom prompt text for 'custom' mode
@@ -17,6 +19,8 @@ class FloatingChatUI {
         this.initialUserMessage = null;
         this.initialBase64Image = null;
         this.allImages = [];  // Store all snipped images for compare window
+        this.activeTabId = null;
+        this.windowId = null;
     }
 
     /**
@@ -28,6 +32,12 @@ class FloatingChatUI {
         await ui.initModel();
         ui.createWindow();
         ui.loadState();
+        return ui;
+    }
+
+    static async createFromSession(session, options = {}) {
+        const ui = await FloatingChatUI.create();
+        ui.hydrateFromSession(session, options);
         return ui;
     }
 
@@ -52,10 +62,11 @@ class FloatingChatUI {
 
         // Get the current selected model, mode, and custom modes from storage
         const storage = await new Promise(resolve => {
-            chrome.storage.local.get(['selectedModel', 'selectedMode', 'customModes', 'customPrompt'], resolve);
+            chrome.storage.local.get(['selectedModel', 'selectedMode', 'customModes', 'customPrompt', 'chatDisplayMode'], resolve);
         });
         this.currentModel = storage.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
         this.currentMode = storage.selectedMode || 'short';
+        this.displayMode = storage.chatDisplayMode === 'sidebar' ? 'sidebar' : 'popup';
         this.customModes = storage.customModes || [];
         this.customPrompt = storage.customPrompt || '';
 
@@ -330,6 +341,7 @@ class FloatingChatUI {
 
         // Header with model selector
         const header = document.createElement("div");
+        this.header = header;
         header.style.cssText = `
             padding: 12px 14px; 
             background: linear-gradient(135deg, #2a2a2a 0%, #1f1f1f 100%); 
@@ -365,6 +377,10 @@ class FloatingChatUI {
         this.modelSelect.addEventListener("change", () => {
             this.currentModel = this.modelSelect.value;
             chrome.storage.local.set({ selectedModel: this.currentModel });
+            if (WindowManager.isSidebarMode()) {
+                WindowManager.refreshLayout();
+            }
+            this.onSessionChanged?.();
         });
 
         titleSection.appendChild(this.modelSelect);
@@ -417,6 +433,7 @@ class FloatingChatUI {
         this.modeSelect.addEventListener("change", () => {
             this.currentMode = this.modeSelect.value;
             chrome.storage.local.set({ selectedMode: this.currentMode });
+            this.onSessionChanged?.();
         });
 
         titleSection.appendChild(this.modeSelect);
@@ -424,6 +441,7 @@ class FloatingChatUI {
 
         // Snip Again button
         const snipAgainBtn = document.createElement("button");
+        this.snipAgainBtn = snipAgainBtn;
         snipAgainBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>`;
         snipAgainBtn.title = "Snip and add to this chat";
         snipAgainBtn.style.cssText = `
@@ -437,6 +455,7 @@ class FloatingChatUI {
 
         // Compare button
         const compareBtn = document.createElement("button");
+        this.compareBtn = compareBtn;
         compareBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`;
         compareBtn.title = "Compare with another model";
         compareBtn.style.cssText = `
@@ -448,8 +467,48 @@ class FloatingChatUI {
         compareBtn.onclick = () => this.spawnCompareWindow();
         header.appendChild(compareBtn);
 
+        const displayModeBtn = document.createElement("button");
+        this.displayModeBtn = displayModeBtn;
+        displayModeBtn.style.cssText = `
+            background: rgba(255,255,255,0.05); color: #888; border: 1px solid rgba(255,255,255,0.1);
+            width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+        `;
+        displayModeBtn.onclick = async () => {
+            const session = this.serializeSession();
+            if (this.isSidePanelHost) {
+                const result = await chrome.runtime.sendMessage({ action: 'MOVE_SIDEPANEL_TO_POPUP', session });
+                if (!result?.success && typeof showErrorToast === 'function') {
+                    showErrorToast(result?.error || 'Could not move sidebar chat to popup.');
+                }
+                return;
+            }
+
+            const result = await chrome.runtime.sendMessage({ action: 'MOVE_CHAT_TO_SIDE_PANEL', session });
+            if (result?.success) {
+                this.close();
+                return;
+            }
+
+            // If the side panel couldn't be opened (likely user gesture restriction),
+            // still save the session so it's ready when the user opens the panel manually.
+            const isUserGestureError = result?.error && result.error.includes('user gesture');
+            if (isUserGestureError) {
+                // Save session to storage so the side panel picks it up when manually opened
+                await chrome.runtime.sendMessage({ action: 'SET_SIDE_PANEL_SESSION', session });
+                if (typeof showErrorToast === 'function') {
+                    showErrorToast('Session saved. Open the sidebar from the extension icon or toolbar to view it.');
+                }
+            } else if (typeof showErrorToast === 'function') {
+                showErrorToast(result?.error || 'Could not move popup chat to sidebar.');
+            }
+        };
+        header.appendChild(displayModeBtn);
+
         // Minimize button
         const minimizeBtn = document.createElement("button");
+        this.minimizeBtn = minimizeBtn;
         minimizeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
         minimizeBtn.title = "Minimize to bubble";
         minimizeBtn.style.cssText = `
@@ -462,6 +521,7 @@ class FloatingChatUI {
         header.appendChild(minimizeBtn);
 
         const closeBtn = document.createElement("span");
+        this.closeBtn = closeBtn;
         closeBtn.id = "closeBtn";
         closeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
         closeBtn.style.cssText = `
@@ -483,15 +543,18 @@ class FloatingChatUI {
             background: linear-gradient(180deg, #0a0a0a 0%, #121212 100%); 
             scrollbar-width: thin; scrollbar-color: #404040 transparent;
             scroll-behavior: smooth;
+            min-height: 0;
         `;
         this.container.appendChild(this.chatBody);
 
         // Input Area
         const inputArea = document.createElement("div");
+        this.inputArea = inputArea;
         inputArea.style.cssText = `
             padding: 12px 14px; border-top: 1px solid rgba(255,255,255,0.08); 
             background: linear-gradient(135deg, #1f1f1f 0%, #171717 100%);
             display: flex; gap: 10px; border-radius: 0 0 12px 12px; align-items: flex-end;
+            flex-shrink: 0;
         `;
 
         this.input = document.createElement("textarea");
@@ -582,6 +645,170 @@ class FloatingChatUI {
         this.host.addEventListener('keydown', preventHostCapture, true);
         this.host.addEventListener('keyup', preventHostCapture, true);
         this.host.addEventListener('keypress', preventHostCapture, true);
+
+        this.setDisplayMode(this.displayMode);
+    }
+
+    setDisplayMode(mode) {
+        this.displayMode = mode === 'sidebar' ? 'sidebar' : 'popup';
+
+        if (!this.container || !this.header) {
+            return;
+        }
+
+        if (this.displayMode === 'sidebar') {
+            if (this.isSidePanelHost) {
+                this.host.style.cssText = 'all: initial; position: static; display: block; width: 100%; height: 100%;';
+                this.container.style.position = 'relative';
+                this.container.style.width = '100%';
+                this.container.style.height = '100%';
+                this.container.style.maxHeight = '100%';
+                this.container.style.minHeight = '100%';
+                this.container.style.minWidth = '0';
+                this.container.style.maxWidth = '100%';
+                this.container.style.top = 'auto';
+                this.container.style.right = 'auto';
+                this.container.style.left = 'auto';
+                this.container.style.bottom = 'auto';
+            } else {
+                this.host.style.cssText = 'all: initial; position: fixed; z-index: 2147483647; top: 0; left: 0;';
+                this.container.style.position = 'fixed';
+                this.container.style.width = '100vw';
+                this.container.style.height = '100vh';
+                this.container.style.maxHeight = '100vh';
+                this.container.style.minHeight = '100vh';
+                this.container.style.minWidth = '100vw';
+                this.container.style.maxWidth = '100vw';
+                this.container.style.top = '0';
+                this.container.style.right = '0';
+                this.container.style.left = 'auto';
+                this.container.style.bottom = 'auto';
+            }
+            this.container.style.borderRadius = '0';
+            this.container.style.borderRight = 'none';
+            this.container.style.borderTop = 'none';
+            this.container.style.resize = 'none';
+            this.container.style.boxShadow = 'none';
+            this.container.style.margin = '0';
+            this.header.style.cursor = 'default';
+            this.header.style.borderRadius = '0';
+            this.header.style.padding = '12px';
+            if (this.minimizeBtn) this.minimizeBtn.style.display = 'none';
+            this.hasSavedPosition = false;
+        } else {
+            this.host.style.cssText = 'all: initial; position: fixed; z-index: 2147483647; top: 0; left: 0;';
+            this.container.style.position = 'fixed';
+            this.container.style.width = '480px';
+            this.container.style.height = '580px';
+            this.container.style.minWidth = '320px';
+            this.container.style.minHeight = '280px';
+            this.container.style.maxWidth = '90vw';
+            this.container.style.maxHeight = '90vh';
+            this.container.style.top = this.container.style.top || '50px';
+            this.container.style.bottom = 'auto';
+            this.container.style.borderRadius = '12px';
+            this.container.style.borderTop = '1px solid rgba(255, 107, 74, 0.4)';
+            this.container.style.borderRight = '1px solid rgba(255, 107, 74, 0.4)';
+            this.container.style.resize = 'both';
+            this.container.style.boxShadow = '0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05)';
+            this.header.style.cursor = 'move';
+            this.header.style.borderRadius = '12px 12px 0 0';
+            this.header.style.padding = '12px 14px';
+            if (this.minimizeBtn) this.minimizeBtn.style.display = 'flex';
+            this.loadState();
+        }
+
+        this.updateDisplayModeButton();
+    }
+
+    applyManagedLayout({ mode, isActive }) {
+        if (!this.container) return;
+
+        if (mode === 'sidebar') {
+            this.container.style.display = isActive ? 'flex' : 'none';
+            return;
+        }
+
+        this.container.style.display = 'flex';
+    }
+
+    renderSidebarTabs(windows, activeWindowId) {
+        return;
+    }
+
+    updateDisplayModeButton() {
+        if (!this.displayModeBtn) return;
+
+        if (this.displayMode === 'sidebar') {
+            this.displayModeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3"/><path d="M16 8l5 4-5 4"/><path d="M21 12H9"/></svg>`;
+            this.displayModeBtn.title = 'Pop out to popup';
+        } else {
+            this.displayModeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>`;
+            this.displayModeBtn.title = 'Move to sidebar';
+        }
+    }
+
+    serializeSession() {
+        return {
+            chatHistory: this.chatHistory.map((message) => ({ ...message })),
+            currentModel: this.currentModel,
+            currentMode: this.currentMode,
+            availableModels: Array.isArray(this.availableModels) ? [...this.availableModels] : [],
+            customModes: Array.isArray(this.customModes) ? [...this.customModes] : [],
+            customPrompt: this.customPrompt || '',
+            initialUserMessage: this.initialUserMessage || null,
+            initialBase64Image: this.initialBase64Image || null,
+            allImages: Array.isArray(this.allImages) ? [...this.allImages] : [],
+            activeTabId: this.activeTabId || null,
+            windowId: this.windowId || null,
+            lastUpdated: Date.now()
+        };
+    }
+
+    hydrateFromSession(session, options = {}) {
+        if (!session) return;
+
+        this.availableModels = Array.isArray(session.availableModels) && session.availableModels.length > 0
+            ? [...session.availableModels]
+            : this.availableModels;
+        this.customModes = Array.isArray(session.customModes) ? [...session.customModes] : this.customModes;
+        this.customPrompt = session.customPrompt || this.customPrompt;
+        this.currentModel = session.currentModel || this.currentModel;
+        this.currentMode = session.currentMode || this.currentMode;
+        this.initialUserMessage = session.initialUserMessage || null;
+        this.initialBase64Image = session.initialBase64Image || null;
+        this.allImages = Array.isArray(session.allImages) ? [...session.allImages] : [];
+        this.activeTabId = session.activeTabId || this.activeTabId || null;
+        this.windowId = session.windowId || this.windowId || null;
+        this.chatHistory = Array.isArray(session.chatHistory) ? session.chatHistory.map((message) => ({ ...message })) : [];
+        this.isSidePanelHost = options.isSidePanelHost === true;
+
+        if (this.modelSelect) {
+            this.modelSelect.innerHTML = '';
+            this.availableModels.forEach((m) => {
+                const opt = document.createElement('option');
+                opt.value = m.value;
+                opt.textContent = m.name;
+                if (m.value === this.currentModel) opt.selected = true;
+                this.modelSelect.appendChild(opt);
+            });
+            this.modelSelect.value = this.currentModel;
+        }
+
+        if (this.modeSelect) {
+            this.modeSelect.value = this.currentMode;
+        }
+
+        if (this.chatBody) {
+            this.chatBody.innerHTML = '';
+            this.chatHistory.forEach((msg) => {
+                renderClonedChatMessage(this, msg);
+            });
+            this.chatBody.scrollTop = this.chatBody.scrollHeight;
+        }
+
+        this.updateDisplayModeButton();
+        this.onSessionChanged?.();
     }
 
     /**
@@ -614,6 +841,7 @@ class FloatingChatUI {
         });
 
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
+        this.onSessionChanged?.();
     }
 
     /**
@@ -1032,6 +1260,8 @@ class FloatingChatUI {
         WindowManager.windows.forEach(w => {
             w._processSnippedImage(croppedBase64);
         });
+
+        WindowManager.refreshLayout();
     }
 
     /**
@@ -1189,6 +1419,7 @@ class FloatingChatUI {
         }
 
         const newUI = await FloatingChatUI.create();
+        newUI.setDisplayMode('popup');
         WindowManager.register(newUI);
 
         // Copy all state to compare window
@@ -1420,6 +1651,7 @@ class FloatingChatUI {
         let containerWidth, containerHeight;
 
         header.addEventListener('mousedown', (e) => {
+            if (this.displayMode === 'sidebar') return;
             if (e.target.id === 'closeBtn') return;
             // Prevent drag when clicking controls
             if (e.target.closest('button') || e.target.closest('select')) return;
@@ -1491,6 +1723,8 @@ class FloatingChatUI {
      * Save window position and size to storage
      */
     saveState() {
+        if (this.displayMode === 'sidebar') return;
+
         const rect = this.container.getBoundingClientRect();
         chrome.storage.local.set({
             chatWinState: {
@@ -1506,6 +1740,11 @@ class FloatingChatUI {
      * Load window position and size from storage
      */
     loadState() {
+        if (this.displayMode === 'sidebar') {
+            this.hasSavedPosition = false;
+            return;
+        }
+
         this.hasSavedPosition = true;
 
         chrome.storage.local.get(['chatWinState'], (res) => {
