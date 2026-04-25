@@ -44,6 +44,8 @@ const API_KEY_CONFIG = {
 };
 const DEFAULT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
 const DEFAULT_MODE = 'short';
+const DEFAULT_CHAT_DISPLAY_MODE = 'popup';
+const SIDE_PANEL_PATH = 'src/sidepanel/sidepanel.html';
 
 // --- STATE ---
 let editingModeId = null;
@@ -102,7 +104,14 @@ function updateGuestBanner(guestStatus) {
 }
 
 async function initializeDefaults() {
-  const result = await chrome.storage.local.get(['customModes', 'enabledProviders', 'enabledModels', 'selectedModel', 'selectedMode']);
+  const result = await chrome.storage.local.get([
+    'customModes',
+    'enabledProviders',
+    'enabledModels',
+    'selectedModel',
+    'selectedMode',
+    'chatDisplayMode'
+  ]);
 
   if (!result.customModes) {
     await chrome.storage.local.set({ customModes: DEFAULT_MODES });
@@ -123,6 +132,10 @@ async function initializeDefaults() {
   if (!result.selectedMode) {
     await chrome.storage.local.set({ selectedMode: DEFAULT_MODE });
   }
+
+  if (!result.chatDisplayMode) {
+    await chrome.storage.local.set({ chatDisplayMode: DEFAULT_CHAT_DISPLAY_MODE });
+  }
 }
 
 // --- LOAD SETTINGS ---
@@ -130,7 +143,7 @@ async function loadSettings() {
   const result = await chrome.storage.local.get([
     'customModes', 'enabledProviders', 'enabledModels', 'selectedModel', 'selectedMode',
     'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost', 'customPrompt',
-    'providerHiddenSince', 'hideContextMenu', 'hiddenModels'
+    'providerHiddenSince', 'hideContextMenu', 'hiddenModels', 'chatDisplayMode'
   ]);
 
   // Check and cleanup old keys
@@ -170,6 +183,11 @@ async function loadSettings() {
   const hideContextMenuToggle = document.getElementById('hideContextMenu');
   if (hideContextMenuToggle) {
     hideContextMenuToggle.checked = result.hideContextMenu === true;
+  }
+
+  const chatDisplayModeSelect = document.getElementById('chatDisplayMode');
+  if (chatDisplayModeSelect) {
+    chatDisplayModeSelect.value = result.chatDisplayMode || DEFAULT_CHAT_DISPLAY_MODE;
   }
 
   // Handle custom prompt visibility
@@ -399,6 +417,33 @@ async function validateCustomModelBeforeSave(customModel) {
   }
 
   return response;
+}
+
+async function openBrowserSidePanelFromPopup() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs[0];
+  if (!tab?.id) {
+    throw new Error('No active tab available for sidebar.');
+  }
+
+  if (typeof chrome.sidePanel?.setOptions !== 'function' || typeof chrome.sidePanel?.open !== 'function') {
+    const response = await chrome.runtime.sendMessage({ action: 'PREPARE_SIDE_PANEL' });
+    if (!response?.success) {
+      throw new Error(response?.error || 'Chrome side panel API is unavailable.');
+    }
+    return;
+  }
+
+  await chrome.sidePanel.setOptions({
+    tabId: tab.id,
+    path: SIDE_PANEL_PATH,
+    enabled: true
+  });
+  await chrome.sidePanel.open({ windowId: tab.windowId });
+  const response = await chrome.runtime.sendMessage({ action: 'RESET_SIDE_PANEL_SESSION' });
+  if (!response?.success) {
+    console.warn('Snip & Ask: could not reset side panel session', response?.error);
+  }
 }
 
 function loadModes(modes, selectedMode) {
@@ -712,6 +757,21 @@ function setupEventListeners() {
     });
   }
 
+  const chatDisplayModeSelect = document.getElementById('chatDisplayMode');
+  if (chatDisplayModeSelect) {
+    chatDisplayModeSelect.addEventListener('change', async () => {
+      const nextMode = chatDisplayModeSelect.value === 'sidebar' ? 'sidebar' : 'popup';
+      await chrome.storage.local.set({ chatDisplayMode: nextMode });
+      if (nextMode === 'sidebar') {
+        try {
+          await openBrowserSidePanelFromPopup();
+        } catch (error) {
+          console.warn('Snip & Ask: could not pre-open side panel', error);
+        }
+      }
+    });
+  }
+
   // Hide context menu toggle
   const hideContextMenuToggle = document.getElementById('hideContextMenu');
   if (hideContextMenuToggle) {
@@ -810,7 +870,7 @@ async function deleteMode(modeId) {
 
 // --- SNIP FUNCTIONALITY ---
 async function startSnip() {
-  const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'selectedMode', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost']);
+  const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'selectedMode', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost', 'chatDisplayMode']);
   const modelSelect = document.getElementById('modelSelect');
   const modeSelect = document.getElementById('modeSelect');
   let model = modelSelect?.value || result.selectedModel || DEFAULT_MODEL;
@@ -854,6 +914,14 @@ async function startSnip() {
   if (isRestrictedPage(tab.url)) {
     alert("Cannot run on this restricted page.");
     return;
+  }
+
+  if (result.chatDisplayMode === 'sidebar') {
+    try {
+      await openBrowserSidePanelFromPopup();
+    } catch (error) {
+      console.warn('Snip & Ask: side panel could not be prepared before snip', error);
+    }
   }
 
   try {

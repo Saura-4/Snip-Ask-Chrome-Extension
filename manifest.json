@@ -9,7 +9,8 @@
     "scripting",
     "storage",
     "offscreen",
-    "contextMenus"
+    "contextMenus",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://api.groq.com/*",
@@ -44,6 +45,9 @@
       "48": "assets/icons/icon-48.png",
       "128": "assets/icons/icon-128.png"
     }
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/sidepanel.html"
   },
   "icons": {
     "16": "assets/icons/icon-16.png",
