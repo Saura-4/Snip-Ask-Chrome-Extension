@@ -750,6 +750,7 @@ class FloatingChatUI {
 
     serializeSession() {
         return {
+            uiId: this.uiId,
             chatHistory: this.chatHistory.map((message) => ({ ...message })),
             currentModel: this.currentModel,
             currentMode: this.currentMode,
@@ -768,6 +769,7 @@ class FloatingChatUI {
     hydrateFromSession(session, options = {}) {
         if (!session) return;
 
+        this.uiId = session.uiId || this.uiId;
         this.availableModels = Array.isArray(session.availableModels) && session.availableModels.length > 0
             ? [...session.availableModels]
             : this.availableModels;
@@ -808,7 +810,6 @@ class FloatingChatUI {
         }
 
         this.updateDisplayModeButton();
-        this.onSessionChanged?.();
     }
 
     /**

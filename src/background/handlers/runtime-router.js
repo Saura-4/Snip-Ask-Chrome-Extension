@@ -432,7 +432,6 @@ export function createRuntimeMessageListener() {
                     }
 
                     await ensureActiveTabContentScript(targetTab.id);
-                    await chrome.storage.local.set({ pendingSidebarSnip: true });
                     await chrome.tabs.sendMessage(targetTab.id, {
                         action: 'START_SNIP',
                         appendToSidebar: true,
