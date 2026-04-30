@@ -303,7 +303,7 @@ async function handleResponse(apiResponse, responseContext = {}) {
         const preferredMode = storage.chatDisplayMode === 'sidebar' ? 'sidebar' : 'popup';
 
         if (preferredMode === 'sidebar') {
-            const isAppend = responseContext.appendToSidebar === true || storage.pendingSidebarSnip === true;
+            const isAppend = responseContext.appendToSidebar === true;
             let session;
             if (isAppend) {
                 session = mergeSidebarSession(storage.sidePanelSession || null, apiResponse, responseContext);

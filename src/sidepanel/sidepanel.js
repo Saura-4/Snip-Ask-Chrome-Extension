@@ -27,13 +27,13 @@ const WindowManager = {
 };
 
 let sidePanelUi = null;
-let suppressNextStorageSync = false;
 
 async function persistSidePanelSession() {
     if (!sidePanelUi) return;
-    suppressNextStorageSync = true;
+    const session = sidePanelUi.serializeSession();
+    sidePanelUi._lastRenderedTimestamp = session.lastUpdated || null;
     await chrome.storage.local.set({
-        sidePanelSession: sidePanelUi.serializeSession()
+        sidePanelSession: session
     });
 }
 
@@ -42,9 +42,11 @@ async function loadSidePanelSession() {
     return storage.sidePanelSession || null;
 }
 
-async function closeBrowserSidePanel() {
-    const storage = await chrome.storage.local.get(['sidePanelSession']);
-    const windowId = storage.sidePanelSession?.windowId;
+async function closeBrowserSidePanel(windowId = null) {
+    if (!windowId) {
+        const storage = await chrome.storage.local.get(['sidePanelSession']);
+        windowId = storage.sidePanelSession?.windowId;
+    }
     if (chrome.sidePanel.close && windowId) {
         try {
             await chrome.sidePanel.close({ windowId });
@@ -58,6 +60,7 @@ async function renderSession(session) {
     if (!sidePanelUi) {
         sidePanelUi = await FloatingChatUI.createFromSession(session || {}, { isSidePanelHost: true });
         sidePanelUi.setDisplayMode('sidebar');
+        sidePanelUi._lastRenderedTimestamp = session?.lastUpdated || null;
         sidePanelUi.onSessionChanged = () => {
             void persistSidePanelSession();
         };
@@ -85,8 +88,9 @@ async function renderSession(session) {
 
         if (sidePanelUi.closeBtn) {
             sidePanelUi.closeBtn.onclick = async () => {
+                const windowId = sidePanelUi.windowId;
                 await chrome.storage.local.set({ sidePanelSession: null });
-                await closeBrowserSidePanel();
+                await closeBrowserSidePanel(windowId);
                 sidePanelUi.chatBody.innerHTML = '';
             };
         }
@@ -98,6 +102,7 @@ async function renderSession(session) {
         // Null/empty session — clear the chat body
         sidePanelUi.chatHistory = [];
         if (sidePanelUi.chatBody) sidePanelUi.chatBody.innerHTML = '';
+        sidePanelUi._lastRenderedTimestamp = null;
         return;
     }
 
@@ -125,11 +130,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local' || !changes.sidePanelSession) {
-        return;
-    }
-
-    if (suppressNextStorageSync) {
-        suppressNextStorageSync = false;
         return;
     }
 
