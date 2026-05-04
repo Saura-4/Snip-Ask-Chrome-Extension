@@ -7,7 +7,12 @@
  */
 let pendingSnipConfig = null;
 
-function buildSessionFromApiResponse(apiResponse) {
+function getSessionModel(apiResponse, responseContext = {}) {
+    return responseContext.model || apiResponse.model || null;
+}
+
+function buildSessionFromApiResponse(apiResponse, responseContext = {}) {
+    const sessionModel = getSessionModel(apiResponse, responseContext);
     const userEntry = createChatHistoryEntry(
         'user',
         apiResponse.initialUserMessage,
@@ -18,7 +23,7 @@ function buildSessionFromApiResponse(apiResponse) {
     const assistantEntry = createChatHistoryEntry(
         'assistant',
         apiResponse.answer,
-        apiResponse.model || null,
+        sessionModel,
         null,
         false
     );
@@ -26,8 +31,8 @@ function buildSessionFromApiResponse(apiResponse) {
     return {
         uiId: crypto.randomUUID(),
         chatHistory: [userEntry, assistantEntry],
-        currentModel: apiResponse.model || null,
-        currentMode: null,
+        currentModel: sessionModel,
+        currentMode: responseContext.mode || null,
         availableModels: [],
         customModes: [],
         customPrompt: '',
@@ -39,6 +44,7 @@ function buildSessionFromApiResponse(apiResponse) {
 }
 
 function mergeSidebarSession(existingSession, apiResponse, responseContext = {}) {
+    const sessionModel = getSessionModel(apiResponse, responseContext);
     const priorHistory = Array.isArray(existingSession?.chatHistory)
         ? existingSession.chatHistory.map((message) => ({ ...message }))
         : [];
@@ -56,7 +62,7 @@ function mergeSidebarSession(existingSession, apiResponse, responseContext = {})
     const assistantEntry = createChatHistoryEntry(
         'assistant',
         apiResponse.answer,
-        apiResponse.model || null,
+        sessionModel,
         null,
         false
     );
@@ -68,7 +74,7 @@ function mergeSidebarSession(existingSession, apiResponse, responseContext = {})
     return {
         ...(existingSession || {}),
         chatHistory: [...priorHistory, userEntry, assistantEntry],
-        currentModel: apiResponse.model || existingSession?.currentModel || null,
+        currentModel: sessionModel || existingSession?.currentModel || null,
         currentMode: responseContext.mode || existingSession?.currentMode || null,
         initialUserMessage: existingSession?.initialUserMessage || apiResponse.initialUserMessage,
         initialBase64Image: existingSession?.initialBase64Image || apiResponse.base64Image || null,
@@ -241,7 +247,7 @@ function handleSnipComplete(rect) {
                         model: currentModel,
                         base64Image: croppedBase64,
                         mode: currentMode
-                    }, (apiResponse) => handleResponse(apiResponse, requestConfig));
+                    }, (apiResponse) => handleResponse(apiResponse, { ...requestConfig, model: currentModel, mode: currentMode }));
                     return;
                 }
 
@@ -270,7 +276,7 @@ function handleSnipComplete(rect) {
                             text: ocrResponse.text,
                             ocrConfidence: ocrResponse.confidence,
                             mode: currentMode
-                        }, (apiResponse) => handleResponse(apiResponse, requestConfig));
+                        }, (apiResponse) => handleResponse(apiResponse, { ...requestConfig, model: currentModel, mode: currentMode }));
                     } else {
                         console.warn("OCR Empty or Failed:", ocrResponse.error || 'No readable text');
                         if (isVisionModel(currentModel)) {
@@ -279,7 +285,7 @@ function handleSnipComplete(rect) {
                                 model: currentModel,
                                 base64Image: croppedBase64,
                                 mode: currentMode
-                            }, (apiResponse) => handleResponse(apiResponse, requestConfig));
+                            }, (apiResponse) => handleResponse(apiResponse, { ...requestConfig, model: currentModel, mode: currentMode }));
                         } else {
                             alert(`⚠️ No text found in snippet.\n\nSince '${currentModel}' cannot see images, please try snipping clearer text or switch to a Vision model.`);
                             if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
@@ -308,7 +314,7 @@ async function handleResponse(apiResponse, responseContext = {}) {
             if (isAppend) {
                 session = mergeSidebarSession(storage.sidePanelSession || null, apiResponse, responseContext);
             } else {
-                session = buildSessionFromApiResponse(apiResponse);
+                session = buildSessionFromApiResponse(apiResponse, responseContext);
             }
 
             // Use OPEN_SIDE_PANEL_WITH_SESSION for new sessions to ensure the panel
@@ -340,7 +346,7 @@ async function handleResponse(apiResponse, responseContext = {}) {
 
             // Pass base64Image so image thumbnail appears in chat
             ui.addMessage('user', apiResponse.initialUserMessage, null, false, apiResponse.base64Image || null);
-            ui.addMessage('assistant', apiResponse.answer, null, false, null, false, apiResponse.tokenUsage);
+            ui.addMessage('assistant', apiResponse.answer, getSessionModel(apiResponse, responseContext), false, null, false, apiResponse.tokenUsage);
 
             // Store initial state for comparison cloning
             ui.initialUserMessage = apiResponse.initialUserMessage;
@@ -359,7 +365,7 @@ async function handleResponse(apiResponse, responseContext = {}) {
         const ui = await FloatingChatUI.create();
         WindowManager.register(ui);
         ui.addMessage('user', apiResponse.initialUserMessage, null, false, apiResponse.base64Image || null);
-        ui.addMessage('assistant', apiResponse.answer, null, false, null, false, apiResponse.tokenUsage);
+        ui.addMessage('assistant', apiResponse.answer, getSessionModel(apiResponse, responseContext), false, null, false, apiResponse.tokenUsage);
         ui.initialUserMessage = apiResponse.initialUserMessage;
         ui.initialBase64Image = apiResponse.base64Image || null;
 
