@@ -422,6 +422,29 @@ export function createRuntimeMessageListener() {
             return true;
         }
 
+        if (request.action === 'BROADCAST_TO_POPUP_WINDOWS') {
+            (async () => {
+                try {
+                    const storage = await chrome.storage.local.get(['sidePanelSession']);
+                    const targetTab = await getTabForSession(storage.sidePanelSession || null, sender.tab || null);
+                    if (!targetTab?.id) {
+                        throw new Error('No active tab available for popup windows.');
+                    }
+
+                    await ensureActiveTabContentScript(targetTab.id);
+                    const result = await chrome.tabs.sendMessage(targetTab.id, {
+                        action: 'BROADCAST_TO_POPUP_WINDOWS',
+                        text: request.text,
+                        parallelCount: request.parallelCount || 0
+                    });
+                    sendResponse(result || { success: false });
+                } catch (error) {
+                    sendResponse({ success: false, error: error.message });
+                }
+            })();
+            return true;
+        }
+
         if (request.action === 'START_SNIP_FROM_SIDE_PANEL') {
             (async () => {
                 try {

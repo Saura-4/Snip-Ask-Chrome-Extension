@@ -231,6 +231,7 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
             sendResponse({
                 success: true,
                 answer,
+                model: modelName,
                 initialUserMessage: messages[messages.length - 1],
                 usedOCR: type === 'text',
                 ocrConfidence,
@@ -254,7 +255,8 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
         sendResponse({
             success: true,
             answer: result.answer,
-            model: result.model,
+            model: modelName,
+            responseModel: result.model,
             tokenUsage: result.tokenUsage,
             initialUserMessage: result.initialUserMessage,
             usedOCR: type === 'text',
@@ -302,6 +304,7 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
             sendResponse({
                 success: true,
                 answer,
+                model: modelName,
                 initialUserMessage: messages[messages.length - 1],
                 imageCount: images.length,
                 guestInfo,
@@ -329,7 +332,8 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
         sendResponse({
             success: true,
             answer: result.text,
-            model: result.model,
+            model: modelName,
+            responseModel: result.model,
             tokenUsage: result.tokenUsage,
             initialUserMessage: messages[0],
             imageCount: images.length

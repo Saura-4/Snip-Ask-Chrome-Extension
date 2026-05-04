@@ -1,99 +1,153 @@
 # Snip & Ask
 
-**Your AI Screen Assistant. Snip anything, ask anything.**
+Snip any part of your screen and ask AI to explain, solve, or debug it. Supports Groq, Gemini, OpenAI, OpenRouter, and Ollama.
 
-> *No subscriptions. No data mining. Just instant intelligence.*
-
----
-
-## Why This Exists
-
-As a student, I constantly faced two problems:
-1.  **The Context-Switching Tax**: Encountering a complex diagram or error log meant taking a screenshot, switching tabs to ChatGPT, uploading the image, and then switching back. It broke my flow every time.
-2.  **The Subscription Wall**: Well, I can't afford expensive monthly subscriptions. I needed powerful AI tools without the hefty price tag.
-
-I realized that powerful, free resources exist (Groq, Google Gemini, Ollama), but they are scattered. **Snip & Ask** is my solution: an open-source extension that aggregates these free tools into a single, seamless workflow floating right over your screen.
-
-## What It Does
-
-**Snip & Ask** removes the friction between you and the answer.
-1.  **Snip**: Draw a box around *any* content—code errors, diagrams, or UI mockups.
-2.  **Select & Ask**: Highlight text on any webpage, right-click, and ask immediately.
-3.  **Instant Answer**: An overlay appears with the specific help you need.
-
-### How It "Sees"
-*   **Vision Models** (e.g., Llama 4 , Gemini 2.5/3): These models see the actual image pixel-by-pixel, perfect for diagrams and charts.
-*   **Non-Vision Models** (e.g., DeepSeek, Kimi, gpt oss): We use the powerful **Tesseract.js OCR** engine to extract text from your snip on-device, so even text-only models can understand your screen content.
+**[Download directly from the Chrome Web Store](https://chromewebstore.google.com/detail/snip-ask-ai-screen-assist/bhbmfojjmimjpdkebhhipkffjkcglofo)**
 
 ## Key Features
 
-### ⚡ Zero Friction
--   **Universal Capture**: Works on any website, local file, or PDF open in Chrome.
--   **Temporary Chat**: Conversations are ephemeral and focused on the task at hand. Privacy by default.
+- **Guest Mode**: Try the extension instantly without needing an API key.
+- **Bring Your Own Key (BYOK)**: Connect your own API keys for Groq, Gemini, OpenRouter, or local Ollama for unlimited access and full control.
+- **Universal Capture**: Works on any website, local file, or PDF open in Chrome.
+- **Right-Click Ask**: Simply select text or an image, right-click, and ask the AI instantly via the context menu.
+- **Custom Modes**: Create and tailor custom system prompts and modes for your specific workflows.
+- **Temporary Chat**: Conversations are ephemeral and focused on the task at hand for privacy by default.
+- **Compare Mode**: Ask two different models simultaneously and compare their answers side-by-side to verify truth.
+- **On-Device OCR**: Built-in text extraction using Tesseract.js ensures text-only models can understand screen content.
 
-### 🧠 Multi-Model Intelligence
--   **Cloud Integration**: Support for **Groq** (Llama 3 - blazing fast), **Google Gemini** (strong reasoning), and **OpenRouter** (access to Claude, GPT-4, etc).
--   **Local AI (Ollama)**: Run models entirely offline on your machine.
--   **Compare Mode**: AI can hallucinate. Tackle this by asking two different models simultaneously and comparing their answers side-by-side to verify the truth.
+## Tech Stack
 
-### 🛠️ Power User Tools
--   **Custom Modes**: Create your own personas (e.g., "Strict Code Reviewer", "Simple Explainer").
--   **Custome Prompt**: Create your temporary custom prompt on the fly.
--   **Guest Mode**: Unsure about API keys? Try the extension immediately using our hosted provider. Generous limits included.
--   **Shortcuts**: Configurable keyboard shortcuts  via `chrome://extensions/shortcuts`.
+- **Extension Framework**: Chrome Extensions Manifest V3
+- **Language**: Vanilla JavaScript (ES6+), HTML, CSS
+- **OCR Engine**: Tesseract.js (Client-side, WebAssembly)
+- **Math Rendering**: KaTeX
+- **Security**: DOMPurify
+- **Backend/Rate Limiting**: Cloudflare Workers (for Guest Mode)
+- **Database**: Cloudflare D1 (Analytics and Rate Limiting state)
+- **Deployment**: Chrome Web Store
 
-## Installation
+## Prerequisites
 
-### [Chrome Web Store](https://chromewebstore.google.com/detail/snip-ask-ai-screen-assist/bhbmfojjmimjpdkebhhipkffjkcglofo)
-*(Recommended for most users)*
+- Google Chrome browser (or Chromium-based alternative)
+- Optional: API Keys (Groq, Gemini, or OpenRouter)
+- Optional: Ollama installed locally for offline inference
+- Optional: Node.js (for deploying the Cloudflare Worker)
 
-### Developer Install
-1.  Clone this repository:
-    ```bash
-    git clone https://github.com/Saura-4/Snip-Ask-Chrome-Extension.git
-    ```
-2.  Open Chrome and navigate to `chrome://extensions`.
-3.  Toggle **Developer mode** (top right corner).
-4.  Click **Load unpacked** and select the extension folder.
+## Getting Started
 
-## Setup & Configuration
+### 1. Clone the Repository
 
-1.  **Click the Icon** in your toolbar.
-2.  **Guest Mode**: You can start snipping immediately!
-3.  **Add Your Keys (For Unlimited Access)**:
-    -   Open **Settings** (⚙️).
-    -   **Groq**: [Groq Console](https://console.groq.com/keys) (Free Tier available).
-    -   **Gemini**: [Google AI Studio](https://aistudio.google.com/app/apikey) (Free Tier available).
-    -   **Ollama**:
-        *   Install from [Ollama.com](https://ollama.com/).
-        *   **Important**: You must run the CORS fix script to allow the extension to talk to Ollama.
-        *   👉 [**View setup guide**](src/setupguide/setupguide.html) for detailed instructions.
+```bash
+git clone https://github.com/Saura-4/Snip-Ask-Chrome-Extension.git
+cd Snip-Ask-Chrome-Extension
+```
 
-## Support the Project
+### 2. Load the Extension
 
-This project is 100% free and open-source. If it saves you time or helps you learn, consider supporting the development!
+1. Open Chrome and navigate to `chrome://extensions`.
+2. Toggle **Developer mode** in the top right corner.
+3. Click **Load unpacked** and select the `Snip-Ask-Chrome-Extension` directory.
 
-| Method | Link/ID |
-| :--- | :--- |
-| **GitHub Sponsor** | [github.com/sponsors/Saura-4](https://github.com/sponsors/Saura-4) |
-| **PayPal** | [paypal.me/saura444](https://paypal.me/saura444) |
-| **UPI (India)** | `saurav04042004@okaxis` |
+### 3. Setup AI Providers (Optional but recommended)
 
-## Community
+1. Click the extension icon in your toolbar.
+2. Open Settings.
+3. Enter your API keys for Groq, Gemini, or OpenRouter.
+4. For Ollama: Ensure Ollama is running locally with correct CORS settings.
 
--   **Found a bug?** [Open an Issue](https://github.com/Saura-4/Snip-Ask-Chrome-Extension/issues)
--   **Have an idea?** [Start a Discussion](https://github.com/Saura-4/Snip-Ask-Chrome-Extension/discussions)
--   **Chat with us:** [Join our Discord](https://discord.gg/bppspgkd)
+## Architecture
 
-## Acknowledgments
+### Directory Structure
 
-Special thanks to the open-source projects that make Snip & Ask possible:
--   **[Tesseract.js](https://github.com/naptha/tesseract.js)**: For the incredible OCR engine that powers our client-side text extraction.
--   **[KaTeX](https://katex.org/)**: For fast math rendering.
--   **[DOMPurify](https://github.com/cure53/DOMPurify)**: For keeping our HTML rendering secure.
+```
+├── src/
+│   ├── background/    # Service workers and AI routing logic
+│   ├── content/       # Content scripts for DOM interaction
+│   ├── offscreen/     # Offscreen document for clipboard and OCR processing
+│   ├── popup/         # Extension popup UI
+│   ├── setupguide/    # Local Ollama setup guide
+│   └── sidepanel/     # Chrome side panel UI
+├── lib/               # Local libraries (Tesseract.js, KaTeX, DOMPurify)
+├── cloudflare-worker/ # Guest Mode proxy and rate limiter
+├── assets/            # Icons and UI assets
+└── manifest.json      # Extension configuration
+```
+
+### Request Lifecycle
+
+1. User triggers a snip or text selection via Chrome context menu or keyboard shortcut.
+2. Content script captures the screen or text and sends it to the background worker.
+3. If an image is captured and the selected AI model is text-only, the background worker delegates the image to the offscreen document for local OCR via Tesseract.js.
+4. Background worker routes the query to the appropriate AI service (Groq, Gemini, OpenRouter, or local Ollama).
+5. If using Guest Mode, the request routes through the Cloudflare Worker proxy which enforces rate limits and tracks analytics via D1.
+6. The AI response is streamed back to the popup or side panel UI and rendered using KaTeX and DOMPurify.
+
+## Environment Variables
+
+Environment variables are strictly used for the Cloudflare Worker proxy (`cloudflare-worker/wrangler.toml`). No environment variables are needed for the Chrome Extension itself.
+
+### Required (Cloudflare Worker)
+
+| Variable | Description | Example |
+| --- | --- | --- |
+| `GROQ_API_KEY` | Proxy API key for Groq Guest Mode | `gsk_...` |
+
+### Optional (Cloudflare Worker)
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `VELOCITY_LIMIT` | Max requests per minute | `10` |
+| `HARD_CAP_DAILY` | Max requests per day | `100` |
+| `ALLOWED_EXTENSION_ID` | CORS allowed origin | `bhbmfojjmimjpdkebhhipkffjkcglofo` |
+
+## Available Scripts
+
+There is no bundler for the Chrome Extension itself; the code is vanilla JavaScript.
+
+For the Cloudflare Worker:
+
+| Command | Description |
+| --- | --- |
+| `npm install` | Install Cloudflare Worker dependencies |
+| `npx wrangler dev` | Start local development server |
+| `npx wrangler deploy` | Deploy worker to Cloudflare |
+
+## Testing
+
+No automated test suite is currently configured. Manual testing is required by loading the unpacked extension into Chrome.
+
+1. Navigate to `chrome://extensions`.
+2. Reload the extension after making file changes.
+3. Inspect views:
+   - Popup: Right click the extension icon -> Inspect popup.
+   - Background Worker: Click "service worker" on the extension card.
+   - Side Panel: Right click inside the side panel -> Inspect.
+
+## Troubleshooting
+
+### Local Ollama Connection Issues
+
+**Error:** Extension cannot connect to local Ollama instance.
+
+**Solution:**
+Ollama blocks cross-origin requests by default. You must configure CORS.
+1. See the guide in `src/setupguide/setupguide.html`.
+2. Generally, you need to set `OLLAMA_ORIGINS="chrome-extension://extension_id"` in your system environment variables before starting Ollama.
+
+### OCR Failing
+
+**Error:** Text extraction returns empty or nonsense.
+
+**Solution:**
+Ensure the `lib/` directory contains `eng.traineddata.gz` and the WebAssembly core files (`tesseract-core.wasm`). They are required for offline OCR.
+
+### Guest Mode Blocked
+
+**Error:** Rate limit exceeded or Access Denied.
+
+**Solution:**
+The Cloudflare Worker restricts requests per device fingerprint to prevent abuse. Use your own API keys in Settings to completely bypass Guest Mode limits.
 
 ---
 
-<div align="center">
-    Built with ❤️ by <a href="https://github.com/Saura-4">Saurav Chourasia</a>
-</div>
+Built by Saurav Chourasia.
