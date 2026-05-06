@@ -276,16 +276,21 @@ function renderChatMessage(targetUI, options) {
     return msgDiv;
 }
 
-function renderClonedChatMessage(targetUI, msg) {
+function renderClonedChatMessage(targetUI, msg, options = {}) {
+    const {
+        includeActions = false,
+        messageIndex = -1
+    } = options;
+
     renderChatMessage(targetUI, {
         role: msg.role,
         content: msg.content,
         displayText: msg.displayText || (typeof msg.content === 'string' ? msg.content : ''),
         base64Image: msg.base64Image || null,
-        includeActions: false,
+        includeActions: msg.role === 'assistant' && includeActions,
         isError: false,
         isRegenerated: Boolean(msg.isRegenerated),
-        messageIndex: -1,
+        messageIndex,
         modelLabel: msg.role === 'assistant' ? targetUI._getModelDisplayName(msg.model) : null,
         tokenUsage: null
     });

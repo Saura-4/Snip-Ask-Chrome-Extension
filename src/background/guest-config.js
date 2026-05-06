@@ -10,7 +10,7 @@ const GUEST_WORKER_URL = 'https://snip-ask-guest.saurav04042004.workers.dev/';
 // Keep this aligned with a stable, widely-available Groq model.
 // Guest mode uses this only as a fallback when the user's selection isn't a Groq model.
 // Prefer a fast default for no-friction first use.
-const GUEST_DEFAULT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+const GUEST_DEFAULT_MODEL = 'groq:auto';
 const DEFAULT_PROVIDER_VISIBILITY = {
     groq: true,
     google: false,
@@ -209,7 +209,7 @@ async function makeGuestRequest(requestBody, externalSignal = null) {
     }
 
     if (data.code === 'API_EXHAUSTED') {
-        throw new Error('Service temporarily unavailable. Please try again in a few minutes.');
+        throw new Error(data.message || 'Service temporarily unavailable. Please try again in a few minutes.');
     }
 
     if (data.code === 'MISSING_ID') {

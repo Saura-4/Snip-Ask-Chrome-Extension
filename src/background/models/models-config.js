@@ -8,6 +8,7 @@ import { isGuestConfigured } from '../guest-config.js';
  */
 export const ALL_MODELS = {
     groq: [
+        { value: 'groq:auto', name: 'Auto (Guest)' },
         { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B (Fast)' },
         { value: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
@@ -65,6 +66,7 @@ export const ALL_MODELS = {
  */
 export const CHAT_WINDOW_MODELS = {
     groq: [
+        { value: 'groq:auto', name: 'Auto' },
         { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B' },
         { value: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
@@ -323,6 +325,9 @@ export function getFilteredModels(enabledProviders, enabledModels, hiddenModels 
     for (const [provider, models] of Object.entries(modelSource)) {
         if (providersToUse[provider]) {
             models.forEach(model => {
+                if (!isGuestMode && model.value === 'groq:auto') {
+                    return;
+                }
                 if (isGuestMode && model.value.endsWith(':custom')) {
                     return;
                 }

@@ -1,7 +1,7 @@
 import { getAIService, optimizeMessageHistory } from '../ai-service.js';
 import { isGuestMode, isGuestConfigured, makeGuestRequest, GUEST_DEFAULT_MODEL } from '../guest-config.js';
 import { getChatWindowModels, checkGuestModeStatus } from '../models/models-config.js';
-import { isGoogleModel, isGroqModel, isOllamaModel, isOpenAIModel, isOpenRouterModel } from '../models/model-routing.js';
+import { isAutoGuestModel, isGoogleModel, isGroqModel, isOllamaModel, isOpenAIModel, isOpenRouterModel } from '../models/model-routing.js';
 import { buildGuestRequestPayload, buildGuestSystemPrompt } from '../guest/request.js';
 import { parseGuestResponse } from '../guest/response.js';
 import { getStorage } from '../core/storage.js';
@@ -110,7 +110,8 @@ export async function handleContinueChat(request, sendResponse, signal) {
             const guestResponse = await makeGuestRequest(guestRequest.payload, signal);
             const { answer, guestInfo, tokenUsage } = parseGuestResponse(guestResponse);
 
-            sendResponse({ success: true, answer, guestInfo, tokenUsage });
+            const responseModel = guestInfo?.model || guestResponse.model || guestRequest.modelName;
+            sendResponse({ success: true, answer, model: responseModel, responseModel, selectedModel: modelName, guestInfo, tokenUsage });
             return;
         }
 
@@ -123,7 +124,7 @@ export async function handleContinueChat(request, sendResponse, signal) {
         const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
         const optimizedHistory = optimizeMessageHistory(request.history, modelName);
         const result = await aiService.chat(optimizedHistory, signal);
-        sendResponse({ success: true, answer: result.text, tokenUsage: result.tokenUsage });
+        sendResponse({ success: true, answer: result.text, model: modelName, responseModel: result.model, tokenUsage: result.tokenUsage });
     } catch (error) {
         sendResponse({ success: false, error: error.message });
     }
@@ -132,7 +133,8 @@ export async function handleContinueChat(request, sendResponse, signal) {
 export async function handleProviderConfigCheck(request, sendResponse) {
     try {
         const storage = await getStorage(['groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost', 'selectedModel', 'selectedMode', 'interactionMode']);
-        const modelName = request.model || storage.selectedModel || GUEST_DEFAULT_MODEL;
+        const requestedModel = request.model || storage.selectedModel || GUEST_DEFAULT_MODEL;
+        const modelName = requestedModel;
         const currentMode = storage.selectedMode || storage.interactionMode || 'short';
 
         let isConfigured = false;
@@ -159,6 +161,7 @@ export async function handleProviderConfigCheck(request, sendResponse) {
             isConfigured,
             providerName,
             model: modelName,
+            selectedModel: requestedModel,
             mode: currentMode
         });
     } catch (error) {
@@ -203,8 +206,9 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
             'customModes', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost'
         ]);
         const mode = explicitMode || storage.selectedMode || storage.interactionMode || 'short';
-        const modelName = explicitModel || storage.selectedModel || GUEST_DEFAULT_MODEL;
+        const requestedModelName = explicitModel || storage.selectedModel || GUEST_DEFAULT_MODEL;
         const inGuestMode = await isGuestMode();
+        const modelName = requestedModelName;
 
         if (inGuestMode) {
             if (!isGuestConfigured()) {
@@ -224,14 +228,23 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
                 messages.push({ role: 'user', content: truncateGuestText(inputContent) });
             }
 
-            const guestRequest = buildGuestRequestPayload({ modelName, mode, storage, messages });
+            const guestRequest = buildGuestRequestPayload({
+                modelName: requestedModelName,
+                mode,
+                storage,
+                messages,
+                forceVisionFallback: type === 'image' && isAutoGuestModel(requestedModelName)
+            });
             const guestResponse = await makeGuestRequest(guestRequest.payload, signal);
             const { answer, guestInfo, tokenUsage } = parseGuestResponse(guestResponse);
+            const responseModel = guestInfo?.model || guestResponse.model || guestRequest.modelName;
 
             sendResponse({
                 success: true,
                 answer,
-                model: modelName,
+                model: responseModel,
+                selectedModel: requestedModelName,
+                responseModel,
                 initialUserMessage: messages[messages.length - 1],
                 usedOCR: type === 'text',
                 ocrConfidence,
@@ -275,8 +288,9 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
             'customModes', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost'
         ]);
         const mode = explicitMode || storage.selectedMode || storage.interactionMode || 'short';
-        const modelName = explicitModel || storage.selectedModel || GUEST_DEFAULT_MODEL;
+        const requestedModelName = explicitModel || storage.selectedModel || GUEST_DEFAULT_MODEL;
         const inGuestMode = await isGuestMode();
+        const modelName = requestedModelName;
 
         if (inGuestMode) {
             if (!isGuestConfigured()) {
@@ -292,19 +306,23 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
             messages.push({ role: 'user', content: contentArray });
 
             const guestRequest = buildGuestRequestPayload({
-                modelName,
+                modelName: requestedModelName,
                 mode,
                 storage,
                 messages,
-                optimize: true
+                optimize: true,
+                forceVisionFallback: isAutoGuestModel(requestedModelName)
             });
             const guestResponse = await makeGuestRequest(guestRequest.payload, signal);
             const { answer, guestInfo, tokenUsage } = parseGuestResponse(guestResponse);
+            const responseModel = guestInfo?.model || guestResponse.model || guestRequest.modelName;
 
             sendResponse({
                 success: true,
                 answer,
-                model: modelName,
+                model: responseModel,
+                selectedModel: requestedModelName,
+                responseModel,
                 initialUserMessage: messages[messages.length - 1],
                 imageCount: images.length,
                 guestInfo,

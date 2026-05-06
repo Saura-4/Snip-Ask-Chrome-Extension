@@ -6,13 +6,63 @@
  * Message Listener - Entry point for extension messages
  */
 let pendingSnipConfig = null;
+let activeOverlayRequestId = 0;
+const cancelledOverlayRequestIds = new Set();
+
+function beginOverlayRequest() {
+    activeOverlayRequestId += 1;
+    return activeOverlayRequestId;
+}
+
+function cancelActiveOverlayRequest() {
+    if (activeOverlayRequestId) {
+        cancelledOverlayRequestIds.add(activeOverlayRequestId);
+    }
+    pendingSnipConfig = null;
+}
+
+function isOverlayRequestCancelled(requestId) {
+    return Boolean(requestId && cancelledOverlayRequestIds.has(requestId));
+}
+
+function finishOverlayRequest(requestId) {
+    if (requestId) {
+        cancelledOverlayRequestIds.delete(requestId);
+    }
+}
+
+document.addEventListener('snipAskCancelActiveRequest', cancelActiveOverlayRequest);
+
+function isExtensionContextInvalidatedError(error) {
+    const message = typeof error === 'string'
+        ? error
+        : (error?.message || error?.reason?.message || String(error || ''));
+    return message.includes('Extension context invalidated');
+}
+
+window.addEventListener('error', (event) => {
+    if (isExtensionContextInvalidatedError(event.error || event.message)) {
+        event.preventDefault();
+    }
+}, true);
+
+window.addEventListener('unhandledrejection', (event) => {
+    if (isExtensionContextInvalidatedError(event.reason)) {
+        event.preventDefault();
+    }
+}, true);
 
 function getSessionModel(apiResponse, responseContext = {}) {
-    return responseContext.model || apiResponse.model || null;
+    return apiResponse.selectedModel || responseContext.model || apiResponse.model || null;
+}
+
+function getResponseModel(apiResponse, responseContext = {}) {
+    return apiResponse.responseModel || apiResponse.model || responseContext.model || null;
 }
 
 function buildSessionFromApiResponse(apiResponse, responseContext = {}) {
     const sessionModel = getSessionModel(apiResponse, responseContext);
+    const responseModel = getResponseModel(apiResponse, responseContext);
     const userEntry = createChatHistoryEntry(
         'user',
         apiResponse.initialUserMessage,
@@ -23,7 +73,7 @@ function buildSessionFromApiResponse(apiResponse, responseContext = {}) {
     const assistantEntry = createChatHistoryEntry(
         'assistant',
         apiResponse.answer,
-        sessionModel,
+        responseModel,
         null,
         false
     );
@@ -45,6 +95,7 @@ function buildSessionFromApiResponse(apiResponse, responseContext = {}) {
 
 function mergeSidebarSession(existingSession, apiResponse, responseContext = {}) {
     const sessionModel = getSessionModel(apiResponse, responseContext);
+    const responseModel = getResponseModel(apiResponse, responseContext);
     const priorHistory = Array.isArray(existingSession?.chatHistory)
         ? existingSession.chatHistory.map((message) => ({ ...message }))
         : [];
@@ -62,7 +113,7 @@ function mergeSidebarSession(existingSession, apiResponse, responseContext = {})
     const assistantEntry = createChatHistoryEntry(
         'assistant',
         apiResponse.answer,
-        sessionModel,
+        responseModel,
         null,
         false
     );
@@ -104,15 +155,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Handle text selection from context menu
     if (request.action === "SHOW_AI_RESPONSE_FOR_TEXT") {
         if (typeof showLoadingCursor === 'function') showLoadingCursor();
+        const requestId = beginOverlayRequest();
 
         // Read mode from storage to pass explicitly
         chrome.storage.local.get(['selectedMode', 'interactionMode'], (modeStorage) => {
+            if (isOverlayRequestCancelled(requestId)) return;
             const mode = modeStorage.selectedMode || modeStorage.interactionMode || 'short';
             chrome.runtime.sendMessage({
                 action: "ASK_AI_TEXT",
                 text: request.text,
                 mode: mode
-            }, handleResponse);
+            }, (apiResponse) => handleResponse(apiResponse, { requestId }));
         });
 
         sendResponse({ status: "Processing text" });
@@ -176,14 +229,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 function handleSnipComplete(rect) {
     const requestConfig = pendingSnipConfig || { model: null, mode: null };
     pendingSnipConfig = null;
+    const requestId = beginOverlayRequest();
 
     // Capture Screenshot
     chrome.runtime.sendMessage({
         action: "CAPTURE_VISIBLE_TAB"
     }, (response) => {
+        if (isOverlayRequestCancelled(requestId)) return;
         if (!response || !response.dataUrl) {
             alert("Screenshot failed. Reload page.");
             if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
+            finishOverlayRequest(requestId);
             return;
         }
 
@@ -191,9 +247,11 @@ function handleSnipComplete(rect) {
 
         // Crop the image
         cropImage(response.dataUrl, rect, async (croppedBase64) => {
+            if (isOverlayRequestCancelled(requestId)) return;
 
             // Show first-time privacy toast (only once per user)
             chrome.storage.local.get(['hasShownSnipToast'], (res) => {
+                if (isOverlayRequestCancelled(requestId)) return;
                 if (!res.hasShownSnipToast) {
                     chrome.storage.local.set({ hasShownSnipToast: true });
                     const toast = document.createElement('div');
@@ -216,6 +274,7 @@ function handleSnipComplete(rect) {
                 window._snipAgainTarget = null;
 
                 if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
+                finishOverlayRequest(requestId);
                 targetUI.addSnippedImage(croppedBase64);
                 return;
             }
@@ -225,29 +284,33 @@ function handleSnipComplete(rect) {
                 action: "CHECK_PROVIDER_CONFIG",
                 model: requestConfig.model
             }, async (configResult) => {
+                if (isOverlayRequestCancelled(requestId)) return;
                 if (chrome.runtime.lastError || !configResult?.success) {
                     showErrorToast("Failed to check configuration. Please reload the page.");
                     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
+                    finishOverlayRequest(requestId);
                     return;
                 }
 
                 const currentModel = configResult.model;
                 const currentMode = requestConfig.mode || configResult.mode || 'short';
+                const isAutoGuestModel = currentModel === 'groq:auto';
 
                 if (!configResult.isConfigured) {
                     showErrorToast(`Please set your ${configResult.providerName} in the extension popup!`);
                     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
                     chrome.runtime.sendMessage({ action: "OPEN_OPTIONS_PAGE" });
+                    finishOverlayRequest(requestId);
                     return;
                 }
 
-                if (isVisionModel(currentModel)) {
+                if (!isAutoGuestModel && isVisionModel(currentModel)) {
                     chrome.runtime.sendMessage({
                         action: "ASK_AI",
                         model: currentModel,
                         base64Image: croppedBase64,
                         mode: currentMode
-                    }, (apiResponse) => handleResponse(apiResponse, { ...requestConfig, model: currentModel, mode: currentMode }));
+                    }, (apiResponse) => handleResponse(apiResponse, { ...requestConfig, model: currentModel, mode: currentMode, requestId }));
                     return;
                 }
 
@@ -257,16 +320,18 @@ function handleSnipComplete(rect) {
                     action: "PERFORM_OCR",
                     base64Image: croppedBase64
                 }, (ocrResponse) => {
+                    if (isOverlayRequestCancelled(requestId)) return;
 
                     if (chrome.runtime.lastError || !ocrResponse) {
                         showErrorToast("OCR Failed: " + (chrome.runtime.lastError?.message || "Unknown error"));
                         if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
+                        finishOverlayRequest(requestId);
                         return;
                     }
 
                     // Handle OCR quality failures with helpful messages
                     if (!ocrResponse.success && ocrResponse.error) {
-                        console.warn("OCR Quality Check Failed:", ocrResponse.error);
+                        console.debug("OCR Quality Check Failed:", ocrResponse.error);
                     }
 
                     if (ocrResponse.success && ocrResponse.text && ocrResponse.text.length > 3) {
@@ -276,19 +341,20 @@ function handleSnipComplete(rect) {
                             text: ocrResponse.text,
                             ocrConfidence: ocrResponse.confidence,
                             mode: currentMode
-                        }, (apiResponse) => handleResponse(apiResponse, { ...requestConfig, model: currentModel, mode: currentMode }));
+                        }, (apiResponse) => handleResponse(apiResponse, { ...requestConfig, model: currentModel, mode: currentMode, requestId }));
                     } else {
-                        console.warn("OCR Empty or Failed:", ocrResponse.error || 'No readable text');
-                        if (isVisionModel(currentModel)) {
+                        console.debug("OCR Empty or Failed:", ocrResponse.error || 'No readable text');
+                        if (isAutoGuestModel || isVisionModel(currentModel)) {
                             chrome.runtime.sendMessage({
                                 action: "ASK_AI",
                                 model: currentModel,
                                 base64Image: croppedBase64,
                                 mode: currentMode
-                            }, (apiResponse) => handleResponse(apiResponse, { ...requestConfig, model: currentModel, mode: currentMode }));
+                            }, (apiResponse) => handleResponse(apiResponse, { ...requestConfig, model: currentModel, mode: currentMode, requestId }));
                         } else {
                             alert(`⚠️ No text found in snippet.\n\nSince '${currentModel}' cannot see images, please try snipping clearer text or switch to a Vision model.`);
                             if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
+                            finishOverlayRequest(requestId);
                         }
                     }
                 });
@@ -302,10 +368,19 @@ function handleSnipComplete(rect) {
  * @param {Object} apiResponse
  */
 async function handleResponse(apiResponse, responseContext = {}) {
+    if (isOverlayRequestCancelled(responseContext.requestId)) {
+        finishOverlayRequest(responseContext.requestId);
+        return;
+    }
+
     if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
 
     if (apiResponse && apiResponse.success) {
         const storage = await chrome.storage.local.get(['chatDisplayMode', 'sidePanelSession', 'pendingSidebarSnip']);
+        if (isOverlayRequestCancelled(responseContext.requestId)) {
+            finishOverlayRequest(responseContext.requestId);
+            return;
+        }
         const preferredMode = storage.chatDisplayMode === 'sidebar' ? 'sidebar' : 'popup';
 
         if (preferredMode === 'sidebar') {
@@ -325,6 +400,10 @@ async function handleResponse(apiResponse, responseContext = {}) {
                 action: sidePanelAction,
                 session
             });
+            if (isOverlayRequestCancelled(responseContext.requestId)) {
+                finishOverlayRequest(responseContext.requestId);
+                return;
+            }
             if (storage.pendingSidebarSnip === true) {
                 await chrome.storage.local.remove('pendingSidebarSnip');
             }
@@ -333,6 +412,7 @@ async function handleResponse(apiResponse, responseContext = {}) {
                 if (apiResponse.guestInfo) {
                     updateLocalGuestCache(apiResponse.guestInfo);
                 }
+                finishOverlayRequest(responseContext.requestId);
                 return;
             }
 
@@ -346,7 +426,7 @@ async function handleResponse(apiResponse, responseContext = {}) {
 
             // Pass base64Image so image thumbnail appears in chat
             ui.addMessage('user', apiResponse.initialUserMessage, null, false, apiResponse.base64Image || null);
-            ui.addMessage('assistant', apiResponse.answer, getSessionModel(apiResponse, responseContext), false, null, false, apiResponse.tokenUsage);
+            ui.addMessage('assistant', apiResponse.answer, getResponseModel(apiResponse, responseContext), false, null, false, apiResponse.tokenUsage);
 
             // Store initial state for comparison cloning
             ui.initialUserMessage = apiResponse.initialUserMessage;
@@ -356,6 +436,7 @@ async function handleResponse(apiResponse, responseContext = {}) {
             if (apiResponse.guestInfo) {
                 updateLocalGuestCache(apiResponse.guestInfo);
             }
+            finishOverlayRequest(responseContext.requestId);
             return;
         }
 
@@ -365,16 +446,20 @@ async function handleResponse(apiResponse, responseContext = {}) {
         const ui = await FloatingChatUI.create();
         WindowManager.register(ui);
         ui.addMessage('user', apiResponse.initialUserMessage, null, false, apiResponse.base64Image || null);
-        ui.addMessage('assistant', apiResponse.answer, getSessionModel(apiResponse, responseContext), false, null, false, apiResponse.tokenUsage);
+        ui.addMessage('assistant', apiResponse.answer, getResponseModel(apiResponse, responseContext), false, null, false, apiResponse.tokenUsage);
         ui.initialUserMessage = apiResponse.initialUserMessage;
         ui.initialBase64Image = apiResponse.base64Image || null;
 
         if (apiResponse.guestInfo) {
             updateLocalGuestCache(apiResponse.guestInfo);
         }
+        finishOverlayRequest(responseContext.requestId);
     } else {
         // Show error in a styled toast instead of native alert
-        showErrorToast(apiResponse ? apiResponse.error : "Unknown error");
+        if (!isOverlayRequestCancelled(responseContext.requestId)) {
+            showErrorToast(apiResponse ? apiResponse.error : "Unknown error");
+        }
+        finishOverlayRequest(responseContext.requestId);
     }
 }
 

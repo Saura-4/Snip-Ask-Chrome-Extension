@@ -56,7 +56,7 @@ class FloatingChatUI {
             // Fallback: minimal default if background script fails
             console.warn('Failed to fetch models from background:', modelResult?.error);
             this.availableModels = [
-                { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout' }
+                { value: 'groq:auto', name: 'Auto' }
             ];
         }
 
@@ -64,7 +64,7 @@ class FloatingChatUI {
         const storage = await new Promise(resolve => {
             chrome.storage.local.get(['selectedModel', 'selectedMode', 'customModes', 'customPrompt', 'chatDisplayMode'], resolve);
         });
-        this.currentModel = storage.selectedModel || 'meta-llama/llama-4-scout-17b-16e-instruct';
+        this.currentModel = storage.selectedModel || 'groq:auto';
         this.currentMode = storage.selectedMode || 'short';
         this.displayMode = storage.chatDisplayMode === 'sidebar' ? 'sidebar' : 'popup';
         this.customModes = storage.customModes || [];
@@ -319,17 +319,18 @@ class FloatingChatUI {
             code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #ccc; }
             
             /* TYPING INDICATOR */
-            .typing-container { display: flex; align-items: center; gap: 10px; opacity: 0.8; margin-bottom: 10px; }
-            .typing-bubble { background: #2a2a2a; padding: 8px 14px; border-radius: 12px 12px 12px 2px; display: flex; gap: 4px; width: fit-content; }
+            .typing-container { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; padding: 8px 10px; width: fit-content; max-width: 100%; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; box-shadow: 0 8px 22px rgba(0,0,0,0.22); }
+            .typing-bubble { background: transparent; padding: 0; display: flex; gap: 4px; width: fit-content; }
             .dot { width: 6px; height: 6px; background: #666; border-radius: 50%; animation: bounce 1.4s infinite ease-in-out both; }
             .dot:nth-child(1) { animation-delay: -0.32s; }
             .dot:nth-child(2) { animation-delay: -0.16s; }
             @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); background: #f55036; } }
-            .thinking-text { font-size: 11px; color: #666; font-style: italic; animation: pulse 1.5s infinite; }
+            .thinking-text { font-size: 11px; color: #9ca3af; font-style: normal; animation: pulse 1.5s infinite; }
             @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
-            .stop-btn { background: none; border: 1px solid #555; color: #999; font-size: 11px; padding: 3px 10px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s; margin-left: auto; }
-            .stop-btn:hover { border-color: #f55036; color: #f55036; background: rgba(245, 80, 54, 0.08); }
-            .stop-btn svg { width: 10px; height: 10px; fill: currentColor; }
+            .stop-btn { width: 26px; height: 26px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); color: #b8b8b8; padding: 0; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: all 0.18s ease; margin-left: 2px; }
+            .stop-btn svg { width: 12px; height: 12px; display: block; }
+            .stop-btn:hover { border-color: rgba(245, 80, 54, 0.55); color: #ff6b4a; background: rgba(245, 80, 54, 0.12); }
+            .stop-btn:active { transform: scale(0.94); }
             
             /* MATH BLOCKS (LaTeX) */
             .math-block { background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 12px 16px; margin: 10px 0; overflow-x: auto; text-align: center; }
@@ -803,8 +804,11 @@ class FloatingChatUI {
 
         if (this.chatBody) {
             this.chatBody.innerHTML = '';
-            this.chatHistory.forEach((msg) => {
-                renderClonedChatMessage(this, msg);
+            this.chatHistory.forEach((msg, index) => {
+                renderClonedChatMessage(this, msg, {
+                    includeActions: true,
+                    messageIndex: index
+                });
             });
             this.chatBody.scrollTop = this.chatBody.scrollHeight;
         }
@@ -863,8 +867,9 @@ class FloatingChatUI {
             </div>
             <span class="thinking-text">Thinking...</span>
             <button class="stop-btn" title="Stop generating">
-                <svg viewBox="0 0 10 10"><rect x="1" y="1" width="8" height="8" rx="1"/></svg>
-                Stop
+                <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M3 3 9 9M9 3 3 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
             </button>
         `;
 
@@ -975,7 +980,9 @@ class FloatingChatUI {
             }
 
             // Check if we need to include image data for vision models
-            if (isVisionModel(this.currentModel)) {
+            const isAutoGuestModel = this.currentModel === 'groq:auto';
+
+            if (!isAutoGuestModel && isVisionModel(this.currentModel)) {
                 if (imagesToSend.length > 0) {
                     // Use multi-image if multiple, single image otherwise
                     if (imagesToSend.length === 1) {
@@ -1032,6 +1039,21 @@ class FloatingChatUI {
                             history: historyWithOcr,
                             mode: this.currentMode
                         });
+                    } else if (isAutoGuestModel) {
+                        response = imagesToSend.length === 1
+                            ? await chrome.runtime.sendMessage({
+                                action: "ASK_AI",
+                                model: this.currentModel,
+                                base64Image: imagesToSend[0],
+                                mode: this.currentMode
+                            })
+                            : await chrome.runtime.sendMessage({
+                                action: "ASK_AI_MULTI_IMAGE",
+                                model: this.currentModel,
+                                images: imagesToSend,
+                                textContext: this._extractTextFromHistory(userMsgIndex),
+                                mode: this.currentMode
+                            });
                     } else {
                         // OCR failed, use text history as fallback
                         response = await chrome.runtime.sendMessage({
@@ -1058,7 +1080,7 @@ class FloatingChatUI {
 
             if (response && response.success) {
                 // Add regenerated indicator to the response
-                this._addRegeneratedMessage(response.answer, this.currentModel);
+                this._addRegeneratedMessage(response.answer, response.responseModel || response.model || this.currentModel);
                 if (response.guestInfo) {
                     updateLocalGuestCache(response.guestInfo);
                 }
@@ -1482,7 +1504,9 @@ class FloatingChatUI {
             const apiHistory = newUI._buildApiHistory(newUI.chatHistory.length - 1);
             const fullTextContext = apiHistory.map(m => `${m.role}: ${m.content}`).join('\n');
 
-            if (isVisionModel(newUI.currentModel) && imagesToSend.length > 0) {
+            const isAutoGuestModel = newUI.currentModel === 'groq:auto';
+
+            if (!isAutoGuestModel && isVisionModel(newUI.currentModel) && imagesToSend.length > 0) {
                 // Vision model with images: Always use MULTI_IMAGE which supports textContext
                 // ASK_AI does NOT support additionalContext, so we must use MULTI_IMAGE even for 1 image
                 response = await chrome.runtime.sendMessage({
@@ -1517,6 +1541,14 @@ class FloatingChatUI {
                         action: "CONTINUE_CHAT",
                         model: newUI.currentModel,
                         history: historyWithOcr,
+                        mode: newUI.currentMode
+                    });
+                } else if (isAutoGuestModel) {
+                    response = await chrome.runtime.sendMessage({
+                        action: "ASK_AI_MULTI_IMAGE",
+                        model: newUI.currentModel,
+                        images: imagesToSend,
+                        textContext: fullTextContext,
                         mode: newUI.currentMode
                     });
                 } else {
