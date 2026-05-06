@@ -139,7 +139,7 @@ async function runOCR(base64Image) {
 
         // 5. Validate OCR quality
         if (confidence < OCR_CONFIG.MIN_CONFIDENCE) {
-            console.warn(`[Offscreen] Low confidence OCR (${confidence}%) - likely noise`);
+            console.debug(`[Offscreen] Low confidence OCR (${confidence}%) - likely noise`);
             return {
                 success: false,
                 error: `OCR confidence too low (${confidence.toFixed(0)}%). Image may be too noisy or not contain text.`,
@@ -150,7 +150,7 @@ async function runOCR(base64Image) {
         const qualityCheck = analyzeOCRQuality(text);
 
         if (!qualityCheck.isValid) {
-            console.warn(`[Offscreen] OCR quality check failed: ${qualityCheck.reason}`, qualityCheck.detail);
+            console.debug(`[Offscreen] OCR quality check failed: ${qualityCheck.reason}`, qualityCheck.detail);
             return {
                 success: false,
                 error: `OCR produced unusable text (${qualityCheck.reason}). Try snipping clearer content.`,

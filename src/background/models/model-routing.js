@@ -29,7 +29,14 @@ function isOpenAIModel(modelName) {
     return getModelProvider(modelName) === 'openai';
 }
 
+function isAutoGuestModel(modelName) {
+    return modelName === 'groq:auto';
+}
+
 function resolveGuestModel(modelName, fallbackModel) {
+    if (isAutoGuestModel(modelName)) {
+        return modelName;
+    }
     if (typeof modelName === 'string' && modelName.startsWith('groq:')) {
         return fallbackModel;
     }
@@ -51,6 +58,7 @@ export {
     isOpenRouterModel,
     isOllamaModel,
     isOpenAIModel,
+    isAutoGuestModel,
     resolveGuestModel,
     normalizeProviderScopedModelName
 };

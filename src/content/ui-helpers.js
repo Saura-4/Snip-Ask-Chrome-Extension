@@ -9,121 +9,105 @@ let _loadingOverlay = null;
 let _loadingOverlayEscapeHandler = null;
 
 /**
- * Show a full-screen thinking overlay while processing snip
- * Called after user snips the screen, before the response window appears
+ * Show a draggable, nonblocking thinking panel while processing a snip.
  */
 function showLoadingCursor() {
-    // Remove existing overlay if any
     hideLoadingCursor();
 
-    // Create overlay container
     _loadingOverlay = document.createElement('div');
     _loadingOverlay.id = 'snip-loading-overlay';
     _loadingOverlay.style.cssText = `
         position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        background: rgba(0, 0, 0, 0.7);
-        backdrop-filter: blur(4px);
+        inset: 0;
         z-index: 2147483646;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        gap: 12px;
+        pointer-events: none;
         animation: overlayFadeIn 0.2s ease;
     `;
 
-    const cancelButton = document.createElement('button');
-    cancelButton.type = 'button';
-    cancelButton.innerHTML = `
-        <span style="font-size: 14px; line-height: 1;">✕</span>
-        <span>Stop</span>
-    `;
-    cancelButton.style.cssText = `
-        position: absolute;
-        top: 18px;
-        left: 18px;
-        display: inline-flex;
+    const panel = document.createElement('div');
+    panel.style.cssText = `
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 16px;
         background: rgba(18, 18, 18, 0.92);
         color: #fff4f1;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-left: 3px solid #f55036;
-        border-radius: 12px;
-        padding: 10px 14px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 999px;
+        min-width: 188px;
+        min-height: 40px;
+        padding: 6px 8px 6px 18px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        font-size: 12px;
-        font-weight: 700;
-        letter-spacing: 0.02em;
-        cursor: pointer;
-        transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+        box-shadow: 0 14px 38px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(245, 80, 54, 0.08);
+        backdrop-filter: blur(14px);
+        pointer-events: auto;
+        cursor: grab;
+        user-select: none;
+        touch-action: none;
     `;
-    cancelButton.addEventListener('mouseenter', () => {
-        cancelButton.style.background = 'rgba(28, 28, 28, 0.98)';
-        cancelButton.style.borderColor = 'rgba(245, 80, 54, 0.45)';
-        cancelButton.style.boxShadow = '0 12px 34px rgba(0, 0, 0, 0.34)';
-        cancelButton.style.transform = 'translateY(-1px)';
-    });
-    cancelButton.addEventListener('mouseleave', () => {
-        cancelButton.style.background = 'rgba(18, 18, 18, 0.92)';
-        cancelButton.style.borderColor = 'rgba(255, 255, 255, 0.14)';
-        cancelButton.style.boxShadow = '0 10px 30px rgba(0, 0, 0, 0.28)';
-        cancelButton.style.transform = 'translateY(0)';
-    });
-    cancelButton.addEventListener('click', () => {
-        cancelButton.disabled = true;
-        cancelButton.style.opacity = '0.75';
-        cancelButton.style.cursor = 'default';
-        cancelButton.innerHTML = `
-            <span style="font-size: 14px; line-height: 1;">…</span>
-            <span>Stopping</span>
-        `;
-        chrome.runtime.sendMessage({ action: 'CANCEL_AI_REQUEST' }, () => {
-            hideLoadingCursor();
-            if (chrome.runtime.lastError) {
-                console.warn('Failed to cancel active AI request:', chrome.runtime.lastError.message);
-            }
-        });
-    });
-    _loadingOverlay.appendChild(cancelButton);
 
-    _loadingOverlayEscapeHandler = (event) => {
-        if (event.key !== 'Escape') return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (!cancelButton.disabled) {
-            cancelButton.click();
+    let panelLeft = null;
+    let panelTop = null;
+    let dragState = null;
+
+    const movePanel = (left, top) => {
+        const rect = panel.getBoundingClientRect();
+        const margin = 8;
+        panelLeft = Math.min(Math.max(left, margin), window.innerWidth - rect.width - margin);
+        panelTop = Math.min(Math.max(top, margin), window.innerHeight - rect.height - margin);
+        panel.style.left = `${panelLeft}px`;
+        panel.style.top = `${panelTop}px`;
+        panel.style.transform = 'none';
+    };
+
+    panel.addEventListener('pointerdown', (event) => {
+        if (event.button !== undefined && event.button !== 0) return;
+        if (event.target.closest('button')) return;
+
+        const rect = panel.getBoundingClientRect();
+        dragState = {
+            offsetX: event.clientX - rect.left,
+            offsetY: event.clientY - rect.top
+        };
+        panel.setPointerCapture(event.pointerId);
+        panel.style.cursor = 'grabbing';
+    });
+
+    panel.addEventListener('pointermove', (event) => {
+        if (!dragState) return;
+        movePanel(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY);
+    });
+
+    const stopDragging = (event) => {
+        if (!dragState) return;
+        dragState = null;
+        panel.style.cursor = 'grab';
+        try {
+            panel.releasePointerCapture(event.pointerId);
+        } catch {
+            // Pointer capture may already be released by the browser.
         }
     };
-    document.addEventListener('keydown', _loadingOverlayEscapeHandler, true);
+    panel.addEventListener('pointerup', stopDragging);
+    panel.addEventListener('pointercancel', stopDragging);
 
-    // Container for bubble and text (similar to .typing-container but centered)
     const thinkingContainer = document.createElement('div');
     thinkingContainer.style.cssText = `
         display: flex;
         align-items: center;
-        gap: 10px;
-        opacity: 0.9;
+        gap: 8px;
     `;
 
-    // Bubble (matching .typing-bubble)
     const bubble = document.createElement('div');
     bubble.style.cssText = `
-        background: #2a2a2a;
-        padding: 8px 14px;
-        border-radius: 12px;
         display: flex;
         gap: 4px;
         width: fit-content;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     `;
 
-    // Create 3 animated dots
     for (let i = 0; i < 3; i++) {
         const dot = document.createElement('span');
         dot.style.cssText = `
@@ -137,31 +121,86 @@ function showLoadingCursor() {
         bubble.appendChild(dot);
     }
 
-    // "Thinking..." text (matching .thinking-text)
     const text = document.createElement('span');
     text.textContent = 'Thinking...';
     text.style.cssText = `
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        font-size: 11px;
-        color: #ddd;
-        font-style: italic;
+        font-size: 12px;
+        color: #d5d5d5;
+        font-style: normal;
         animation: thinkingPulse 1.5s infinite;
+        white-space: nowrap;
     `;
-
     thinkingContainer.appendChild(bubble);
     thinkingContainer.appendChild(text);
-    _loadingOverlay.appendChild(thinkingContainer);
 
-    // Add keyframes animation via style tag
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.innerHTML = '<svg viewBox="0 0 12 12" aria-hidden="true" style="width: 12px; height: 12px; display: block;"><path d="M3 3 9 9M9 3 3 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+    cancelButton.title = 'Stop generating';
+    cancelButton.style.cssText = `
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        background: rgba(255, 255, 255, 0.05);
+        color: #d5d5d5;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 999px;
+        padding: 0;
+        font: inherit;
+        cursor: pointer;
+        transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+    `;
+    cancelButton.addEventListener('mouseenter', () => {
+        cancelButton.style.background = 'rgba(245, 80, 54, 0.14)';
+        cancelButton.style.borderColor = 'rgba(245, 80, 54, 0.5)';
+        cancelButton.style.color = '#ff6b4a';
+        cancelButton.style.transform = 'translateY(-1px)';
+    });
+    cancelButton.addEventListener('mouseleave', () => {
+        cancelButton.style.background = 'rgba(255, 255, 255, 0.05)';
+        cancelButton.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+        cancelButton.style.color = '#d5d5d5';
+        cancelButton.style.transform = 'translateY(0)';
+    });
+    cancelButton.addEventListener('click', () => {
+        cancelButton.disabled = true;
+        cancelButton.style.opacity = '0.75';
+        cancelButton.style.cursor = 'default';
+        cancelButton.textContent = '...';
+        document.dispatchEvent(new CustomEvent('snipAskCancelActiveRequest'));
+        chrome.runtime.sendMessage({ action: 'CANCEL_AI_REQUEST' }, () => {
+            hideLoadingCursor();
+            if (chrome.runtime.lastError) {
+                console.warn('Failed to cancel active AI request:', chrome.runtime.lastError.message);
+            }
+        });
+    });
+
+    _loadingOverlayEscapeHandler = (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!cancelButton.disabled) {
+            cancelButton.click();
+        }
+    };
+    document.addEventListener('keydown', _loadingOverlayEscapeHandler, true);
+
+    panel.appendChild(thinkingContainer);
+    panel.appendChild(cancelButton);
+    _loadingOverlay.appendChild(panel);
+
     const style = document.createElement('style');
     style.textContent = `
         @keyframes overlayFadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
         }
-        @keyframes bounce { 
-            0%, 80%, 100% { transform: scale(0); } 
-            40% { transform: scale(1); background: #f55036; } 
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); background: #f55036; }
         }
         @keyframes thinkingPulse {
             0%, 100% { opacity: 0.5; }

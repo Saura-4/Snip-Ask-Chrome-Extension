@@ -214,10 +214,13 @@ export default {
                 groqBody.model = MODEL_FALLBACKS[groqBody.model];
             }
 
+            const requestedModel = typeof body._meta?.requestedModel === 'string'
+                ? body._meta.requestedModel
+                : (typeof groqBody.model === 'string' ? groqBody.model : null);
             const routedModel = typeof groqBody.model === 'string' ? groqBody.model : null;
             const velocityResult = await env.DB.prepare(
                 'INSERT INTO velocity_events (user_id, model, mode) VALUES (?, ?, ?) RETURNING id'
-            ).bind(userId, routedModel, requestedMode).first();
+            ).bind(userId, requestedModel || routedModel, requestedMode).first();
             const velocityEventId = velocityResult?.id;
 
             // Get API keys
@@ -226,30 +229,65 @@ export default {
                 return jsonResponse({ error: 'No API keys configured', code: 'CONFIG_ERROR' }, 500, corsHeaders);
             }
 
+            const AUTO_GUEST_MODEL = 'groq:auto';
+            const AUTO_MODEL_CHAIN = [
+                'openai/gpt-oss-20b',
+                'llama-3.3-70b-versatile',
+                'qwen/qwen3-32b',
+                'openai/gpt-oss-120b',
+                'meta-llama/llama-4-scout-17b-16e-instruct'
+            ];
+            const forceVisionFallback = body._meta?.forceVisionFallback === true;
+            const isAutoModel = !forceVisionFallback && (requestedModel === AUTO_GUEST_MODEL || groqBody.model === AUTO_GUEST_MODEL);
+            const modelChain = forceVisionFallback
+                ? ['meta-llama/llama-4-scout-17b-16e-instruct']
+                : isAutoModel
+                    ? AUTO_MODEL_CHAIN
+                    : [groqBody.model];
             let groqResponse = null;
+            let finalModel = null;
+            let attemptedModels = [];
 
-            // Try keys
-            for (const apiKey of apiKeys) {
-                try {
-                    groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${apiKey}`,
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(groqBody)
-                    });
-                    if (groqResponse.status !== 429) break;
-                } catch (e) {
-                    console.log(`Key failed: ${e.message}`);
+            for (const candidateModel of modelChain) {
+                if (!candidateModel) continue;
+                attemptedModels.push(candidateModel);
+                const candidateBody = { ...groqBody, model: candidateModel };
+
+                for (const apiKey of apiKeys) {
+                    try {
+                        groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${apiKey}`,
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(candidateBody)
+                        });
+                        if (groqResponse.status !== 429) {
+                            finalModel = candidateModel;
+                            break;
+                        }
+                    } catch (e) {
+                        console.log(`Key failed for ${candidateModel}: ${e.message}`);
+                    }
                 }
+
+                if (groqResponse && groqResponse.status !== 429) break;
             }
 
             if (!groqResponse || groqResponse.status === 429) {
+                if (!isAutoModel) {
+                    return jsonResponse({
+                        error: 'Selected model rate limit reached. Switch to Auto or choose another model.',
+                        code: 'MODEL_RATE_LIMITED',
+                        message: 'Selected model rate limit reached. Switch to Auto or choose another model.'
+                    }, 429, corsHeaders);
+                }
+
                 return jsonResponse({
                     error: 'Service busy',
                     code: 'API_EXHAUSTED',
-                    message: 'Please try again later.'
+                    message: 'All Auto guest models are currently rate limited. Please try again later.'
                 }, 503, corsHeaders);
             }
 
@@ -265,11 +303,11 @@ export default {
             // Extract token usage from Groq response
             const tokenUsage = responseData.usage?.total_tokens || 0;
 
-            // Update velocity event with token count
-            if (velocityEventId && tokenUsage > 0) {
+            // Update velocity event with token count and the final routed model.
+            if (velocityEventId) {
                 await env.DB.prepare(
-                    'UPDATE velocity_events SET tokens = ? WHERE id = ?'
-                ).bind(tokenUsage, velocityEventId).run();
+                    'UPDATE velocity_events SET tokens = ?, model = ? WHERE id = ?'
+                ).bind(tokenUsage || 0, finalModel || routedModel, velocityEventId).run();
             }
 
             // Update usage stats for ALL users (including admins) with token tracking
@@ -285,8 +323,22 @@ export default {
 
             return jsonResponse({
                 ...responseData,
-                _guest: { ok: true, usage: currentUsage + (parallelCount > 0 ? parallelCount : 1) },
-                _demo: { ok: true, usage: currentUsage + (parallelCount > 0 ? parallelCount : 1) }
+                _guest: {
+                    ok: true,
+                    usage: currentUsage + (parallelCount > 0 ? parallelCount : 1),
+                    model: finalModel || responseData.model || routedModel,
+                    requestedModel,
+                    auto: isAutoModel,
+                    attemptedModels
+                },
+                _demo: {
+                    ok: true,
+                    usage: currentUsage + (parallelCount > 0 ? parallelCount : 1),
+                    model: finalModel || responseData.model || routedModel,
+                    requestedModel,
+                    auto: isAutoModel,
+                    attemptedModels
+                }
             }, groqResponse.status, corsHeaders);
 
         } catch (error) {

@@ -43,7 +43,7 @@ const API_KEY_CONFIG = {
   openrouter: { id: 'openrouterKey', placeholder: 'OpenRouter Key (sk-or-...)', type: 'password', storageKey: 'openrouterKey' },
   ollama: { id: 'ollamaHost', placeholder: 'Ollama URL (http://localhost:11434)', type: 'text', storageKey: 'ollamaHost' }
 };
-const DEFAULT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+const DEFAULT_MODEL = 'groq:auto';
 const DEFAULT_MODE = 'default';
 const DEFAULT_CHAT_DISPLAY_MODE = 'popup';
 const SIDE_PANEL_PATH = 'src/sidepanel/sidepanel.html';

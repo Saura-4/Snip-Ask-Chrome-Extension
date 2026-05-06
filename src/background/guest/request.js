@@ -5,7 +5,8 @@ import { resolveGuestModel } from '../models/model-routing.js';
 function getGuestMaxTokens(mode) {
     if (mode === 'short') return 384;
     if (mode === 'code') return 1536;
-    return 1024;
+    if (mode === 'detailed' || mode === 'custom') return 1024;
+    return 320;
 }
 
 function getGuestModeLabel(mode, storage) {
@@ -50,9 +51,10 @@ function buildGuestSystemPrompt(mode, storage) {
     return 'This is a POPUP WINDOW. Analyze the input and provide a helpful, concise response (under 200 words). Be direct and focused.';
 }
 
-function buildGuestRequestPayload({ modelName, mode, storage, messages, parallelCount = null, optimize = false }) {
+function buildGuestRequestPayload({ modelName, mode, storage, messages, parallelCount = null, optimize = false, forceVisionFallback = false }) {
     const resolvedModel = resolveGuestModel(modelName, GUEST_DEFAULT_MODEL);
-    const requestMessages = optimize ? optimizeMessageHistory(messages, resolvedModel) : messages;
+    const shouldOptimize = optimize && forceVisionFallback !== true;
+    const requestMessages = shouldOptimize ? optimizeMessageHistory(messages, resolvedModel) : messages;
     const payload = {
         model: resolvedModel,
         messages: requestMessages,
@@ -63,11 +65,15 @@ function buildGuestRequestPayload({ modelName, mode, storage, messages, parallel
     if (parallelCount !== null) {
         payload._meta = {
             parallelCount,
-            mode: getGuestModeLabel(mode, storage)
+            mode: getGuestModeLabel(mode, storage),
+            requestedModel: modelName || null,
+            forceVisionFallback: forceVisionFallback === true
         };
     } else {
         payload._meta = {
-            mode: getGuestModeLabel(mode, storage)
+            mode: getGuestModeLabel(mode, storage),
+            requestedModel: modelName || null,
+            forceVisionFallback: forceVisionFallback === true
         };
     }
 
