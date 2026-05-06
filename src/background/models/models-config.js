@@ -8,15 +8,14 @@ import { isGuestConfigured } from '../guest-config.js';
  */
 export const ALL_MODELS = {
     groq: [
-        { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout (Vision)' },
-        { value: 'groq/compound', name: 'Compound' },
-        { value: 'groq/compound-mini', name: 'Compound Mini' },
-        { value: 'moonshotai/kimi-k2-instruct', name: 'Kimi k2 Instruct' },
-        { value: 'moonshotai/kimi-k2-instruct-0905', name: 'Kimi k2 Instruct (0905)' },
+        { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B (Fast)' },
+        { value: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
-        { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B' },
         { value: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (Text)' },
+        { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout (Vision, Preview)' },
         { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B (Text)' },
+        { value: 'groq/compound-mini', name: 'Compound Mini (Tools, Slower)' },
+        { value: 'groq/compound', name: 'Compound (Tools, Slower)' },
         { value: 'groq:custom', name: 'Custom Model' }
     ],
     google: [
@@ -25,22 +24,29 @@ export const ALL_MODELS = {
         { value: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
         { value: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
         { value: 'gemma-3-27b-it', name: 'Gemma 3 27B (Vision)' },
-        { value: 'gemma-3-12b-it', name: 'Gemma 3 12B (Vision)' },
-        { value: 'gemma-3-4b-it', name: 'Gemma 3 4B' },
-        { value: 'gemma-3-1b-it', name: 'Gemma 3 1B' },
         { value: 'google:custom', name: 'Custom Model' }
     ],
     openai: [
+        { value: 'openai:gpt-5.2', name: 'GPT-5.2 (Vision)' },
+        { value: 'openai:gpt-5.1', name: 'GPT-5.1 (Vision)' },
         { value: 'openai:gpt-5', name: 'GPT-5 (Vision)' },
         { value: 'openai:gpt-5-mini', name: 'GPT-5 Mini (Vision)' },
         { value: 'openai:gpt-5-nano', name: 'GPT-5 Nano (Vision)' },
         { value: 'openai:gpt-4.1', name: 'GPT-4.1 (Vision)' },
+        { value: 'openai:gpt-4.1-mini', name: 'GPT-4.1 Mini (Vision)' },
+        { value: 'openai:gpt-4.1-nano', name: 'GPT-4.1 Nano (Vision)' },
         { value: 'openai:gpt-4o', name: 'GPT-4o (Vision)' },
         { value: 'openai:gpt-4o-mini', name: 'GPT-4o Mini (Vision)' },
-        { value: 'openai:gpt-4.1-mini', name: 'GPT-4.1 Mini' },
         { value: 'openai:custom', name: 'Custom Model' }
     ],
     openrouter: [
+        { value: 'openrouter:openrouter/free', name: 'Free Router (Auto)' },
+        { value: 'openrouter:nvidia/nemotron-nano-9b-v2:free', name: 'Nemotron Nano 9B V2 (Free, Fast)' },
+        { value: 'openrouter:openai/gpt-oss-20b:free', name: 'GPT OSS 20B (Free, Fast)' },
+        { value: 'openrouter:nvidia/nemotron-3-nano-30b-a3b:free', name: 'Nemotron 3 Nano 30B (Free)' },
+        { value: 'openrouter:google/gemma-4-31b-it:free', name: 'Gemma 4 31B (Free, Vision)' },
+        { value: 'openrouter:nvidia/nemotron-3-super-120b-a12b:free', name: 'Nemotron 3 Super 120B (Free)' },
+        { value: 'openrouter:openai/gpt-oss-120b:free', name: 'GPT OSS 120B (Free)' },
         { value: 'openrouter:deepseek/deepseek-r1-0528:free', name: 'DeepSeek R1 (Free)' },
         { value: 'openrouter:custom', name: 'Custom Model' }
     ],
@@ -59,15 +65,14 @@ export const ALL_MODELS = {
  */
 export const CHAT_WINDOW_MODELS = {
     groq: [
-        { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout' },
-        { value: 'groq/compound', name: 'Compound' },
-        { value: 'groq/compound-mini', name: 'Compound Mini' },
-        { value: 'moonshotai/kimi-k2-instruct', name: 'Kimi k2' },
-        { value: 'moonshotai/kimi-k2-instruct-0905', name: 'Kimi k2 (0905)' },
-        { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
         { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B' },
+        { value: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B' },
+        { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
         { value: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B' },
-        { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B' }
+        { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout' },
+        { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B' },
+        { value: 'groq/compound-mini', name: 'Compound Mini' },
+        { value: 'groq/compound', name: 'Compound' }
     ],
     google: [
         { value: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite' },
@@ -77,15 +82,25 @@ export const CHAT_WINDOW_MODELS = {
         { value: 'gemma-3-27b-it', name: 'Gemma 3 27B' }
     ],
     openai: [
+        { value: 'openai:gpt-5.2', name: 'GPT-5.2' },
+        { value: 'openai:gpt-5.1', name: 'GPT-5.1' },
         { value: 'openai:gpt-5', name: 'GPT-5' },
         { value: 'openai:gpt-5-mini', name: 'GPT-5 Mini' },
         { value: 'openai:gpt-5-nano', name: 'GPT-5 Nano' },
         { value: 'openai:gpt-4.1', name: 'GPT-4.1' },
+        { value: 'openai:gpt-4.1-mini', name: 'GPT-4.1 Mini' },
+        { value: 'openai:gpt-4.1-nano', name: 'GPT-4.1 Nano' },
         { value: 'openai:gpt-4o', name: 'GPT-4o' },
-        { value: 'openai:gpt-4o-mini', name: 'GPT-4o Mini' },
-        { value: 'openai:gpt-4.1-mini', name: 'GPT-4.1 Mini' }
+        { value: 'openai:gpt-4o-mini', name: 'GPT-4o Mini' }
     ],
     openrouter: [
+        { value: 'openrouter:openrouter/free', name: 'Free Router' },
+        { value: 'openrouter:nvidia/nemotron-nano-9b-v2:free', name: 'Nemotron Nano 9B' },
+        { value: 'openrouter:openai/gpt-oss-20b:free', name: 'GPT OSS 20B' },
+        { value: 'openrouter:nvidia/nemotron-3-nano-30b-a3b:free', name: 'Nemotron 3 Nano 30B' },
+        { value: 'openrouter:google/gemma-4-31b-it:free', name: 'Gemma 4 31B' },
+        { value: 'openrouter:nvidia/nemotron-3-super-120b-a12b:free', name: 'Nemotron 3 Super' },
+        { value: 'openrouter:openai/gpt-oss-120b:free', name: 'GPT OSS 120B' },
         { value: 'openrouter:deepseek/deepseek-r1-0528:free', name: 'DeepSeek R1' }
     ],
     ollama: [
@@ -149,7 +164,27 @@ export function getDefaultEnabledModels() {
 export async function getCustomSavedModels() {
     try {
         const result = await chrome.storage.local.get(['customSavedModels']);
-        return result.customSavedModels || { groq: [], google: [], openai: [], ollama: [], openrouter: [] };
+        const customSavedModels = result.customSavedModels || { groq: [], google: [], openai: [], ollama: [], openrouter: [] };
+        let changed = false;
+
+        for (const models of Object.values(customSavedModels)) {
+            if (!Array.isArray(models)) {
+                continue;
+            }
+
+            for (const model of models) {
+                if (typeof model.name === 'string' && /^Custom\s+/i.test(model.name)) {
+                    model.name = model.name.replace(/^Custom\s+/i, '');
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed) {
+            await chrome.storage.local.set({ customSavedModels });
+        }
+
+        return customSavedModels;
     } catch (e) {
         console.error('Failed to get custom saved models:', e);
         return { groq: [], google: [], openai: [], ollama: [], openrouter: [] };

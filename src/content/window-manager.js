@@ -213,14 +213,16 @@ const WindowManager = {
             const hasSidebarSession = Array.isArray(storage.sidePanelSession?.chatHistory) && storage.sidePanelSession.chatHistory.length > 0;
             const totalTargets = this.windows.length + (hasSidebarSession ? 1 : 0);
 
+            // Always disable input while waiting for response(s)
+            this.pendingResponses = this.windows.length;
+            this.windows.forEach((w) => w.setInputDisabled(true));
+
             if (totalTargets <= 1) {
                 const mode = senderUI.currentMode || 'short';
                 senderUI.sendMessageDirect(text, 1, mode);
                 return;
             }
 
-            this.pendingResponses = this.windows.length;
-            this.windows.forEach((w) => w.setInputDisabled(true));
             this.windows.forEach((w, index) => {
                 const windowMode = w.currentMode || 'short';
                 w.sendMessageDirect(text, index === 0 ? totalTargets : 0, windowMode);
@@ -240,7 +242,6 @@ const WindowManager = {
      * Called when a response is received (for multi-window sync)
      */
     onResponseReceived() {
-        if (this.windows.length <= 1) return;
         this.pendingResponses--;
         if (this.pendingResponses <= 0) {
             this.pendingResponses = 0;

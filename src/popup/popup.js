@@ -30,9 +30,10 @@ import {
 
 // --- DEFAULT DATA ---
 const DEFAULT_MODES = [
-  { id: 'short', name: '⚡ Short Answer', prompt: "You are a concise answer engine. 1. Analyze the user's input. 2. If it is a multiple-choice question, Output in this format: 'Answer: <option>. <explanation>'. 3. For follow-up chat or non-questions, reply naturally but concisely.", isDefault: true },
-  { id: 'detailed', name: '🧠 Detailed', prompt: "You are an expert tutor. Analyze the input. Provide a detailed, step-by-step answer. Use Markdown.", isDefault: true },
-  { id: 'code', name: '💻 Code Debug', prompt: "You are a code debugger. Correct the code and explain the fix. Output a single fenced code block first.", isDefault: true }
+  { id: 'default', name: 'Default', prompt: "You are a helpful assistant. Analyze the user's input and provide a clear, well-structured response. Use Markdown formatting when helpful. Be accurate, balanced in detail, and adapt your tone to the question.", isDefault: true },
+  { id: 'short', name: 'Short Answer', prompt: "You are a concise answer engine. 1. Analyze the user's input. 2. If it is a multiple-choice question, Output in this format: 'Answer: <option>. <explanation>'. 3. For follow-up chat or non-questions, reply naturally but concisely.", isDefault: true },
+  { id: 'detailed', name: 'Detailed', prompt: "You are an expert tutor. Analyze the input. Provide a detailed, step-by-step answer. Use Markdown.", isDefault: true },
+  { id: 'code', name: 'Code Debug', prompt: "You are a code debugger. Correct the code and explain the fix. Output a single fenced code block first.", isDefault: true }
 ];
 
 const API_KEY_CONFIG = {
@@ -43,7 +44,7 @@ const API_KEY_CONFIG = {
   ollama: { id: 'ollamaHost', placeholder: 'Ollama URL (http://localhost:11434)', type: 'text', storageKey: 'ollamaHost' }
 };
 const DEFAULT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
-const DEFAULT_MODE = 'short';
+const DEFAULT_MODE = 'default';
 const DEFAULT_CHAT_DISPLAY_MODE = 'popup';
 const SIDE_PANEL_PATH = 'src/sidepanel/sidepanel.html';
 
@@ -115,6 +116,31 @@ async function initializeDefaults() {
 
   if (!result.customModes) {
     await chrome.storage.local.set({ customModes: DEFAULT_MODES });
+  } else {
+    let modes = result.customModes;
+    let changed = false;
+
+    // Inject missing default modes
+    for (const defMode of DEFAULT_MODES) {
+      if (!modes.some(m => m.id === defMode.id)) {
+        modes = [defMode, ...modes];
+        changed = true;
+      }
+    }
+
+    // Sync names and prompts for built-in default modes
+    modes = modes.map(m => {
+      const defMatch = DEFAULT_MODES.find(d => d.id === m.id && m.isDefault);
+      if (defMatch && (m.name !== defMatch.name || m.prompt !== defMatch.prompt)) {
+        changed = true;
+        return { ...m, name: defMatch.name, prompt: defMatch.prompt };
+      }
+      return m;
+    });
+
+    if (changed) {
+      await chrome.storage.local.set({ customModes: modes });
+    }
   }
 
   if (!result.enabledProviders) {
@@ -407,6 +433,10 @@ function loadApiKeyInputs(enabledProviders, savedValues) {
 }
 
 async function validateCustomModelBeforeSave(customModel) {
+  if (customModel.provider === 'openrouter') {
+    return { success: true, model: customModel.modelValue };
+  }
+
   const response = await chrome.runtime.sendMessage({
     action: 'VALIDATE_CUSTOM_MODEL',
     model: customModel.modelValue
