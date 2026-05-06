@@ -888,6 +888,9 @@ class FloatingChatUI {
 
         // Show stopped message
         this.addMessage('assistant', '⏹ Response stopped by user.', this.currentModel, true);
+
+        // Re-enable input since this window's response is done
+        WindowManager.onResponseReceived();
     }
 
     /**
@@ -1612,7 +1615,10 @@ class FloatingChatUI {
 
             this.removeTypingIndicator();
 
-            if (this._requestCancelled) return; // User clicked Stop
+            if (this._requestCancelled) {
+                WindowManager.onResponseReceived();
+                return;
+            }
 
             if (response && response.success) {
                 this.addMessage('assistant', response.answer, modelToUse, false, null, false, response.tokenUsage);
@@ -1624,7 +1630,10 @@ class FloatingChatUI {
             }
         } catch (e) {
             this.removeTypingIndicator();
-            if (this._requestCancelled) return;
+            if (this._requestCancelled) {
+                WindowManager.onResponseReceived();
+                return;
+            }
             this.addMessage('assistant', "⚠️ Network Error: " + e.message, modelToUse, true);
         }
         WindowManager.onResponseReceived();

@@ -283,7 +283,7 @@ function formatOpenRouterDisplayName(slug) {
 }
 
 function formatSimpleCustomDisplayName(name) {
-  return `Custom ${name}`;
+  return name;
 }
 
 function isLikelyValidGroqModelId(name) {
@@ -371,7 +371,7 @@ export function promptForCustomModel(model) {
       cancelled: false,
       provider: 'ollama',
       modelValue: `ollama:${name}`,
-      displayName: `Custom ${formatOllamaDisplayName(name)}`
+      displayName: formatOllamaDisplayName(name)
     };
   }
 
@@ -390,7 +390,7 @@ export function promptForCustomModel(model) {
       cancelled: false,
       provider: 'openrouter',
       modelValue: `openrouter:${slug}`,
-      displayName: `Custom ${formatOpenRouterDisplayName(slug)}`
+      displayName: formatOpenRouterDisplayName(slug)
     };
   }
 
