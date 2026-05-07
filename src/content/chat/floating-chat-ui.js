@@ -27,16 +27,22 @@ class FloatingChatUI {
      * Static factory method for async initialization
      * @returns {Promise<FloatingChatUI>}
      */
-    static async create() {
+    static async create(options = {}) {
         const ui = new FloatingChatUI();
+        ui.isSidePanelHost = options.isSidePanelHost === true;
         await ui.initModel();
+        if (ui.isSidePanelHost) {
+            ui.displayMode = 'sidebar';
+        }
         ui.createWindow();
         ui.loadState();
         return ui;
     }
 
     static async createFromSession(session, options = {}) {
-        const ui = await FloatingChatUI.create();
+        const ui = await FloatingChatUI.create({
+            isSidePanelHost: options.isSidePanelHost === true
+        });
         ui.hydrateFromSession(session, options);
         return ui;
     }
@@ -62,11 +68,11 @@ class FloatingChatUI {
 
         // Get the current selected model, mode, and custom modes from storage
         const storage = await new Promise(resolve => {
-            chrome.storage.local.get(['selectedModel', 'selectedMode', 'customModes', 'customPrompt', 'chatDisplayMode'], resolve);
+            chrome.storage.local.get(['selectedModel', 'selectedMode', 'customModes', 'customPrompt'], resolve);
         });
         this.currentModel = storage.selectedModel || 'groq:auto';
         this.currentMode = storage.selectedMode || 'short';
-        this.displayMode = storage.chatDisplayMode === 'sidebar' ? 'sidebar' : 'popup';
+        this.displayMode = 'popup';
         this.customModes = storage.customModes || [];
         this.customPrompt = storage.customPrompt || '';
 
@@ -126,6 +132,14 @@ class FloatingChatUI {
             height: this.container.style.height,
             minWidth: this.container.style.minWidth,
             minHeight: this.container.style.minHeight,
+            maxWidth: this.container.style.maxWidth,
+            maxHeight: this.container.style.maxHeight,
+            background: this.container.style.background,
+            border: this.container.style.border,
+            borderRadius: this.container.style.borderRadius,
+            boxShadow: this.container.style.boxShadow,
+            overflow: this.container.style.overflow,
+            backdropFilter: this.container.style.backdropFilter,
             top: rect.top,
             left: rect.left,
             childDisplays: []
@@ -142,45 +156,99 @@ class FloatingChatUI {
         this.container.style.height = 'auto';
         this.container.style.minWidth = 'unset';
         this.container.style.minHeight = 'unset';
+        this.container.style.maxWidth = 'calc(100vw - 16px)';
+        this.container.style.maxHeight = 'unset';
+        this.container.style.background = 'transparent';
+        this.container.style.border = 'none';
+        this.container.style.borderRadius = '999px';
+        this.container.style.boxShadow = 'none';
+        this.container.style.overflow = 'visible';
+        this.container.style.backdropFilter = 'none';
         this.container.style.resize = 'none';
 
         // Create bubble element
         this.bubble = document.createElement("div");
         this.bubble.style.cssText = `
-            padding: 10px 16px;
-            background: #2d2d2d;
-            border-radius: 10px;
+            min-height: 40px;
+            padding: 6px 8px 6px 12px;
+            background: rgba(18, 18, 18, 0.92);
+            color: #fff4f1;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 999px;
+            box-shadow: 0 14px 38px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(245, 80, 54, 0.08);
+            backdrop-filter: blur(14px);
             cursor: move;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 10px;
             white-space: nowrap;
             user-select: none;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         `;
-        const bubbleIcon = document.createElement('span');
-        bubbleIcon.style.cssText = 'color: #f55036; font-weight: bold;';
-        bubbleIcon.textContent = 'AI';
+        const bubbleIcon = document.createElement('img');
+        bubbleIcon.src = chrome.runtime.getURL("assets/icons/icon-32.png");
+        bubbleIcon.alt = "Snip & Ask";
+        bubbleIcon.style.cssText = `
+            width: 18px;
+            height: 18px;
+            display: block;
+            object-fit: contain;
+            flex: 0 0 auto;
+        `;
 
         const bubbleLabel = document.createElement('span');
-        bubbleLabel.style.cssText = 'color: #ccc; font-size: 12px;';
+        bubbleLabel.style.cssText = `
+            color: #d5d5d5;
+            font-size: 12px;
+            line-height: 1;
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        `;
         bubbleLabel.textContent = this._getModelDisplayName(this.currentModel);
 
-        const expandArrow = document.createElement('span');
-        expandArrow.style.cssText = 'color: #f55036; font-size: 14px; font-weight: bold; margin-left: 6px; padding: 2px 6px; background: #3a3a3a; border-radius: 4px; border: 1px solid #f55036;';
-        expandArrow.title = 'Click to expand';
-        expandArrow.textContent = '^';
+        const expandButton = document.createElement('button');
+        expandButton.type = 'button';
+        expandButton.innerHTML = '<svg viewBox="0 0 12 12" aria-hidden="true" style="width: 12px; height: 12px; display: block;"><path d="M3 7.25 6 4.25l3 3" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        expandButton.style.cssText = `
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            background: transparent;
+            color: #d5d5d5;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 999px;
+            padding: 0;
+            font: inherit;
+            cursor: pointer;
+            transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+        `;
+        expandButton.title = 'Expand';
+        expandButton.addEventListener('mouseenter', () => {
+            expandButton.style.background = 'rgba(245, 80, 54, 0.14)';
+            expandButton.style.borderColor = 'rgba(245, 80, 54, 0.5)';
+            expandButton.style.color = '#ff6b4a';
+            expandButton.style.transform = 'translateY(-1px)';
+        });
+        expandButton.addEventListener('mouseleave', () => {
+            expandButton.style.background = 'transparent';
+            expandButton.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+            expandButton.style.color = '#d5d5d5';
+            expandButton.style.transform = 'translateY(0)';
+        });
 
         this.bubble.appendChild(bubbleIcon);
         this.bubble.appendChild(bubbleLabel);
-        this.bubble.appendChild(expandArrow);
-        this.bubble.title = 'Drag to move, click ^ to expand';
+        this.bubble.appendChild(expandButton);
+        this.bubble.title = 'Drag to move';
 
         // Make bubble draggable
         this.makeBubbleDraggable(this.bubble);
 
-        // Click on arrow to expand
-        expandArrow.style.cursor = 'pointer';
-        expandArrow.onclick = (e) => {
+        // Click on button to expand
+        expandButton.onclick = (e) => {
             e.stopPropagation();
             this.expand();
         };
@@ -217,6 +285,14 @@ class FloatingChatUI {
             this.container.style.height = this._savedState.height || '500px';
             this.container.style.minWidth = this._savedState.minWidth || '300px';
             this.container.style.minHeight = this._savedState.minHeight || '200px';
+            this.container.style.maxWidth = this._savedState.maxWidth || '90vw';
+            this.container.style.maxHeight = this._savedState.maxHeight || '90vh';
+            this.container.style.background = this._savedState.background || 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)';
+            this.container.style.border = this._savedState.border || '1px solid rgba(255, 107, 74, 0.4)';
+            this.container.style.borderRadius = this._savedState.borderRadius || '12px';
+            this.container.style.boxShadow = this._savedState.boxShadow || '0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05)';
+            this.container.style.overflow = this._savedState.overflow || 'hidden';
+            this.container.style.backdropFilter = this._savedState.backdropFilter || 'blur(10px)';
             this.container.style.resize = 'both';
         }
 
@@ -232,7 +308,7 @@ class FloatingChatUI {
         let offsetX, offsetY;
 
         bubble.addEventListener('mousedown', (e) => {
-            if (e.target.textContent === '⬆') return;
+            if (e.target.closest?.('button')) return;
             isDragging = true;
             const rect = this.container.getBoundingClientRect();
             offsetX = e.clientX - rect.left;
@@ -317,6 +393,52 @@ class FloatingChatUI {
             .copy-btn:hover { color: #fff; }
             pre { margin: 0; padding: 12px; overflow-x: auto; }
             code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #ccc; }
+
+            /* HEADER ICON BUTTONS */
+            .chat-header-select {
+                height: 36px;
+                background: #080808;
+                color: #f1f1f1;
+                border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 8px;
+                padding: 0 12px;
+                font-size: 13px;
+                font-weight: 500;
+                cursor: pointer;
+                outline: none;
+                transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+            }
+            .chat-header-select:hover,
+            .chat-header-select:focus {
+                background: #0d0d0d;
+                border-color: rgba(255,107,74,0.38);
+            }
+            .chat-header-action {
+                width: 30px;
+                height: 30px;
+                background: #0d0d0d;
+                color: #c4c4c4;
+                border: 1px solid rgba(255,255,255,0.13);
+                border-radius: 999px;
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 0;
+                flex: 0 0 auto;
+                transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+            }
+            .chat-header-action:hover {
+                background: #101010;
+                border-color: rgba(255,107,74,0.42);
+                color: #ff8a6d;
+            }
+            .chat-header-action:active { transform: scale(0.94); }
+            .chat-header-action svg {
+                width: 14px;
+                height: 14px;
+                display: block;
+            }
             
             /* TYPING INDICATOR */
             .typing-container { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; padding: 8px 10px; width: fit-content; max-width: 100%; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; box-shadow: 0 8px 22px rgba(0,0,0,0.22); }
@@ -344,26 +466,37 @@ class FloatingChatUI {
         const header = document.createElement("div");
         this.header = header;
         header.style.cssText = `
-            padding: 12px 14px; 
-            background: linear-gradient(135deg, #2a2a2a 0%, #1f1f1f 100%); 
+            padding: 8px 10px;
+            background: #232323;
             border-bottom: 1px solid rgba(255,255,255,0.08);
             cursor: move; display: flex; justify-content: space-between; align-items: center;
-            border-radius: 12px 12px 0 0; user-select: none; gap: 10px;
+            border-radius: 12px 12px 0 0; user-select: none; gap: 4px;
             position: relative;
             border-top: 2px solid rgba(255, 107, 74, 0.6);
         `;
 
         const titleSection = document.createElement("div");
-        titleSection.style.cssText = "display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;";
-        titleSection.innerHTML = `<strong style="color: #ff6b4a; white-space: nowrap; font-size: 16px;">⚡</strong>`;
+        titleSection.style.cssText = "display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;";
+
+        const brandIcon = document.createElement("img");
+        brandIcon.src = chrome.runtime.getURL("assets/icons/icon-32.png");
+        brandIcon.alt = "Snip & Ask";
+        brandIcon.style.cssText = `
+            width: 18px;
+            height: 18px;
+            flex: 0 0 auto;
+            display: block;
+            object-fit: contain;
+        `;
+        titleSection.appendChild(brandIcon);
 
         // Model selector dropdown
         this.modelSelect = document.createElement("select");
+        this.modelSelect.className = "chat-header-select";
         this.modelSelect.style.cssText = `
-            background: #0a0a0a; color: #e8e8e8; border: 1px solid rgba(255, 255, 255, 0.15); 
-            border-radius: 6px; padding: 6px 10px; font-size: 12px;
-            cursor: pointer; flex: 1; min-width: 0; max-width: 200px;
-            transition: all 0.2s; font-weight: 500;
+            flex: 1;
+            min-width: 0;
+            max-width: 220px;
         `;
 
         // Populate options
@@ -388,11 +521,9 @@ class FloatingChatUI {
 
         // Mode selector dropdown
         this.modeSelect = document.createElement("select");
+        this.modeSelect.className = "chat-header-select";
         this.modeSelect.style.cssText = `
-            background: #0a0a0a; color: #e8e8e8; border: 1px solid rgba(255, 255, 255, 0.15); 
-            border-radius: 6px; padding: 6px 10px; font-size: 12px;
-            cursor: pointer; min-width: 90px;
-            transition: all 0.2s; font-weight: 500;
+            min-width: 144px;
         `;
 
         // Load all modes from storage (includes built-in and user-created modes)
@@ -443,40 +574,32 @@ class FloatingChatUI {
         // Snip Again button
         const snipAgainBtn = document.createElement("button");
         this.snipAgainBtn = snipAgainBtn;
+        snipAgainBtn.className = "chat-header-action";
         snipAgainBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>`;
         snipAgainBtn.title = "Snip and add to this chat";
-        snipAgainBtn.style.cssText = `
-            background: rgba(255,255,255,0.05); color: #888; border: 1px solid rgba(255,255,255,0.1);
-            width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-            transition: all 0.2s;
-        `;
         snipAgainBtn.onclick = () => this.startSnipAgain();
         header.appendChild(snipAgainBtn);
 
         // Compare button
         const compareBtn = document.createElement("button");
         this.compareBtn = compareBtn;
+        compareBtn.className = "chat-header-action";
         compareBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`;
         compareBtn.title = "Compare with another model";
-        compareBtn.style.cssText = `
-            background: rgba(255,255,255,0.05); color: #888; border: 1px solid rgba(255,255,255,0.1);
-            width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-            transition: all 0.2s;
-        `;
         compareBtn.onclick = () => this.spawnCompareWindow();
         header.appendChild(compareBtn);
 
         const displayModeBtn = document.createElement("button");
         this.displayModeBtn = displayModeBtn;
-        displayModeBtn.style.cssText = `
-            background: rgba(255,255,255,0.05); color: #888; border: 1px solid rgba(255,255,255,0.1);
-            width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-            transition: all 0.2s;
-        `;
+        displayModeBtn.className = "chat-header-action";
         displayModeBtn.onclick = async () => {
+            if (this.isGeneratingResponse()) {
+                if (typeof showErrorToast === 'function') {
+                    showErrorToast('Wait for the current response to finish before switching layout.');
+                }
+                return;
+            }
+
             const session = this.serializeSession();
             if (this.isSidePanelHost) {
                 const result = await chrome.runtime.sendMessage({ action: 'MOVE_SIDEPANEL_TO_POPUP', session });
@@ -492,16 +615,7 @@ class FloatingChatUI {
                 return;
             }
 
-            // If the side panel couldn't be opened (likely user gesture restriction),
-            // still save the session so it's ready when the user opens the panel manually.
-            const isUserGestureError = result?.error && result.error.includes('user gesture');
-            if (isUserGestureError) {
-                // Save session to storage so the side panel picks it up when manually opened
-                await chrome.runtime.sendMessage({ action: 'SET_SIDE_PANEL_SESSION', session });
-                if (typeof showErrorToast === 'function') {
-                    showErrorToast('Session saved. Open the sidebar from the extension icon or toolbar to view it.');
-                }
-            } else if (typeof showErrorToast === 'function') {
+            if (typeof showErrorToast === 'function') {
                 showErrorToast(result?.error || 'Could not move popup chat to sidebar.');
             }
         };
@@ -510,28 +624,17 @@ class FloatingChatUI {
         // Minimize button
         const minimizeBtn = document.createElement("button");
         this.minimizeBtn = minimizeBtn;
+        minimizeBtn.className = "chat-header-action";
         minimizeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
         minimizeBtn.title = "Minimize to bubble";
-        minimizeBtn.style.cssText = `
-            background: rgba(255,255,255,0.05); color: #888; border: 1px solid rgba(255,255,255,0.1);
-            width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-            transition: all 0.2s;
-        `;
         minimizeBtn.onclick = () => this.minimize();
         header.appendChild(minimizeBtn);
 
         const closeBtn = document.createElement("span");
         this.closeBtn = closeBtn;
         closeBtn.id = "closeBtn";
+        closeBtn.className = "chat-header-action";
         closeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
-        closeBtn.style.cssText = `
-            cursor: pointer; color: #888;
-            width: 28px; height: 28px; border-radius: 6px;
-            display: flex; align-items: center; justify-content: center;
-            background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
-            transition: all 0.2s;
-        `;
         header.appendChild(closeBtn);
 
         this.container.appendChild(header);
@@ -667,10 +770,11 @@ class FloatingChatUI {
                 this.container.style.minHeight = '100%';
                 this.container.style.minWidth = '0';
                 this.container.style.maxWidth = '100%';
-                this.container.style.top = 'auto';
-                this.container.style.right = 'auto';
-                this.container.style.left = 'auto';
-                this.container.style.bottom = 'auto';
+                this.container.style.removeProperty('top');
+                this.container.style.removeProperty('right');
+                this.container.style.removeProperty('left');
+                this.container.style.removeProperty('bottom');
+                this.container.style.removeProperty('transform');
             } else {
                 this.host.style.cssText = 'all: initial; position: fixed; z-index: 2147483647; top: 0; left: 0;';
                 this.container.style.position = 'fixed';
@@ -693,7 +797,7 @@ class FloatingChatUI {
             this.container.style.margin = '0';
             this.header.style.cursor = 'default';
             this.header.style.borderRadius = '0';
-            this.header.style.padding = '12px';
+            this.header.style.padding = '10px 12px';
             if (this.minimizeBtn) this.minimizeBtn.style.display = 'none';
             this.hasSavedPosition = false;
         } else {
@@ -714,7 +818,7 @@ class FloatingChatUI {
             this.container.style.boxShadow = '0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05)';
             this.header.style.cursor = 'move';
             this.header.style.borderRadius = '12px 12px 0 0';
-            this.header.style.padding = '12px 14px';
+            this.header.style.padding = '10px 12px';
             if (this.minimizeBtn) this.minimizeBtn.style.display = 'flex';
             this.loadState();
         }
@@ -750,70 +854,11 @@ class FloatingChatUI {
     }
 
     serializeSession() {
-        return {
-            uiId: this.uiId,
-            chatHistory: this.chatHistory.map((message) => ({ ...message })),
-            currentModel: this.currentModel,
-            currentMode: this.currentMode,
-            availableModels: Array.isArray(this.availableModels) ? [...this.availableModels] : [],
-            customModes: Array.isArray(this.customModes) ? [...this.customModes] : [],
-            customPrompt: this.customPrompt || '',
-            initialUserMessage: this.initialUserMessage || null,
-            initialBase64Image: this.initialBase64Image || null,
-            allImages: Array.isArray(this.allImages) ? [...this.allImages] : [],
-            activeTabId: this.activeTabId || null,
-            windowId: this.windowId || null,
-            lastUpdated: Date.now()
-        };
+        return SnipAskSession.serializeFloatingChat(this);
     }
 
     hydrateFromSession(session, options = {}) {
-        if (!session) return;
-
-        this.uiId = session.uiId || this.uiId;
-        this.availableModels = Array.isArray(session.availableModels) && session.availableModels.length > 0
-            ? [...session.availableModels]
-            : this.availableModels;
-        this.customModes = Array.isArray(session.customModes) ? [...session.customModes] : this.customModes;
-        this.customPrompt = session.customPrompt || this.customPrompt;
-        this.currentModel = session.currentModel || this.currentModel;
-        this.currentMode = session.currentMode || this.currentMode;
-        this.initialUserMessage = session.initialUserMessage || null;
-        this.initialBase64Image = session.initialBase64Image || null;
-        this.allImages = Array.isArray(session.allImages) ? [...session.allImages] : [];
-        this.activeTabId = session.activeTabId || this.activeTabId || null;
-        this.windowId = session.windowId || this.windowId || null;
-        this.chatHistory = Array.isArray(session.chatHistory) ? session.chatHistory.map((message) => ({ ...message })) : [];
-        this.isSidePanelHost = options.isSidePanelHost === true;
-
-        if (this.modelSelect) {
-            this.modelSelect.innerHTML = '';
-            this.availableModels.forEach((m) => {
-                const opt = document.createElement('option');
-                opt.value = m.value;
-                opt.textContent = m.name;
-                if (m.value === this.currentModel) opt.selected = true;
-                this.modelSelect.appendChild(opt);
-            });
-            this.modelSelect.value = this.currentModel;
-        }
-
-        if (this.modeSelect) {
-            this.modeSelect.value = this.currentMode;
-        }
-
-        if (this.chatBody) {
-            this.chatBody.innerHTML = '';
-            this.chatHistory.forEach((msg, index) => {
-                renderClonedChatMessage(this, msg, {
-                    includeActions: true,
-                    messageIndex: index
-                });
-            });
-            this.chatBody.scrollTop = this.chatBody.scrollHeight;
-        }
-
-        this.updateDisplayModeButton();
+        SnipAskSession.hydrateFloatingChat(this, session, options);
     }
 
     /**
@@ -855,6 +900,9 @@ class FloatingChatUI {
     showTypingIndicator() {
         this.removeTypingIndicator(); // Ensure only one exists
         this._requestCancelled = false; // Reset cancel flag for new request
+        this._requestFinishedNotified = false;
+        this._requestInFlight = true;
+        this._activeRequestId = crypto.randomUUID();
 
         const container = document.createElement("div");
         container.className = "typing-container";
@@ -879,22 +927,31 @@ class FloatingChatUI {
 
         this.chatBody.appendChild(container);
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
+        return this._activeRequestId;
     }
 
     /**
      * Handle user clicking the Stop button
      */
     _handleStopRequest() {
+        const requestId = this._activeRequestId;
         this._requestCancelled = true;
         this.removeTypingIndicator();
 
-        // Tell background to abort all in-progress requests
-        chrome.runtime.sendMessage({ action: "CANCEL_AI_REQUEST" });
+        // Tell background to abort this window's in-progress request.
+        chrome.runtime.sendMessage({ action: "CANCEL_AI_REQUEST", requestId });
 
         // Show stopped message
         this.addMessage('assistant', '⏹ Response stopped by user.', this.currentModel, true);
 
         // Re-enable input since this window's response is done
+        this._notifyRequestFinished();
+    }
+
+    _notifyRequestFinished() {
+        if (this._requestFinishedNotified) return;
+        this._requestFinishedNotified = true;
+        this._requestInFlight = false;
         WindowManager.onResponseReceived();
     }
 
@@ -904,6 +961,11 @@ class FloatingChatUI {
     removeTypingIndicator() {
         const existing = this.chatBody.querySelector("#typing-indicator");
         if (existing) existing.remove();
+        this._requestInFlight = false;
+    }
+
+    isGeneratingResponse() {
+        return Boolean(this._requestInFlight || this.chatBody?.querySelector("#typing-indicator"));
     }
 
     /**
@@ -962,7 +1024,7 @@ class FloatingChatUI {
             }
         }
 
-        this.showTypingIndicator();
+        const requestId = this.showTypingIndicator();
 
         try {
             let response;
@@ -990,7 +1052,8 @@ class FloatingChatUI {
                             action: "ASK_AI",
                             model: this.currentModel,
                             base64Image: imagesToSend[0],
-                            mode: this.currentMode
+                            mode: this.currentMode,
+                            requestId
                         });
                     } else {
                         response = await chrome.runtime.sendMessage({
@@ -998,7 +1061,8 @@ class FloatingChatUI {
                             model: this.currentModel,
                             images: imagesToSend,
                             textContext: this._extractTextFromHistory(userMsgIndex),
-                            mode: this.currentMode
+                            mode: this.currentMode,
+                            requestId
                         });
                     }
                 } else {
@@ -1007,7 +1071,8 @@ class FloatingChatUI {
                         action: "CONTINUE_CHAT",
                         model: this.currentModel,
                         history: this._buildApiHistory(userMsgIndex),
-                        mode: this.currentMode
+                        mode: this.currentMode,
+                        requestId
                     });
                 }
             } else {
@@ -1037,7 +1102,8 @@ class FloatingChatUI {
                             action: "CONTINUE_CHAT",
                             model: this.currentModel,
                             history: historyWithOcr,
-                            mode: this.currentMode
+                            mode: this.currentMode,
+                            requestId
                         });
                     } else if (isAutoGuestModel) {
                         response = imagesToSend.length === 1
@@ -1045,14 +1111,16 @@ class FloatingChatUI {
                                 action: "ASK_AI",
                                 model: this.currentModel,
                                 base64Image: imagesToSend[0],
-                                mode: this.currentMode
+                                mode: this.currentMode,
+                                requestId
                             })
                             : await chrome.runtime.sendMessage({
                                 action: "ASK_AI_MULTI_IMAGE",
                                 model: this.currentModel,
                                 images: imagesToSend,
                                 textContext: this._extractTextFromHistory(userMsgIndex),
-                                mode: this.currentMode
+                                mode: this.currentMode,
+                                requestId
                             });
                     } else {
                         // OCR failed, use text history as fallback
@@ -1060,7 +1128,8 @@ class FloatingChatUI {
                             action: "CONTINUE_CHAT",
                             model: this.currentModel,
                             history: this._buildApiHistory(userMsgIndex),
-                            mode: this.currentMode
+                            mode: this.currentMode,
+                            requestId
                         });
                     }
                 } else {
@@ -1069,7 +1138,8 @@ class FloatingChatUI {
                         action: "CONTINUE_CHAT",
                         model: this.currentModel,
                         history: this._buildApiHistory(userMsgIndex),
-                        mode: this.currentMode
+                        mode: this.currentMode,
+                        requestId
                     });
                 }
             }
@@ -1287,6 +1357,16 @@ class FloatingChatUI {
             w._processSnippedImage(croppedBase64);
         });
 
+        if (!this.isSidePanelHost) {
+            chrome.runtime.sendMessage({
+                action: 'ADD_SNIPPED_IMAGE_TO_SIDEPANEL',
+                base64Image: croppedBase64,
+                sourceUiId: this.uiId
+            }).catch(() => {
+                // No active side panel is fine; popup windows already received the snip.
+            });
+        }
+
         WindowManager.refreshLayout();
     }
 
@@ -1299,7 +1379,7 @@ class FloatingChatUI {
         // Store image for compare window access
         this.allImages.push(croppedBase64);
 
-        this.showTypingIndicator();
+        const requestId = this.showTypingIndicator();
 
         // Create a proper message object with image data (unified format like initial snip)
         const userContent = [
@@ -1315,7 +1395,8 @@ class FloatingChatUI {
                 action: "ASK_AI",
                 model: this.currentModel,
                 base64Image: croppedBase64,
-                mode: this.currentMode
+                mode: this.currentMode,
+                requestId
             }, (response) => {
                 this.removeTypingIndicator();
                 if (this._requestCancelled) return; // User clicked Stop
@@ -1338,7 +1419,8 @@ class FloatingChatUI {
                         action: "ASK_AI_TEXT",
                         model: this.currentModel,
                         text: ocrResult.text,
-                        mode: this.currentMode
+                        mode: this.currentMode,
+                        requestId
                     }, (response) => {
                         this.removeTypingIndicator();
                         if (this._requestCancelled) return; // User clicked Stop
@@ -1484,7 +1566,7 @@ class FloatingChatUI {
         }
 
         // Now regenerate the last response with the new model
-        newUI.showTypingIndicator();
+        const requestId = newUI.showTypingIndicator();
 
         try {
             let response;
@@ -1514,7 +1596,8 @@ class FloatingChatUI {
                     model: newUI.currentModel,
                     images: imagesToSend,
                     textContext: fullTextContext,
-                    mode: newUI.currentMode
+                    mode: newUI.currentMode,
+                    requestId
                 });
             } else if (!isVisionModel(newUI.currentModel) && imagesToSend.length > 0) {
                 // Non-vision model with images: Extract text via OCR first
@@ -1541,7 +1624,8 @@ class FloatingChatUI {
                         action: "CONTINUE_CHAT",
                         model: newUI.currentModel,
                         history: historyWithOcr,
-                        mode: newUI.currentMode
+                        mode: newUI.currentMode,
+                        requestId
                     });
                 } else if (isAutoGuestModel) {
                     response = await chrome.runtime.sendMessage({
@@ -1549,7 +1633,8 @@ class FloatingChatUI {
                         model: newUI.currentModel,
                         images: imagesToSend,
                         textContext: fullTextContext,
-                        mode: newUI.currentMode
+                        mode: newUI.currentMode,
+                        requestId
                     });
                 } else {
                     // OCR failed, just use text history
@@ -1557,7 +1642,8 @@ class FloatingChatUI {
                         action: "CONTINUE_CHAT",
                         model: newUI.currentModel,
                         history: apiHistory,
-                        mode: newUI.currentMode
+                        mode: newUI.currentMode,
+                        requestId
                     });
                 }
             } else {
@@ -1566,7 +1652,8 @@ class FloatingChatUI {
                     action: "CONTINUE_CHAT",
                     model: newUI.currentModel,
                     history: apiHistory,
-                    mode: newUI.currentMode
+                    mode: newUI.currentMode,
+                    requestId
                 });
             }
 
@@ -1628,7 +1715,7 @@ class FloatingChatUI {
     async sendMessageDirect(text, parallelCount = 1, mode = null) {
         this.addMessage('user', text);
 
-        this.showTypingIndicator();
+        const requestId = this.showTypingIndicator();
 
         const modelToUse = this.currentModel;
         const modeToUse = mode || this.currentMode || 'short';
@@ -1642,13 +1729,14 @@ class FloatingChatUI {
                 model: modelToUse,
                 history: formattedHistory,
                 mode: modeToUse,
-                parallelCount: parallelCount
+                parallelCount: parallelCount,
+                requestId
             });
 
             this.removeTypingIndicator();
 
             if (this._requestCancelled) {
-                WindowManager.onResponseReceived();
+                this._notifyRequestFinished();
                 return;
             }
 
@@ -1663,12 +1751,12 @@ class FloatingChatUI {
         } catch (e) {
             this.removeTypingIndicator();
             if (this._requestCancelled) {
-                WindowManager.onResponseReceived();
+                this._notifyRequestFinished();
                 return;
             }
             this.addMessage('assistant', "⚠️ Network Error: " + e.message, modelToUse, true);
         }
-        WindowManager.onResponseReceived();
+        this._notifyRequestFinished();
     }
 
     /**
@@ -1679,6 +1767,7 @@ class FloatingChatUI {
         if (!text) return;
         this.input.value = "";
         this.input.style.height = 'auto';
+        this._requestInFlight = true;
         WindowManager.broadcastFollowUp(text, this);
     }
 
@@ -1790,6 +1879,11 @@ class FloatingChatUI {
         this.hasSavedPosition = true;
 
         chrome.storage.local.get(['chatWinState'], (res) => {
+            if (this.displayMode === 'sidebar') {
+                this.hasSavedPosition = false;
+                return;
+            }
+
             if (res.chatWinState) {
                 const s = res.chatWinState;
                 const top = Math.max(0, Math.min(s.top, window.innerHeight - 50));

@@ -198,7 +198,10 @@ const SnipSelection = {
         }
 
         // Minimum size check
-        if (rect.width < 10 || rect.height < 10) return;
+        if (rect.width < 10 || rect.height < 10) {
+            window.restoreSnipAskPopupWindows?.();
+            return;
+        }
 
         // Call completion callback
         if (this.onComplete) {
@@ -230,6 +233,7 @@ const SnipSelection = {
             this.glassPane = null;
         }
         this.isSelecting = false;
+        window.restoreSnipAskPopupWindows?.();
 
         // If in snip-again mode, restore chat windows
         if (window._snipAgainMode) {

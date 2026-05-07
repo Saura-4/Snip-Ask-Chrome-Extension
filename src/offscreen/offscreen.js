@@ -9,6 +9,24 @@ const OCR_CONFIG = {
     MAX_CONSECUTIVE_GARBAGE: 20        // Max consecutive non-printable chars
 };
 
+let ocrWorkerPromise = null;
+
+function getOcrWorker() {
+    if (!ocrWorkerPromise) {
+        ocrWorkerPromise = Tesseract.createWorker('eng', 1, {
+            workerPath: chrome.runtime.getURL('lib/worker.min.js'),
+            corePath: chrome.runtime.getURL('lib/tesseract-core.wasm.js'),
+            langPath: chrome.runtime.getURL('lib/'),
+            cacheMethod: 'none',
+            gzip: true,
+            workerBlobURL: false,
+            errorHandler: e => console.error('[Offscreen] Worker Error:', e)
+        });
+    }
+
+    return ocrWorkerPromise;
+}
+
 // --- OCR TEXT QUALITY ANALYZER ---
 function analyzeOCRQuality(text) {
     if (!text || text.length === 0) {
@@ -117,27 +135,24 @@ async function runOCR(base64Image) {
         const bytes = new Uint8Array(len);
         for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
 
-        // 2. Setup Paths
-        const workerPath = chrome.runtime.getURL('lib/worker.min.js');
-        const corePath = chrome.runtime.getURL('lib/tesseract-core.wasm.js');
-        const langPath = chrome.runtime.getURL('lib/');
+        // 2. Recognize with a cached worker. Creating Tesseract workers is expensive.
+        let worker;
+        try {
+            worker = await getOcrWorker();
+        } catch (error) {
+            ocrWorkerPromise = null;
+            throw error;
+        }
+        let recognitionResult;
+        try {
+            recognitionResult = await worker.recognize(bytes);
+        } catch (error) {
+            ocrWorkerPromise = null;
+            throw error;
+        }
+        const { data: { text, confidence } } = recognitionResult;
 
-        // 3. Initialize Tesseract
-        const worker = await Tesseract.createWorker('eng', 1, {
-            workerPath: workerPath,
-            corePath: corePath,
-            langPath: langPath,
-            cacheMethod: 'none',
-            gzip: true,
-            workerBlobURL: false, // Essential for security
-            errorHandler: e => console.error('[Offscreen] Worker Error:', e)
-        });
-
-        // 4. Recognize
-        const { data: { text, confidence } } = await worker.recognize(bytes);
-        await worker.terminate();
-
-        // 5. Validate OCR quality
+        // 3. Validate OCR quality
         if (confidence < OCR_CONFIG.MIN_CONFIDENCE) {
             console.debug(`[Offscreen] Low confidence OCR (${confidence}%) - likely noise`);
             return {

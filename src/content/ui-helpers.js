@@ -12,7 +12,7 @@ let _loadingOverlayEscapeHandler = null;
  * Show a draggable, nonblocking thinking panel while processing a snip.
  */
 function showLoadingCursor() {
-    hideLoadingCursor();
+    hideLoadingCursor({ immediate: true });
 
     _loadingOverlay = document.createElement('div');
     _loadingOverlay.id = 'snip-loading-overlay';
@@ -32,12 +32,12 @@ function showLoadingCursor() {
         transform: translate(-50%, -50%);
         display: flex;
         align-items: center;
-        gap: 16px;
+        gap: 14px;
         background: rgba(18, 18, 18, 0.92);
         color: #fff4f1;
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 999px;
-        min-width: 188px;
+        min-width: 150px;
         min-height: 40px;
         padding: 6px 8px 6px 18px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -99,6 +99,8 @@ function showLoadingCursor() {
         display: flex;
         align-items: center;
         gap: 8px;
+        flex: 1;
+        min-width: 0;
     `;
 
     const bubble = document.createElement('div');
@@ -135,19 +137,20 @@ function showLoadingCursor() {
 
     const cancelButton = document.createElement('button');
     cancelButton.type = 'button';
-    cancelButton.innerHTML = '<svg viewBox="0 0 12 12" aria-hidden="true" style="width: 12px; height: 12px; display: block;"><path d="M3 3 9 9M9 3 3 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+    cancelButton.innerHTML = '<svg viewBox="0 0 12 12" aria-hidden="true" style="width: 12px; height: 12px; display: block;"><path d="M3.25 3.25 8.75 8.75M8.75 3.25 3.25 8.75" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"/></svg>';
     cancelButton.title = 'Stop generating';
     cancelButton.style.cssText = `
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 28px;
-        height: 28px;
-        background: rgba(255, 255, 255, 0.05);
+        width: 30px;
+        height: 30px;
+        background: transparent;
         color: #d5d5d5;
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 999px;
         padding: 0;
+        margin-left: auto;
         font: inherit;
         cursor: pointer;
         transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
@@ -159,7 +162,7 @@ function showLoadingCursor() {
         cancelButton.style.transform = 'translateY(-1px)';
     });
     cancelButton.addEventListener('mouseleave', () => {
-        cancelButton.style.background = 'rgba(255, 255, 255, 0.05)';
+        cancelButton.style.background = 'transparent';
         cancelButton.style.borderColor = 'rgba(255, 255, 255, 0.12)';
         cancelButton.style.color = '#d5d5d5';
         cancelButton.style.transform = 'translateY(0)';
@@ -170,8 +173,8 @@ function showLoadingCursor() {
         cancelButton.style.cursor = 'default';
         cancelButton.textContent = '...';
         document.dispatchEvent(new CustomEvent('snipAskCancelActiveRequest'));
+        hideLoadingCursor({ immediate: true });
         chrome.runtime.sendMessage({ action: 'CANCEL_AI_REQUEST' }, () => {
-            hideLoadingCursor();
             if (chrome.runtime.lastError) {
                 console.warn('Failed to cancel active AI request:', chrome.runtime.lastError.message);
             }
@@ -215,25 +218,40 @@ function showLoadingCursor() {
 /**
  * Hide the loading overlay
  */
-function hideLoadingCursor() {
+function hideLoadingCursor(options = {}) {
+    const { immediate = false } = options;
+
     if (_loadingOverlayEscapeHandler) {
         document.removeEventListener('keydown', _loadingOverlayEscapeHandler, true);
         _loadingOverlayEscapeHandler = null;
     }
-    if (_loadingOverlay) {
-        _loadingOverlay.style.animation = 'overlayFadeIn 0.15s ease reverse';
-        setTimeout(() => {
-            if (_loadingOverlay && _loadingOverlay.parentNode) {
-                _loadingOverlay.remove();
+
+    const overlayToRemove = _loadingOverlay || document.getElementById('snip-loading-overlay');
+    _loadingOverlay = null;
+
+    if (!overlayToRemove) {
+        return;
+    }
+
+    const removeOverlay = () => {
+        if (overlayToRemove.parentNode) {
+            overlayToRemove.remove();
+        }
+
+        document.querySelectorAll('#snip-loading-overlay').forEach((overlay) => {
+            if (overlay !== overlayToRemove && overlay !== _loadingOverlay) {
+                overlay.remove();
             }
-            _loadingOverlay = null;
-        }, 150);
+        });
+    };
+
+    if (immediate) {
+        removeOverlay();
+        return;
     }
-    // Also remove by ID in case of orphaned overlays
-    const existing = document.getElementById('snip-loading-overlay');
-    if (existing && existing !== _loadingOverlay) {
-        existing.remove();
-    }
+
+    overlayToRemove.style.animation = 'overlayFadeIn 0.15s ease reverse';
+    setTimeout(removeOverlay, 150);
 }
 
 

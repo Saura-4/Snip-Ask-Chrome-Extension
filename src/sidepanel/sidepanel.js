@@ -2,15 +2,18 @@ const WindowManager = {
     windows: [],
     maxWindows: 4,
     pendingResponses: 0,
+    responseBatchResolver: null,
     register(ui) {
         this.windows = [ui];
     },
     unregister() {
         this.windows = [];
+        this.resolveResponseBatch();
     },
     closeAll() {
         this.windows.forEach((ui) => ui.close());
         this.windows = [];
+        this.resolveResponseBatch();
     },
     isMaxReached() {
         return false;
@@ -20,41 +23,48 @@ const WindowManager = {
         return false;
     },
     broadcastFollowUp(text, senderUI) {
-        chrome.runtime.sendMessage({ action: 'BROADCAST_TO_POPUP_WINDOWS', text });
+        this.beginResponseBatch(2);
+        chrome.runtime.sendMessage({ action: 'BROADCAST_TO_POPUP_WINDOWS', text })
+            .then(() => this.onResponseReceived())
+            .catch(() => this.onResponseReceived());
         senderUI.sendMessageDirect(text, 1, senderUI.currentMode || 'short');
     },
-    onResponseReceived() {}
+    beginResponseBatch(count) {
+        this.resolveResponseBatch();
+        this.pendingResponses = Math.max(0, count);
+        this.windows.forEach((ui) => ui.setInputDisabled(this.pendingResponses > 0));
+
+        if (this.pendingResponses === 0) {
+            return Promise.resolve();
+        }
+
+        return new Promise((resolve) => {
+            this.responseBatchResolver = resolve;
+        });
+    },
+    resolveResponseBatch() {
+        if (this.responseBatchResolver) {
+            const resolve = this.responseBatchResolver;
+            this.responseBatchResolver = null;
+            resolve();
+        }
+    },
+    onResponseReceived() {
+        if (this.pendingResponses > 0) {
+            this.pendingResponses--;
+        }
+        if (this.pendingResponses <= 0) {
+            this.pendingResponses = 0;
+            this.windows.forEach((ui) => ui.setInputDisabled(false));
+            this.resolveResponseBatch();
+        }
+    }
 };
 
 let sidePanelUi = null;
-
-async function persistSidePanelSession() {
-    if (!sidePanelUi) return;
-    const session = sidePanelUi.serializeSession();
-    sidePanelUi._lastRenderedTimestamp = session.lastUpdated || null;
-    await chrome.storage.local.set({
-        sidePanelSession: session
-    });
-}
-
-async function loadSidePanelSession() {
-    const storage = await chrome.storage.local.get(['sidePanelSession']);
-    return storage.sidePanelSession || null;
-}
-
-async function closeBrowserSidePanel(windowId = null) {
-    if (!windowId) {
-        const storage = await chrome.storage.local.get(['sidePanelSession']);
-        windowId = storage.sidePanelSession?.windowId;
-    }
-    if (chrome.sidePanel.close && windowId) {
-        try {
-            await chrome.sidePanel.close({ windowId });
-        } catch {
-            // Ignore close failures to avoid breaking popout behavior.
-        }
-    }
-}
+const sidePanelHost = SnipAskSidePanelHost.createSessionHost({
+    getUi: () => sidePanelUi
+});
 
 async function renderSession(session) {
     if (!sidePanelUi) {
@@ -62,17 +72,27 @@ async function renderSession(session) {
         sidePanelUi.setDisplayMode('sidebar');
         sidePanelUi._lastRenderedTimestamp = session?.lastUpdated || null;
         sidePanelUi.onSessionChanged = () => {
-            void persistSidePanelSession();
+            void sidePanelHost.persistSession();
         };
         WindowManager.register(sidePanelUi);
+        sidePanelHost.startPresence();
 
         if (sidePanelUi.compareBtn) {
             sidePanelUi.compareBtn.onclick = async () => {
-                await chrome.runtime.sendMessage({
-                    action: 'OPEN_COMPARE_FROM_SIDEPANEL',
-                    session: sidePanelUi.serializeSession(),
-                    sourceModel: sidePanelUi.currentModel || null
-                });
+                try {
+                    const result = await chrome.runtime.sendMessage({
+                        action: 'OPEN_COMPARE_FROM_SIDEPANEL',
+                        session: sidePanelUi.serializeSession(),
+                        sourceModel: sidePanelUi.currentModel || null
+                    });
+                    if (!result?.success && typeof showErrorToast === 'function') {
+                        showErrorToast(result?.error || 'Could not open compare window.');
+                    }
+                } catch (error) {
+                    if (typeof showErrorToast === 'function') {
+                        showErrorToast(error?.message || 'Could not open compare window.');
+                    }
+                }
             };
         }
 
@@ -89,8 +109,13 @@ async function renderSession(session) {
         if (sidePanelUi.closeBtn) {
             sidePanelUi.closeBtn.onclick = async () => {
                 const windowId = sidePanelUi.windowId;
-                await chrome.storage.local.set({ sidePanelSession: null });
-                await closeBrowserSidePanel(windowId);
+                const tabId = sidePanelUi.activeTabId;
+                await sidePanelHost.clearPresence();
+                await chrome.storage.local.set({
+                    sidePanelSession: null,
+                    sidePanelPresence: null
+                });
+                void sidePanelHost.closeBrowserSidePanel(windowId, tabId);
                 sidePanelUi.chatBody.innerHTML = '';
             };
         }
@@ -103,29 +128,36 @@ async function renderSession(session) {
         sidePanelUi.chatHistory = [];
         if (sidePanelUi.chatBody) sidePanelUi.chatBody.innerHTML = '';
         sidePanelUi._lastRenderedTimestamp = null;
+        void sidePanelHost.clearPresence();
+        void sidePanelHost.closeBrowserSidePanel(sidePanelUi.windowId, sidePanelUi.activeTabId);
         return;
     }
 
     // Only skip hydration if this is an echo of our own write (same uiId AND same timestamp).
-    // This prevents the storage listener from re-rendering after persistSidePanelSession().
-    const isSelfEcho = session.uiId
-        && session.uiId === sidePanelUi.uiId
-        && session.lastUpdated === sidePanelUi._lastRenderedTimestamp;
+    // This prevents the storage listener from re-rendering after our own session write.
+    const isSelfEcho = SnipAskSession.isSameRenderedSession(session, sidePanelUi);
     if (isSelfEcho) {
         // Still update tab/window ids in case they changed
         sidePanelUi.activeTabId = session.activeTabId || sidePanelUi.activeTabId || null;
         sidePanelUi.windowId = session.windowId || sidePanelUi.windowId || null;
+        void sidePanelHost.markAlive();
         return;
     }
 
     sidePanelUi.hydrateFromSession(session, { isSidePanelHost: true });
     sidePanelUi.setDisplayMode('sidebar');
     sidePanelUi._lastRenderedTimestamp = session.lastUpdated || null;
+    void sidePanelHost.markAlive();
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-    const session = await loadSidePanelSession();
-    await renderSession(session);
+    const session = await sidePanelHost.waitForInitialSession();
+    if (session) {
+        await renderSession(session);
+        return;
+    }
+    void sidePanelHost.clearPresence();
+    await sidePanelHost.closeBrowserSidePanel();
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -137,15 +169,35 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'ADD_SNIPPED_IMAGE_TO_SIDEPANEL') {
+        if (!sidePanelUi || !request.base64Image) {
+            sendResponse({ success: false });
+            return false;
+        }
+
+        sidePanelUi._processSnippedImage(request.base64Image);
+        sendResponse({ success: true });
+        return false;
+    }
+
     if (request.action === 'BROADCAST_TO_SIDEPANEL') {
         if (!sidePanelUi) {
             sendResponse({ success: false });
             return false;
         }
 
-        sidePanelUi.sendMessageDirect(request.text, request.parallelCount || 0, sidePanelUi.currentMode || 'short');
-        sendResponse({ success: true });
-        return false;
+        (async () => {
+            sidePanelUi.setInputDisabled(true);
+            try {
+                await sidePanelUi.sendMessageDirect(request.text, request.parallelCount || 0, sidePanelUi.currentMode || 'short');
+                sendResponse({ success: true });
+            } catch (error) {
+                sendResponse({ success: false, error: error.message });
+            } finally {
+                sidePanelUi.setInputDisabled(false);
+            }
+        })();
+        return true;
     }
 
     return false;

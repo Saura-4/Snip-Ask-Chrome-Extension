@@ -3,6 +3,11 @@
 // Backend (Cloudflare Worker) is the sole authority for rate limiting
 
 import { getDeviceFingerprint } from './fingerprint.js';
+import {
+    REQUEST_TOO_LARGE_MESSAGE,
+    extractErrorMessage,
+    isContextLimitErrorMessage
+} from './ai/errors.js';
 
 // --- CONFIGURATION ---
 
@@ -20,33 +25,6 @@ const DEFAULT_PROVIDER_VISIBILITY = {
 };
 const GUEST_SAFE_PAYLOAD_LIMIT_BYTES = 700 * 1024;
 const GUEST_REQUEST_TIMEOUT_MS = 60000;
-
-function extractErrorMessage(errorLike, fallback = 'Guest Mode service error. Please try again later.') {
-    if (!errorLike) return fallback;
-    if (typeof errorLike === 'string') return errorLike;
-
-    if (Array.isArray(errorLike)) {
-        const parts = errorLike
-            .map((item) => extractErrorMessage(item, ''))
-            .filter(Boolean);
-        return parts.join(' ').trim() || fallback;
-    }
-
-    if (typeof errorLike === 'object') {
-        const preferredFields = ['message', 'error', 'detail', 'details', 'status', 'code'];
-        for (const field of preferredFields) {
-            const value = extractErrorMessage(errorLike[field], '');
-            if (value) return value;
-        }
-
-        const values = Object.values(errorLike)
-            .map((value) => extractErrorMessage(value, ''))
-            .filter(Boolean);
-        return values.join(' ').trim() || fallback;
-    }
-
-    return String(errorLike);
-}
 
 // --- INSTANCE ID MANAGEMENT ---
 
@@ -193,6 +171,10 @@ async function makeGuestRequest(requestBody, externalSignal = null) {
         throw new Error(response.ok
             ? 'Guest Mode returned an invalid response. Please try again.'
             : 'Guest Mode service error. Please try again later.');
+    }
+
+    if (!response.ok && response.status !== 429 && isContextLimitErrorMessage(data.error || data.message || data)) {
+        throw new Error(REQUEST_TOO_LARGE_MESSAGE);
     }
 
     // Handle errors from anti-abuse system

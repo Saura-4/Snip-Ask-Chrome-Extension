@@ -1,4 +1,4 @@
-import { optimizeMessageHistory } from '../ai-service.js';
+import { optimizeMessageHistory } from '../ai/token-budget.js';
 import { GUEST_DEFAULT_MODEL } from '../guest-config.js';
 import { resolveGuestModel } from '../models/model-routing.js';
 
@@ -51,15 +51,22 @@ function buildGuestSystemPrompt(mode, storage) {
     return 'This is a POPUP WINDOW. Analyze the input and provide a helpful, concise response (under 200 words). Be direct and focused.';
 }
 
-function buildGuestRequestPayload({ modelName, mode, storage, messages, parallelCount = null, optimize = false, forceVisionFallback = false }) {
+function buildGuestRequestPayload({ modelName, mode, storage, messages, parallelCount = null, forceVisionFallback = false }) {
     const resolvedModel = resolveGuestModel(modelName, GUEST_DEFAULT_MODEL);
-    const shouldOptimize = optimize && forceVisionFallback !== true;
-    const requestMessages = shouldOptimize ? optimizeMessageHistory(messages, resolvedModel) : messages;
+    const maxTokens = getGuestMaxTokens(mode);
+    const optimization = optimizeMessageHistory(messages, resolvedModel, [], {
+        mode,
+        outputTokens: maxTokens
+    });
+    if (optimization.error) {
+        throw new Error(optimization.error.message);
+    }
+    const requestMessages = optimization.messages;
     const payload = {
         model: resolvedModel,
         messages: requestMessages,
         temperature: 0.3,
-        max_tokens: getGuestMaxTokens(mode)
+        max_tokens: maxTokens
     };
 
     if (parallelCount !== null) {

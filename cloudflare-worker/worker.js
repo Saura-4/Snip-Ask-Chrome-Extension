@@ -463,8 +463,17 @@ function buildCorsHeaders(request, env, isPublicRead = false) {
     };
 
     const allowedIds = getAllowedExtensionIds(env);
-    if (isPublicRead || allowedIds.length === 0) {
+    if (isPublicRead) {
         return publicReadHeaders;
+    }
+
+    if (allowedIds.length === 0) {
+        return {
+            'Access-Control-Allow-Origin': 'null',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, X-Extension-Id',
+            'Vary': 'Origin'
+        };
     }
 
     const allowedOrigins = getAllowedExtensionOrigins(env);
@@ -501,7 +510,7 @@ function validateExtensionOrigin(request, env, options = {}) {
     const { preflight = false } = options;
     const allowedIds = getAllowedExtensionIds(env);
     if (allowedIds.length === 0) {
-        return { ok: true };
+        return { ok: false, code: 'MISSING_EXTENSION_ALLOWLIST' };
     }
 
     const allowedOrigins = getAllowedExtensionOrigins(env);

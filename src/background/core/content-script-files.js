@@ -4,7 +4,9 @@ export const CONTENT_SCRIPT_FILES = [
     'src/content/ui-helpers.js',
     'src/content/chat/message-utils.js',
     'src/content/chat/render-utils.js',
+    'src/content/chat/session-state.js',
     'src/content/window-manager.js',
+    'src/content/popup-window-sync.js',
     'src/content/snip-selection.js',
     'src/content/chat/floating-chat-ui.js',
     'src/content/content.js'

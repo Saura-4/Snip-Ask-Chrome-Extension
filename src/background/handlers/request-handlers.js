@@ -1,4 +1,5 @@
-import { getAIService, optimizeMessageHistory } from '../ai-service.js';
+import { getAIService } from '../ai-service.js';
+import { optimizeMessageHistory } from '../ai/token-budget.js';
 import { isGuestMode, isGuestConfigured, makeGuestRequest, GUEST_DEFAULT_MODEL } from '../guest-config.js';
 import { getChatWindowModels, checkGuestModeStatus } from '../models/models-config.js';
 import { isAutoGuestModel, isGoogleModel, isGroqModel, isOllamaModel, isOpenAIModel, isOpenRouterModel } from '../models/model-routing.js';
@@ -37,6 +38,14 @@ function truncateGuestText(text, maxLength = GUEST_TEXT_LIMIT) {
     const lastBreak = Math.max(slice.lastIndexOf('\n'), slice.lastIndexOf(' '));
     const trimmed = lastBreak > maxLength - 300 ? slice.slice(0, lastBreak) : slice;
     return `${trimmed}\n\n[truncated for guest mode]`;
+}
+
+function getBudgetedMessages(messages, modelName, mode) {
+    const result = optimizeMessageHistory(messages, modelName, [], { mode });
+    if (result.error) {
+        throw new Error(result.error.message);
+    }
+    return result.messages;
 }
 
 export async function handleCustomModelValidation(request, sendResponse, signal) {
@@ -103,8 +112,7 @@ export async function handleContinueChat(request, sendResponse, signal) {
                 mode,
                 storage,
                 messages: messagesWithSystem,
-                parallelCount,
-                optimize: true
+                parallelCount
             });
 
             const guestResponse = await makeGuestRequest(guestRequest.payload, signal);
@@ -122,7 +130,7 @@ export async function handleContinueChat(request, sendResponse, signal) {
 
         const mode = request.mode || storage.selectedMode || storage.interactionMode || 'short';
         const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
-        const optimizedHistory = optimizeMessageHistory(request.history, modelName);
+        const optimizedHistory = getBudgetedMessages(request.history, modelName, mode);
         const result = await aiService.chat(optimizedHistory, signal);
         sendResponse({ success: true, answer: result.text, model: modelName, responseModel: result.model, tokenUsage: result.tokenUsage });
     } catch (error) {
@@ -310,7 +318,6 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
                 mode,
                 storage,
                 messages,
-                optimize: true,
                 forceVisionFallback: isAutoGuestModel(requestedModelName)
             });
             const guestResponse = await makeGuestRequest(guestRequest.payload, signal);
@@ -344,7 +351,7 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
         }
 
         const messages = [{ role: 'user', content: contentArray }];
-        const optimizedMessages = optimizeMessageHistory(messages, modelName);
+        const optimizedMessages = getBudgetedMessages(messages, modelName, mode);
         const result = await aiService.chat(optimizedMessages, signal);
 
         sendResponse({

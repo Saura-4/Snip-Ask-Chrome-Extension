@@ -14,6 +14,7 @@ const WindowManager = {
 
     /** @type {number} Pending responses counter for synchronized follow-up */
     pendingResponses: 0,
+    responseBatchResolver: null,
 
     /** @type {string|null} Window id currently docked as sidebar */
     sidebarWindowId: null,
@@ -88,6 +89,7 @@ const WindowManager = {
     closeAll() {
         [...this.windows].forEach(w => w.close());
         this.sidebarWindowId = null;
+        this.resolveResponseBatch();
     },
 
     getSidebarWindow() {
@@ -212,10 +214,7 @@ const WindowManager = {
         chrome.storage.local.get(['sidePanelSession'], (storage) => {
             const hasSidebarSession = Array.isArray(storage.sidePanelSession?.chatHistory) && storage.sidePanelSession.chatHistory.length > 0;
             const totalTargets = this.windows.length + (hasSidebarSession ? 1 : 0);
-
-            // Always disable input while waiting for response(s)
-            this.pendingResponses = this.windows.length;
-            this.windows.forEach((w) => w.setInputDisabled(true));
+            this.beginResponseBatch(totalTargets);
 
             if (totalTargets <= 1) {
                 const mode = senderUI.currentMode || 'short';
@@ -233,19 +232,45 @@ const WindowManager = {
                     action: 'BROADCAST_TO_SIDEPANEL',
                     text,
                     parallelCount: 0
-                });
+                }).then(() => this.onResponseReceived())
+                    .catch(() => this.onResponseReceived());
             }
         });
+    },
+
+    beginResponseBatch(count) {
+        this.resolveResponseBatch();
+        this.pendingResponses = Math.max(0, count);
+        this.windows.forEach((w) => w.setInputDisabled(this.pendingResponses > 0));
+
+        if (this.pendingResponses === 0) {
+            return Promise.resolve();
+        }
+
+        return new Promise((resolve) => {
+            this.responseBatchResolver = resolve;
+        });
+    },
+
+    resolveResponseBatch() {
+        if (this.responseBatchResolver) {
+            const resolve = this.responseBatchResolver;
+            this.responseBatchResolver = null;
+            resolve();
+        }
     },
 
     /**
      * Called when a response is received (for multi-window sync)
      */
     onResponseReceived() {
-        this.pendingResponses--;
+        if (this.pendingResponses > 0) {
+            this.pendingResponses--;
+        }
         if (this.pendingResponses <= 0) {
             this.pendingResponses = 0;
             this.windows.forEach(w => w.setInputDisabled(false));
+            this.resolveResponseBatch();
         }
     },
 

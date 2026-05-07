@@ -3,26 +3,31 @@ function createChatActionButton(text, icon, title, isPrimary) {
     button.innerHTML = `${icon} ${text}`;
     button.title = title;
     button.style.cssText = `
-        background: ${isPrimary ? 'rgba(255, 107, 74, 0.15)' : 'rgba(255,255,255,0.05)'};
-        color: ${isPrimary ? '#ff6b4a' : '#888'};
-        border: 1px solid ${isPrimary ? 'rgba(255, 107, 74, 0.3)' : 'rgba(255,255,255,0.1)'};
-        padding: 4px 10px;
-        border-radius: 6px;
+        background: ${isPrimary ? 'rgba(245, 80, 54, 0.12)' : 'rgba(255,255,255,0.04)'};
+        color: ${isPrimary ? '#ff6b4a' : '#b8b8b8'};
+        border: 1px solid ${isPrimary ? 'rgba(245, 80, 54, 0.5)' : 'rgba(255,255,255,0.1)'};
+        padding: 5px 10px;
+        border-radius: 999px;
         font-size: 11px;
         cursor: pointer;
-        transition: all 0.2s;
-        display: flex;
+        transition: all 0.18s ease;
+        display: inline-flex;
         align-items: center;
+        justify-content: center;
         gap: 5px;
         font-weight: 500;
+        line-height: 1;
+        min-height: 26px;
     `;
     button.onmouseenter = () => {
-        button.style.background = isPrimary ? 'rgba(245, 80, 54, 0.25)' : 'rgba(255,255,255,0.1)';
-        button.style.color = isPrimary ? '#ff6b52' : '#e5e7eb';
+        button.style.background = isPrimary ? 'rgba(245, 80, 54, 0.18)' : 'rgba(255,255,255,0.08)';
+        button.style.borderColor = isPrimary ? 'rgba(245, 80, 54, 0.65)' : 'rgba(255,255,255,0.16)';
+        button.style.color = isPrimary ? '#ff7a5c' : '#e5e7eb';
     };
     button.onmouseleave = () => {
-        button.style.background = isPrimary ? 'rgba(245, 80, 54, 0.15)' : 'rgba(255,255,255,0.05)';
-        button.style.color = isPrimary ? '#f55036' : '#9ca3af';
+        button.style.background = isPrimary ? 'rgba(245, 80, 54, 0.12)' : 'rgba(255,255,255,0.04)';
+        button.style.borderColor = isPrimary ? 'rgba(245, 80, 54, 0.5)' : 'rgba(255,255,255,0.1)';
+        button.style.color = isPrimary ? '#ff6b4a' : '#b8b8b8';
     };
     return button;
 }
@@ -187,7 +192,7 @@ function renderAssistantMessageContent(targetUI, msgDiv, options) {
             setTimeout(() => {
                 copyBtn.innerHTML = originalHTML;
                 copyBtn.style.borderColor = "rgba(255,255,255,0.1)";
-                copyBtn.style.color = "#9ca3af";
+                copyBtn.style.color = "#b8b8b8";
             }, 2000);
         });
     };
