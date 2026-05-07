@@ -45,8 +45,6 @@ const API_KEY_CONFIG = {
 };
 const DEFAULT_MODEL = 'groq:auto';
 const DEFAULT_MODE = 'default';
-const DEFAULT_CHAT_DISPLAY_MODE = 'popup';
-const SIDE_PANEL_PATH = 'src/sidepanel/sidepanel.html';
 
 // --- STATE ---
 let editingModeId = null;
@@ -110,8 +108,7 @@ async function initializeDefaults() {
     'enabledProviders',
     'enabledModels',
     'selectedModel',
-    'selectedMode',
-    'chatDisplayMode'
+    'selectedMode'
   ]);
 
   if (!result.customModes) {
@@ -159,9 +156,7 @@ async function initializeDefaults() {
     await chrome.storage.local.set({ selectedMode: DEFAULT_MODE });
   }
 
-  if (!result.chatDisplayMode) {
-    await chrome.storage.local.set({ chatDisplayMode: DEFAULT_CHAT_DISPLAY_MODE });
-  }
+  await chrome.storage.local.remove('chatDisplayMode');
 }
 
 // --- LOAD SETTINGS ---
@@ -169,7 +164,7 @@ async function loadSettings() {
   const result = await chrome.storage.local.get([
     'customModes', 'enabledProviders', 'enabledModels', 'selectedModel', 'selectedMode',
     'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost', 'customPrompt',
-    'providerHiddenSince', 'hideContextMenu', 'hiddenModels', 'chatDisplayMode'
+    'providerHiddenSince', 'hideContextMenu', 'hiddenModels'
   ]);
 
   // Check and cleanup old keys
@@ -209,11 +204,6 @@ async function loadSettings() {
   const hideContextMenuToggle = document.getElementById('hideContextMenu');
   if (hideContextMenuToggle) {
     hideContextMenuToggle.checked = result.hideContextMenu === true;
-  }
-
-  const chatDisplayModeSelect = document.getElementById('chatDisplayMode');
-  if (chatDisplayModeSelect) {
-    chatDisplayModeSelect.value = result.chatDisplayMode || DEFAULT_CHAT_DISPLAY_MODE;
   }
 
   // Handle custom prompt visibility
@@ -399,29 +389,39 @@ function loadApiKeyInputs(enabledProviders, savedValues) {
       input.style.marginBottom = '6px';
       input.value = savedValues[config.storageKey] || '';
 
-      // Use both 'input' (real-time) and 'change' (on blur) events
       let debounceTimer = null;
-      const handleApiKeyUpdate = async () => {
+      let lastSavedValue = input.value.trim();
+      const saveApiKeyUpdate = async () => {
         const value = input.value.trim();
-        // Save the trimmed value (empty string if only whitespace)
-        await chrome.storage.local.set({ [config.storageKey]: value });
+        if (value === lastSavedValue) {
+          return;
+        }
 
-        // Track whether guest mode status changed
         const wasGuestMode = isGuestModeActive;
+        await chrome.storage.local.set({ [config.storageKey]: value });
+        lastSavedValue = value;
 
-        // Re-check guest status immediately to update banner visibility
         await checkGuestStatus();
 
-        // Only refresh models if guest mode status changed
-        // Use refreshModelsOnly() instead of loadSettings() to avoid recreating inputs and losing focus
         if (wasGuestMode !== isGuestModeActive) {
-          clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(() => refreshModelsOnly(), 300);
+          await refreshModelsOnly();
         }
       };
 
-      input.addEventListener('input', handleApiKeyUpdate);
-      input.addEventListener('change', handleApiKeyUpdate);
+      input.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          void saveApiKeyUpdate();
+        }, 500);
+      });
+      input.addEventListener('change', () => {
+        clearTimeout(debounceTimer);
+        void saveApiKeyUpdate();
+      });
+      input.addEventListener('blur', () => {
+        clearTimeout(debounceTimer);
+        void saveApiKeyUpdate();
+      });
 
       container.appendChild(input);
     }
@@ -447,33 +447,6 @@ async function validateCustomModelBeforeSave(customModel) {
   }
 
   return response;
-}
-
-async function openBrowserSidePanelFromPopup() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  const tab = tabs[0];
-  if (!tab?.id) {
-    throw new Error('No active tab available for sidebar.');
-  }
-
-  if (typeof chrome.sidePanel?.setOptions !== 'function' || typeof chrome.sidePanel?.open !== 'function') {
-    const response = await chrome.runtime.sendMessage({ action: 'PREPARE_SIDE_PANEL' });
-    if (!response?.success) {
-      throw new Error(response?.error || 'Chrome side panel API is unavailable.');
-    }
-    return;
-  }
-
-  await chrome.sidePanel.setOptions({
-    tabId: tab.id,
-    path: SIDE_PANEL_PATH,
-    enabled: true
-  });
-  await chrome.sidePanel.open({ windowId: tab.windowId });
-  const response = await chrome.runtime.sendMessage({ action: 'RESET_SIDE_PANEL_SESSION' });
-  if (!response?.success) {
-    console.warn('Snip & Ask: could not reset side panel session', response?.error);
-  }
 }
 
 function loadModes(modes, selectedMode) {
@@ -787,21 +760,6 @@ function setupEventListeners() {
     });
   }
 
-  const chatDisplayModeSelect = document.getElementById('chatDisplayMode');
-  if (chatDisplayModeSelect) {
-    chatDisplayModeSelect.addEventListener('change', async () => {
-      const nextMode = chatDisplayModeSelect.value === 'sidebar' ? 'sidebar' : 'popup';
-      await chrome.storage.local.set({ chatDisplayMode: nextMode });
-      if (nextMode === 'sidebar') {
-        try {
-          await openBrowserSidePanelFromPopup();
-        } catch (error) {
-          console.warn('Snip & Ask: could not pre-open side panel', error);
-        }
-      }
-    });
-  }
-
   // Hide context menu toggle
   const hideContextMenuToggle = document.getElementById('hideContextMenu');
   if (hideContextMenuToggle) {
@@ -900,7 +858,7 @@ async function deleteMode(modeId) {
 
 // --- SNIP FUNCTIONALITY ---
 async function startSnip() {
-  const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'selectedMode', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost', 'chatDisplayMode']);
+  const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'selectedMode', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost']);
   const modelSelect = document.getElementById('modelSelect');
   const modeSelect = document.getElementById('modeSelect');
   let model = modelSelect?.value || result.selectedModel || DEFAULT_MODEL;
@@ -944,14 +902,6 @@ async function startSnip() {
   if (isRestrictedPage(tab.url)) {
     alert("Cannot run on this restricted page.");
     return;
-  }
-
-  if (result.chatDisplayMode === 'sidebar') {
-    try {
-      await openBrowserSidePanelFromPopup();
-    } catch (error) {
-      console.warn('Snip & Ask: side panel could not be prepared before snip', error);
-    }
   }
 
   try {

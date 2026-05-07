@@ -25,17 +25,12 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "lib/tesseract.min.js",
-        "lib/worker.min.js",
-        "lib/tesseract-core.wasm.js",
-        "lib/tesseract-core.wasm",
-        "lib/eng.traineddata.gz",
-        "lib/katex.min.js",
-        "lib/katex.min.css"
+        "assets/icons/icon-32.png"
       ],
       "matches": [
         "<all_urls>"
-      ]
+      ],
+      "use_dynamic_url": true
     }
   ],
   "action": {

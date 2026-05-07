@@ -107,54 +107,6 @@ async function sendMessageWithInjectionFallback(tab, message) {
     }
 }
 
-async function prepareSidePanelIfPreferred(tab) {
-    if (!tab?.id) return;
-
-    // Read the user's preference. We do this in parallel with the open
-    // attempt to minimise the async gap before sidePanel.open().
-    const storagePromise = getStorage(['chatDisplayMode']);
-
-    // Try to open the side panel IMMEDIATELY to preserve the user gesture.
-    // The default_path from manifest.json is used automatically.
-    let panelOpened = false;
-    try {
-        await chrome.sidePanel.open({ windowId: tab.windowId || undefined });
-        panelOpened = true;
-    } catch (error) {
-        // Fallback: try with tabId
-        try {
-            await chrome.sidePanel.open({ tabId: tab.id });
-            panelOpened = true;
-        } catch {
-            // Side panel open failed entirely — continue without it
-        }
-    }
-
-    const storage = await storagePromise;
-    if (storage.chatDisplayMode !== 'sidebar') {
-        // User doesn't want sidebar mode. Close the panel we just opened.
-        if (panelOpened && chrome.sidePanel.close) {
-            try {
-                await chrome.sidePanel.close({ windowId: tab.windowId || undefined });
-            } catch {
-                // Ignore close failures
-            }
-        }
-        return;
-    }
-
-    // Panel is open and user wants sidebar — ensure options are set
-    try {
-        await chrome.sidePanel.setOptions({
-            tabId: tab.id,
-            path: 'src/sidepanel/sidepanel.html',
-            enabled: true
-        });
-    } catch (error) {
-        console.warn('Snip & Ask: Failed to set side panel options', error?.message || error);
-    }
-}
-
 export function registerChromeUiHandlers() {
     chrome.runtime.onInstalled.addListener(async (details) => {
         if (details.reason === 'install') {
@@ -181,7 +133,6 @@ export function registerChromeUiHandlers() {
         }
 
         try {
-            await prepareSidePanelIfPreferred(tab);
             await sendMessageWithInjectionFallback(tab, {
                 action: 'SHOW_AI_RESPONSE_FOR_TEXT',
                 text: info.selectionText
@@ -203,7 +154,6 @@ export function registerChromeUiHandlers() {
         }
 
         try {
-            await prepareSidePanelIfPreferred(tab);
             await sendMessageWithInjectionFallback(tab, { action: 'START_SNIP' });
         } catch (error) {
             console.error('Snip & Ask: Failed to start snip:', getTabFailureReason(tab, error), error);

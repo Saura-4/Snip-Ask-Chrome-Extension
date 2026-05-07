@@ -1,4 +1,5 @@
-import { cancelAllActiveRequests, createTrackedAbortController, removeTrackedController } from '../core/abort-registry.js';
+import { cancelTrackedRequest, createTrackedAbortController, removeTrackedController } from '../core/abort-registry.js';
+import { CONTENT_SCRIPT_FILES } from '../core/content-script-files.js';
 import {
     handleAIRequest,
     handleChatWindowModels,
@@ -11,6 +12,7 @@ import {
 
 let creating;
 const SIDE_PANEL_PATH = 'src/sidepanel/sidepanel.html';
+const SIDE_PANEL_PRESENCE_TTL_MS = 7000;
 const EMPTY_SIDE_PANEL_SESSION = {
     chatHistory: [],
     currentModel: null,
@@ -47,6 +49,38 @@ async function enableAndOpenSidePanelForTab(tab) {
     await chrome.sidePanel.open({ tabId: tab.id });
 }
 
+async function closeSidePanelForTab(tab) {
+    if (!tab?.id && !tab?.windowId) return;
+
+    if (chrome.sidePanel.close && tab.windowId) {
+        try {
+            await chrome.sidePanel.close({ windowId: tab.windowId });
+        } catch {
+            // Fall through to disabling the tab-specific side panel below.
+        }
+    }
+
+    if (chrome.sidePanel.setOptions && tab.id) {
+        try {
+            await chrome.sidePanel.setOptions({
+                tabId: tab.id,
+                path: SIDE_PANEL_PATH,
+                enabled: false
+            });
+        } catch {
+            // Popout already succeeded; failing to close the browser side panel is non-fatal.
+        }
+    }
+}
+
+function isActiveSidePanelPresence(presence, tab) {
+    if (!presence?.lastSeen) return false;
+    if (Date.now() - presence.lastSeen > SIDE_PANEL_PRESENCE_TTL_MS) return false;
+    if (tab?.id && presence.activeTabId && presence.activeTabId !== tab.id) return false;
+    if (tab?.windowId && presence.windowId && presence.windowId !== tab.windowId) return false;
+    return true;
+}
+
 async function getTabForSession(session = null, fallbackTab = null) {
     if (session?.activeTabId) {
         try {
@@ -72,17 +106,7 @@ async function ensureActiveTabContentScript(tabId) {
     } catch {
         await chrome.scripting.executeScript({
             target: { tabId },
-            files: [
-                'lib/katex.min.js',
-                'src/content/utils.js',
-                'src/content/ui-helpers.js',
-                'src/content/chat/message-utils.js',
-                'src/content/chat/render-utils.js',
-                'src/content/window-manager.js',
-                'src/content/snip-selection.js',
-                'src/content/chat/floating-chat-ui.js',
-                'src/content/content.js'
-            ]
+            files: CONTENT_SCRIPT_FILES
         });
     }
 }
@@ -99,7 +123,6 @@ async function openSidePanelWithSession(session, fallbackTab = null) {
 
     // Save session to storage so the side panel picks it up.
     await chrome.storage.local.set({
-        chatDisplayMode: 'sidebar',
         sidePanelSession: {
             ...(session || {}),
             activeTabId: targetTab.id,
@@ -116,7 +139,6 @@ async function setSidePanelSession(session, fallbackTab = null) {
     }
 
     await chrome.storage.local.set({
-        chatDisplayMode: 'sidebar',
         sidePanelSession: {
             ...(session || {}),
             activeTabId: targetTab.id,
@@ -134,7 +156,6 @@ async function resetSidePanelSessionForTab(fallbackTab = null) {
 
     const storage = await chrome.storage.local.get(['selectedModel', 'selectedMode', 'customModes', 'customPrompt']);
     await chrome.storage.local.set({
-        chatDisplayMode: 'sidebar',
         sidePanelSession: {
             ...EMPTY_SIDE_PANEL_SESSION,
             currentModel: storage.selectedModel || null,
@@ -158,7 +179,6 @@ async function prepareSidePanelForActiveTab() {
 
     await enableAndOpenSidePanelForTab(activeTab);
     await chrome.storage.local.set({
-        chatDisplayMode: 'sidebar',
         sidePanelSession: {
             ...EMPTY_SIDE_PANEL_SESSION,
             currentModel: storage.selectedModel || null,
@@ -179,12 +199,15 @@ async function openFloatingPopupSession(session, compare = false, fallbackTab = 
     }
 
     await ensureActiveTabContentScript(targetTab.id);
-    await chrome.tabs.sendMessage(targetTab.id, {
+    const response = await chrome.tabs.sendMessage(targetTab.id, {
         action: 'OPEN_FLOATING_CHAT_SESSION',
         session,
         compare,
         sourceModel
     });
+    if (response?.success === false) {
+        throw new Error(response.error || 'Could not open popup window.');
+    }
 }
 
 async function setupOffscreenDocument(path) {
@@ -213,7 +236,17 @@ async function setupOffscreenDocument(path) {
 export function createRuntimeMessageListener() {
     return (request, sender, sendResponse) => {
         if (request.action === "CAPTURE_VISIBLE_TAB") {
-            chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 80 }, (dataUrl) => {
+            if (!sender.tab?.windowId) {
+                sendResponse({ error: 'Missing tab context for screenshot capture.' });
+                return true;
+            }
+
+            chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: "jpeg", quality: 80 }, (dataUrl) => {
+                const errorMessage = chrome.runtime.lastError?.message;
+                if (errorMessage) {
+                    sendResponse({ error: errorMessage });
+                    return;
+                }
                 sendResponse({ dataUrl });
             });
             return true;
@@ -238,29 +271,32 @@ export function createRuntimeMessageListener() {
         if (request.action === "ASK_AI" || request.action === "ASK_AI_TEXT") {
             const type = request.action === "ASK_AI_TEXT" ? 'text' : 'image';
             const content = type === 'text' ? request.text : request.base64Image;
-            const controller = createTrackedAbortController();
+            const requestId = request.requestId || null;
+            const controller = createTrackedAbortController(requestId);
 
             handleAIRequest(content, type, request.model, sendResponse, request.ocrConfidence || null, request.mode, controller.signal)
-                .finally(() => removeTrackedController(controller));
+                .finally(() => removeTrackedController(controller, requestId));
             return true;
         }
 
         if (request.action === "ASK_AI_MULTI_IMAGE") {
-            const controller = createTrackedAbortController();
+            const requestId = request.requestId || null;
+            const controller = createTrackedAbortController(requestId);
             handleMultiImageRequest(request.images, request.model, request.textContext, sendResponse, request.mode, controller.signal)
-                .finally(() => removeTrackedController(controller));
+                .finally(() => removeTrackedController(controller, requestId));
             return true;
         }
 
         if (request.action === "CONTINUE_CHAT") {
-            const controller = createTrackedAbortController();
+            const requestId = request.requestId || null;
+            const controller = createTrackedAbortController(requestId);
             handleContinueChat(request, sendResponse, controller.signal)
-                .finally(() => removeTrackedController(controller));
+                .finally(() => removeTrackedController(controller, requestId));
             return true;
         }
 
         if (request.action === "CANCEL_AI_REQUEST") {
-            cancelAllActiveRequests();
+            cancelTrackedRequest(request.requestId || null);
             sendResponse({ success: true });
             return true;
         }
@@ -348,14 +384,30 @@ export function createRuntimeMessageListener() {
             }
 
             // Fetch previous session in parallel (non-blocking)
-            const previousSessionPromise = chrome.storage.local.get(['sidePanelSession']);
+            const previousSessionPromise = chrome.storage.local.get(['sidePanelSession', 'sidePanelPresence']);
+            const enablePanelPromise = chrome.sidePanel.setOptions
+                ? chrome.sidePanel.setOptions({
+                    tabId: tab.id,
+                    path: SIDE_PANEL_PATH,
+                    enabled: true
+                }).catch(() => null)
+                : Promise.resolve();
 
             // Open the side panel IMMEDIATELY — no awaits before this call
             chrome.sidePanel.open({ windowId: tab.windowId })
                 .then(async () => {
-                    // Panel is open. Now save session to storage.
+                    await enablePanelPromise;
+
+                    const current = await previousSessionPromise.catch(() => ({}));
+                    const prevSession = current.sidePanelSession || null;
+                    const hasActiveSidePanel = isActiveSidePanelPresence(current.sidePanelPresence, tab);
+                    const hasPreviousChat = Array.isArray(prevSession?.chatHistory) && prevSession.chatHistory.length > 0;
+                    const shouldPopPrevious = hasActiveSidePanel && hasPreviousChat && prevSession.uiId !== request.session?.uiId;
+
+                    // Commit the clicked popup after the previous side-panel session
+                    // is captured. Popping the old session out is best-effort and
+                    // must not keep the clicked popup open after the panel accepted it.
                     await chrome.storage.local.set({
-                        chatDisplayMode: 'sidebar',
                         sidePanelSession: {
                             ...(request.session || {}),
                             activeTabId: tab.id,
@@ -364,32 +416,16 @@ export function createRuntimeMessageListener() {
                         }
                     });
 
-                    // If there was a previous different session, move it to popup
-                    try {
-                        const current = await previousSessionPromise;
-                        const prevSession = current.sidePanelSession || null;
-                        if (prevSession && prevSession.uiId !== request.session?.uiId) {
-                            await openFloatingPopupSession(prevSession, false, tab);
-                        }
-                    } catch { /* best-effort */ }
-
                     sendResponse({ success: true });
+
+                    if (shouldPopPrevious) {
+                        openFloatingPopupSession(prevSession, false, tab).catch((error) => {
+                            console.warn('Snip & Ask: Failed to pop previous side-panel chat into a popup:', error?.message || error);
+                        });
+                    }
                 })
                 .catch(async (error) => {
-                    // Panel open failed (e.g. user gesture expired anyway).
-                    // Still save the session so the panel picks it up if
-                    // opened manually.
-                    try {
-                        await chrome.storage.local.set({
-                            chatDisplayMode: 'sidebar',
-                            sidePanelSession: {
-                                ...(request.session || {}),
-                                activeTabId: tab.id,
-                                windowId: tab.windowId,
-                                lastUpdated: Date.now()
-                            }
-                        });
-                    } catch { /* best-effort */ }
+                    await enablePanelPromise;
                     sendResponse({ success: false, error: error?.message || String(error) });
                 });
             return true;
@@ -397,18 +433,37 @@ export function createRuntimeMessageListener() {
 
         if (request.action === 'MOVE_SIDEPANEL_TO_POPUP') {
             (async () => {
+                let targetTab = null;
+                let popoutSession = request.session || {};
                 try {
+                    targetTab = await getTabForSession(request.session);
+                    popoutSession = {
+                        ...popoutSession,
+                        activeTabId: targetTab?.id || popoutSession.activeTabId || null,
+                        windowId: targetTab?.windowId || popoutSession.windowId || null,
+                        lastUpdated: Date.now()
+                    };
+
                     await chrome.storage.local.set({
-                        chatDisplayMode: 'popup',
-                        sidePanelSession: null
+                        sidePanelSession: null,
+                        sidePanelPresence: null
                     });
-                    await openFloatingPopupSession(request.session, false);
-                    const targetTab = await getTabForSession(request.session);
-                    if (chrome.sidePanel.close && targetTab?.windowId) {
-                        await chrome.sidePanel.close({ windowId: targetTab.windowId });
-                    }
+                    const closePromise = closeSidePanelForTab(targetTab);
+                    await openFloatingPopupSession(popoutSession, false, targetTab);
+                    await closePromise;
                     sendResponse({ success: true });
                 } catch (error) {
+                    if (targetTab && popoutSession) {
+                        try {
+                            await chrome.storage.local.set({
+                                sidePanelSession: popoutSession,
+                                sidePanelPresence: null
+                            });
+                            await enableAndOpenSidePanelForTab(targetTab);
+                        } catch {
+                            // Preserve the original popout error for the caller.
+                        }
+                    }
                     sendResponse({ success: false, error: error.message });
                 }
             })();
@@ -485,9 +540,10 @@ export function createRuntimeMessageListener() {
         }
 
         if (request.action === "VALIDATE_CUSTOM_MODEL") {
-            const controller = createTrackedAbortController();
+            const requestId = request.requestId || null;
+            const controller = createTrackedAbortController(requestId);
             handleCustomModelValidation(request, sendResponse, controller.signal)
-                .finally(() => removeTrackedController(controller));
+                .finally(() => removeTrackedController(controller, requestId));
             return true;
         }
 

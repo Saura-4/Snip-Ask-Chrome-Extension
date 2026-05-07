@@ -381,8 +381,17 @@ function attachCodeBlockCopyHandlers(container) {
 // Max dimension to prevent huge payloads on 4K monitors (APIs may reject or timeout)
 const MAX_IMAGE_DIMENSION = 1536;
 
-function cropImage(base64Full, rect, callback) {
+function cropImage(base64Full, rect, callback, onError = () => {}) {
   const img = new Image();
+  const fail = (error) => {
+    try {
+      onError(error);
+    } catch {
+      // Keep image-processing failures from escaping into the host page.
+    }
+  };
+
+  img.onerror = () => fail(new Error('Could not decode screenshot.'));
   img.onload = () => {
     // Handle High DPI (Retina) displays for crisp screenshots
     const pixelRatio = window.devicePixelRatio || 1;
@@ -405,6 +414,10 @@ function cropImage(base64Full, rect, callback) {
     canvas.height = outputHeight;
 
     const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      fail(new Error('Could not prepare screenshot crop.'));
+      return;
+    }
 
     ctx.drawImage(
       img,
@@ -414,8 +427,20 @@ function cropImage(base64Full, rect, callback) {
       outputWidth, outputHeight // Destination W, H (scaled)
     );
 
-    // Remove the data URL prefix so it's ready for transmission
-    callback(canvas.toDataURL("image/jpeg", 0.85).replace(/^data:image\/(png|jpeg);base64,/, ""));
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        fail(new Error('Could not encode screenshot crop.'));
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onerror = () => fail(new Error('Could not read screenshot crop.'));
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+        callback(dataUrl.replace(/^data:image\/(png|jpeg);base64,/, ""));
+      };
+      reader.readAsDataURL(blob);
+    }, "image/jpeg", 0.85);
   };
   img.src = base64Full;
 }
