@@ -344,6 +344,7 @@ function handleSnipComplete(rect) {
                             action: "ASK_AI_TEXT",
                             model: currentModel,
                             text: ocrResponse.text,
+                            base64Image: croppedBase64,
                             ocrConfidence: ocrResponse.confidence,
                             mode: currentMode,
                             requestId
@@ -376,6 +377,36 @@ function handleSnipComplete(rect) {
  * Handle API response - create chat window with result
  * @param {Object} apiResponse
  */
+function getInitialUserText(initialUserMessage) {
+    if (typeof initialUserMessage === 'string') {
+        return initialUserMessage;
+    }
+    if (Array.isArray(initialUserMessage)) {
+        const textPart = initialUserMessage.find((item) => item.type === 'text');
+        return textPart?.text || '';
+    }
+    if (initialUserMessage && typeof initialUserMessage.content === 'string') {
+        return initialUserMessage.content;
+    }
+    if (initialUserMessage && Array.isArray(initialUserMessage.content)) {
+        const textPart = initialUserMessage.content.find((item) => item.type === 'text');
+        return textPart?.text || '';
+    }
+    return '';
+}
+
+function createUserOcrMetadata(apiResponse) {
+    const ocrText = getInitialUserText(apiResponse.initialUserMessage).trim();
+    if (apiResponse.usedOCR !== true || !apiResponse.base64Image || !ocrText) {
+        return null;
+    }
+    return {
+        usedOCR: true,
+        ocrText,
+        ocrView: 'image'
+    };
+}
+
 async function handleResponse(apiResponse, responseContext = {}) {
     if (isOverlayRequestCancelled(responseContext.requestId)) {
         finishOverlayRequest(responseContext.requestId);
@@ -420,12 +451,23 @@ async function handleResponse(apiResponse, responseContext = {}) {
             WindowManager.register(ui);
 
             // Pass base64Image so image thumbnail appears in chat
-            ui.addMessage('user', apiResponse.initialUserMessage, null, false, apiResponse.base64Image || null);
-            ui.addMessage('assistant', apiResponse.answer, SnipAskSession.getResponseModel(apiResponse, responseContext), false, null, false, apiResponse.tokenUsage);
+            ui.addMessage('user', apiResponse.initialUserMessage, null, false, apiResponse.base64Image || null, false, null, createUserOcrMetadata(apiResponse));
+            const assistantModel = SnipAskSession.getResponseModel(apiResponse, responseContext);
+            ui.addMessage(
+                'assistant',
+                apiResponse.answer,
+                assistantModel,
+                false,
+                null,
+                false,
+                apiResponse.tokenUsage,
+                ui._createAssistantMetadata(apiResponse, { selectedModel: responseContext.model })
+            );
 
             // Store initial state for comparison cloning
             ui.initialUserMessage = apiResponse.initialUserMessage;
             ui.initialBase64Image = apiResponse.base64Image || null;
+            ui.allImages = apiResponse.base64Image ? [apiResponse.base64Image] : [];
 
             // Update local guest usage cache if guestInfo is returned
             if (apiResponse.guestInfo) {
@@ -440,10 +482,21 @@ async function handleResponse(apiResponse, responseContext = {}) {
 
         const ui = await FloatingChatUI.create();
         WindowManager.register(ui);
-        ui.addMessage('user', apiResponse.initialUserMessage, null, false, apiResponse.base64Image || null);
-        ui.addMessage('assistant', apiResponse.answer, SnipAskSession.getResponseModel(apiResponse, responseContext), false, null, false, apiResponse.tokenUsage);
+        ui.addMessage('user', apiResponse.initialUserMessage, null, false, apiResponse.base64Image || null, false, null, createUserOcrMetadata(apiResponse));
+        const assistantModel = SnipAskSession.getResponseModel(apiResponse, responseContext);
+        ui.addMessage(
+            'assistant',
+            apiResponse.answer,
+            assistantModel,
+            false,
+            null,
+            false,
+            apiResponse.tokenUsage,
+            ui._createAssistantMetadata(apiResponse, { selectedModel: responseContext.model })
+        );
         ui.initialUserMessage = apiResponse.initialUserMessage;
         ui.initialBase64Image = apiResponse.base64Image || null;
+        ui.allImages = apiResponse.base64Image ? [apiResponse.base64Image] : [];
 
         if (apiResponse.guestInfo) {
             updateLocalGuestCache(apiResponse.guestInfo);

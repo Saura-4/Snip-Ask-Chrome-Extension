@@ -14,6 +14,7 @@ class FloatingChatUI {
         this.availableModels = [];
         this.customModes = [];  // User-created custom modes
         this.customPrompt = ''; // Custom prompt text for 'custom' mode
+        this.isGuestMode = false;
         this.isMinimized = false;
         this.hasSavedPosition = false;
         this.initialUserMessage = null;
@@ -58,12 +59,14 @@ class FloatingChatUI {
 
         if (modelResult && modelResult.success) {
             this.availableModels = modelResult.models;
+            this.isGuestMode = modelResult.isGuestMode === true;
         } else {
             // Fallback: minimal default if background script fails
             console.warn('Failed to fetch models from background:', modelResult?.error);
             this.availableModels = [
                 { value: 'groq:auto', name: 'Auto' }
             ];
+            this.isGuestMode = false;
         }
 
         // Get the current selected model, mode, and custom modes from storage
@@ -870,10 +873,15 @@ class FloatingChatUI {
      * @param {string|null} base64Image - Optional base64 image data for this message
      * @param {boolean} isRegenerated - Whether this is a regenerated response
      * @param {Object|null} tokenUsage - Token usage data from API response
+     * @param {Object|null} metadata - Internal message metadata
      */
-    addMessage(role, content, modelName = null, isError = false, base64Image = null, isRegenerated = false, tokenUsage = null) {
+    addMessage(role, content, modelName = null, isError = false, base64Image = null, isRegenerated = false, tokenUsage = null, metadata = null) {
         const msgModel = role === 'assistant' ? (modelName || this.currentModel) : null;
-        const historyEntry = createChatHistoryEntry(role, content, msgModel, base64Image, isRegenerated);
+        const messageMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : null;
+        if (role === 'assistant' && tokenUsage && messageMetadata && !messageMetadata.tokenUsage) {
+            messageMetadata.tokenUsage = tokenUsage;
+        }
+        const historyEntry = createChatHistoryEntry(role, content, msgModel, base64Image, isRegenerated, messageMetadata);
 
         this.chatHistory.push(historyEntry);
         const messageIndex = this.chatHistory.length - 1;
@@ -886,6 +894,7 @@ class FloatingChatUI {
             isError,
             isRegenerated,
             messageIndex,
+            metadata: historyEntry.metadata,
             modelLabel: role === 'assistant' ? this._getModelDisplayName(msgModel) : null,
             tokenUsage
         });
@@ -981,6 +990,153 @@ class FloatingChatUI {
         return parts[parts.length - 1] || 'AI';
     }
 
+    _isScoutModel(modelValue) {
+        return typeof modelValue === 'string' &&
+            modelValue.toLowerCase().includes('llama-4-scout');
+    }
+
+    _createAssistantMetadata(response = {}, overrides = {}) {
+        const selectedModel = response.selectedModel || overrides.selectedModel || this.currentModel;
+        const responseModel = response.responseModel || response.model || overrides.responseModel || selectedModel;
+        const tokenUsage = response.tokenUsage || overrides.tokenUsage || null;
+        const usedOCR = response.usedOCR === true || overrides.usedOCR === true;
+        const isGuestResponse = Boolean(response.guestInfo) || overrides.isGuestResponse === true;
+        const scoutRetryEligible = overrides.scoutRetryEligible === true ||
+            (selectedModel === 'groq:auto' && usedOCR && isGuestResponse && !this._isScoutModel(responseModel));
+
+        return {
+            selectedModel,
+            responseModel,
+            usedOCR,
+            isGuestResponse,
+            scoutRetryEligible,
+            tokenUsage,
+            scoutRetry: overrides.scoutRetry === true
+        };
+    }
+
+    _getTriggeringUserMessageIndex(assistantIndex) {
+        for (let i = assistantIndex - 1; i >= 0; i--) {
+            if (this.chatHistory[i]?.role === 'user') {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    _getScoutRetryImageForIndex(assistantIndex) {
+        const userIndex = this._getTriggeringUserMessageIndex(assistantIndex);
+        if (userIndex >= 0 && this.chatHistory[userIndex]?.base64Image) {
+            return this.chatHistory[userIndex].base64Image;
+        }
+
+        return this.initialBase64Image || null;
+    }
+
+    _shouldShowScoutRetry(messageIndex, metadata = null) {
+        const message = this.chatHistory[messageIndex];
+        if (!message || message.role !== 'assistant') return false;
+
+        const meta = metadata || message.metadata || {};
+        const selectedModel = meta.selectedModel || null;
+        const responseModel = meta.responseModel || message.model || null;
+
+        if (meta.isGuestResponse !== true && this.isGuestMode !== true) return false;
+        if (selectedModel !== 'groq:auto') return false;
+        if (meta.scoutRetryEligible === false) return false;
+        if (meta.usedOCR !== true) return false;
+        if (this._isScoutModel(responseModel)) return false;
+        return Boolean(this._getScoutRetryImageForIndex(messageIndex));
+    }
+
+    _rerenderChatHistory() {
+        if (!this.chatBody) return;
+        this.chatBody.innerHTML = '';
+        this.chatHistory.forEach((message, index) => {
+            renderClonedChatMessage(this, message, {
+                includeActions: true,
+                messageIndex: index
+            });
+        });
+        this.chatBody.scrollTop = this.chatBody.scrollHeight;
+    }
+
+    _refreshChatMessageAtIndex(index) {
+        if (!this.chatBody || !Number.isInteger(index) || !this.chatHistory[index]) return;
+
+        const existing = this.chatBody.querySelector(`[data-snip-ask-message-index="${index}"]`);
+        if (!existing) return;
+
+        const replacement = renderClonedChatMessage(this, this.chatHistory[index], {
+            includeActions: true,
+            messageIndex: index
+        });
+
+        if (replacement) {
+            existing.replaceWith(replacement);
+        }
+    }
+
+    async retryWithScoutAtIndex(index) {
+        if (this.isGeneratingResponse()) return;
+        if (!this._shouldShowScoutRetry(index)) return;
+
+        const image = this._getScoutRetryImageForIndex(index);
+        if (!image) return;
+
+        const requestId = this.showTypingIndicator();
+
+        try {
+            const response = await chrome.runtime.sendMessage({
+                action: "ASK_AI",
+                model: 'groq:auto',
+                base64Image: image,
+                mode: this.currentMode,
+                requestId
+            });
+
+            this.removeTypingIndicator();
+            if (this._requestCancelled) return;
+
+            if (response && response.success) {
+                const responseModel = response.responseModel || response.model || 'meta-llama/llama-4-scout-17b-16e-instruct';
+                const metadata = this._createAssistantMetadata(response, {
+                    selectedModel: 'groq:auto',
+                    responseModel,
+                    usedOCR: false,
+                    scoutRetry: true
+                });
+                const replacement = createChatHistoryEntry(
+                    'assistant',
+                    response.answer,
+                    responseModel,
+                    null,
+                    this.chatHistory[index]?.isRegenerated || false,
+                    metadata
+                );
+                replacement.timestamp = this.chatHistory[index]?.timestamp || replacement.timestamp;
+                this.chatHistory[index] = replacement;
+                this._rerenderChatHistory();
+                if (response.guestInfo) {
+                    updateLocalGuestCache(response.guestInfo);
+                }
+                this.onSessionChanged?.();
+            } else if (typeof showErrorToast === 'function') {
+                showErrorToast("Scout failed: " + (response?.error || "Unknown error"));
+            } else {
+                console.warn("Scout failed:", response?.error || "Unknown error");
+            }
+        } catch (error) {
+            this.removeTypingIndicator();
+            if (this._requestCancelled) return;
+            if (typeof showErrorToast === 'function') {
+                showErrorToast("Scout failed: " + (error?.message || String(error)));
+            } else {
+                console.warn("Scout failed:", error);
+            }
+        }
+    }
+
     /**
      * Regenerate the last assistant response (convenience wrapper)
      */
@@ -1028,6 +1184,7 @@ class FloatingChatUI {
 
         try {
             let response;
+            let responseMetadataOverrides = { selectedModel: this.currentModel };
 
             // Collect all images from history up to (and including) the user message
             const imagesToSend = [];
@@ -1109,8 +1266,10 @@ class FloatingChatUI {
                             model: this.currentModel,
                             history: historyWithOcr,
                             mode: this.currentMode,
+                            usedOCR: isAutoGuestModel,
                             requestId
                         });
+                        responseMetadataOverrides.usedOCR = isAutoGuestModel;
                     } else if (isAutoGuestModel) {
                         const textContext = this._buildApiHistory(userMsgIndex)
                             .map(m => `${m.role}: ${m.content}`)
@@ -1144,7 +1303,12 @@ class FloatingChatUI {
 
             if (response && response.success) {
                 // Add regenerated indicator to the response
-                this._addRegeneratedMessage(response.answer, response.responseModel || response.model || this.currentModel);
+                this._addRegeneratedMessage(
+                    response.answer,
+                    response.responseModel || response.model || this.currentModel,
+                    response,
+                    responseMetadataOverrides
+                );
                 if (response.guestInfo) {
                     updateLocalGuestCache(response.guestInfo);
                 }
@@ -1163,9 +1327,18 @@ class FloatingChatUI {
      * @param {string} content - Message content
      * @param {string} modelName - Model name
      */
-    _addRegeneratedMessage(content, modelName) {
+    _addRegeneratedMessage(content, modelName, response = {}, metadataOverrides = {}) {
         // Use addMessage but mark it as regenerated
-        this.addMessage('assistant', content, modelName, false, null, true);
+        this.addMessage(
+            'assistant',
+            content,
+            modelName,
+            false,
+            null,
+            true,
+            response.tokenUsage || null,
+            this._createAssistantMetadata(response, metadataOverrides)
+        );
     }
 
     /**
@@ -1450,12 +1623,40 @@ class FloatingChatUI {
 
         // Add message with the full content AND store the base64 image
         this.addMessage('user', userContent, null, false, croppedBase64);
+        const userMessageIndex = this.chatHistory.length - 1;
+        const storeHiddenOcrText = (text) => {
+            if (typeof text !== 'string' || !text.trim()) return;
+            const userEntry = this.chatHistory[userMessageIndex];
+            if (!userEntry || userEntry.role !== 'user') return;
+            userEntry.content = text;
+            userEntry.displayText = text;
+            userEntry.metadata = {
+                ...(userEntry.metadata || {}),
+                usedOCR: true,
+                ocrText: text.trim(),
+                ocrView: userEntry.metadata?.ocrView || 'image'
+            };
+            this._refreshChatMessageAtIndex(userMessageIndex);
+        };
 
         const handleSnippedImageResponse = (response) => {
             this.removeTypingIndicator();
             if (this._requestCancelled) return; // User clicked Stop
             if (response && response.success) {
-                this.addMessage('assistant', response.answer, this.currentModel, false, null, false, response.tokenUsage);
+                const responseModel = response.responseModel || response.model || this.currentModel;
+                this.addMessage(
+                    'assistant',
+                    response.answer,
+                    responseModel,
+                    false,
+                    null,
+                    false,
+                    response.tokenUsage,
+                    this._createAssistantMetadata(response, {
+                        selectedModel: this.currentModel,
+                        usedOCR: response.usedOCR === true
+                    })
+                );
                 if (response.guestInfo) {
                     updateLocalGuestCache(response.guestInfo);
                 }
@@ -1479,6 +1680,7 @@ class FloatingChatUI {
                 action: "ASK_AI_TEXT",
                 model: this.currentModel,
                 text,
+                base64Image: croppedBase64,
                 mode: this.currentMode,
                 requestId
             }, handleSnippedImageResponse);
@@ -1492,6 +1694,7 @@ class FloatingChatUI {
                 base64Image: croppedBase64
             }, (ocrResult) => {
                 if (this._isReliableAutoOcrResult(ocrResult)) {
+                    storeHiddenOcrText(ocrResult.text);
                     sendSnippedTextToModel(ocrResult.text);
                 } else {
                     this._logAutoOcrFallback('snip-again', ocrResult);
@@ -1509,7 +1712,17 @@ class FloatingChatUI {
                 this.removeTypingIndicator();
                 if (this._requestCancelled) return; // User clicked Stop
                 if (response && response.success) {
-                    this.addMessage('assistant', response.answer, this.currentModel, false, null, false, response.tokenUsage);
+                    const responseModel = response.responseModel || response.model || this.currentModel;
+                    this.addMessage(
+                        'assistant',
+                        response.answer,
+                        responseModel,
+                        false,
+                        null,
+                        false,
+                        response.tokenUsage,
+                        this._createAssistantMetadata(response, { selectedModel: this.currentModel })
+                    );
                     if (response.guestInfo) {
                         updateLocalGuestCache(response.guestInfo);
                     }
@@ -1523,17 +1736,32 @@ class FloatingChatUI {
                 base64Image: croppedBase64
             }, (ocrResult) => {
                 if (ocrResult && ocrResult.success && ocrResult.text) {
+                    storeHiddenOcrText(ocrResult.text);
                     chrome.runtime.sendMessage({
                         action: "ASK_AI_TEXT",
                         model: this.currentModel,
                         text: ocrResult.text,
+                        base64Image: croppedBase64,
                         mode: this.currentMode,
                         requestId
                     }, (response) => {
                         this.removeTypingIndicator();
                         if (this._requestCancelled) return; // User clicked Stop
                         if (response && response.success) {
-                            this.addMessage('assistant', response.answer, this.currentModel, false, null, false, response.tokenUsage);
+                            const responseModel = response.responseModel || response.model || this.currentModel;
+                            this.addMessage(
+                                'assistant',
+                                response.answer,
+                                responseModel,
+                                false,
+                                null,
+                                false,
+                                response.tokenUsage,
+                                this._createAssistantMetadata(response, {
+                                    selectedModel: this.currentModel,
+                                    usedOCR: response.usedOCR === true
+                                })
+                            );
                             if (response.guestInfo) {
                                 updateLocalGuestCache(response.guestInfo);
                             }
@@ -1642,6 +1870,7 @@ class FloatingChatUI {
         newUI.initialUserMessage = this.initialUserMessage;
         newUI.initialBase64Image = this.initialBase64Image;
         newUI.allImages = [...this.allImages];
+        newUI.isGuestMode = this.isGuestMode;
 
         // Inherit mode from parent window
         newUI.currentMode = this.currentMode;
@@ -1666,6 +1895,7 @@ class FloatingChatUI {
                 model: msg.model,
                 base64Image: msg.base64Image,
                 isRegenerated: msg.isRegenerated,
+                metadata: msg.metadata ? { ...msg.metadata } : null,
                 timestamp: msg.timestamp
             });
 
@@ -1678,6 +1908,7 @@ class FloatingChatUI {
 
         try {
             let response;
+            let responseMetadataOverrides = { selectedModel: newUI.currentModel };
 
             // Collect all images from history
             const imagesToSend = [];
@@ -1739,8 +1970,10 @@ class FloatingChatUI {
                         model: newUI.currentModel,
                         history: historyWithOcr,
                         mode: newUI.currentMode,
+                        usedOCR: isAutoGuestModel,
                         requestId
                     });
+                    responseMetadataOverrides.usedOCR = isAutoGuestModel;
                 } else if (isAutoGuestModel) {
                     response = await newUI._sendAutoVisionFallback(imagesToSend, fullTextContext, requestId);
                 } else {
@@ -1767,7 +2000,17 @@ class FloatingChatUI {
             newUI.removeTypingIndicator();
             if (newUI._requestCancelled) return; // User clicked Stop
             if (response && response.success) {
-                newUI.addMessage('assistant', response.answer, newUI.currentModel, false, null, false, response.tokenUsage);
+                const responseModel = response.responseModel || response.model || newUI.currentModel;
+                newUI.addMessage(
+                    'assistant',
+                    response.answer,
+                    responseModel,
+                    false,
+                    null,
+                    false,
+                    response.tokenUsage,
+                    newUI._createAssistantMetadata(response, responseMetadataOverrides)
+                );
                 if (response.guestInfo) {
                     updateLocalGuestCache(response.guestInfo);
                 }
@@ -1848,7 +2091,17 @@ class FloatingChatUI {
             }
 
             if (response && response.success) {
-                this.addMessage('assistant', response.answer, modelToUse, false, null, false, response.tokenUsage);
+                const responseModel = response.responseModel || response.model || modelToUse;
+                this.addMessage(
+                    'assistant',
+                    response.answer,
+                    responseModel,
+                    false,
+                    null,
+                    false,
+                    response.tokenUsage,
+                    this._createAssistantMetadata(response, { selectedModel: modelToUse })
+                );
                 if (response.guestInfo) {
                     updateLocalGuestCache(response.guestInfo);
                 }
