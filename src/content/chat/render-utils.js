@@ -45,8 +45,26 @@ function getMessageImageSource(content, base64Image) {
     return imagePart?.image_url?.url || null;
 }
 
-function renderUserMessageContent(msgDiv, content, base64Image, displayText, showImageModal) {
+function getOcrToggleText(content, displayText, metadata) {
+    if (typeof metadata?.ocrText === 'string' && metadata.ocrText.trim()) {
+        return metadata.ocrText.trim();
+    }
+    if (typeof displayText === 'string' && displayText.trim()) {
+        return displayText.trim();
+    }
+    if (typeof content === 'string' && content.trim()) {
+        return content.trim();
+    }
+    if (content && typeof content.content === 'string' && content.content.trim()) {
+        return content.content.trim();
+    }
+    return '';
+}
+
+function renderUserMessageContent(targetUI, msgDiv, content, base64Image, displayText, showImageModal, messageIndex, metadata) {
     const hasImage = Boolean(base64Image) || (Array.isArray(content) && content.some((item) => item.type === 'image_url'));
+    const ocrText = getOcrToggleText(content, displayText, metadata);
+    const canToggleOcr = hasImage && metadata?.usedOCR === true && Boolean(ocrText);
 
     if (hasImage) {
         const imgSrc = getMessageImageSource(content, base64Image);
@@ -98,15 +116,54 @@ function renderUserMessageContent(msgDiv, content, base64Image, displayText, sho
         imgContainer.appendChild(iconOverlay);
         msgDiv.appendChild(imgContainer);
 
-        const textLabel = document.createElement('em');
-        textLabel.style.cssText = "opacity: 0.7; font-size: 11px; display: block;";
-        if (Array.isArray(content)) {
-            const textPart = content.find((item) => item.type === 'text');
-            textLabel.textContent = textPart?.text || '(Screenshot)';
-        } else {
-            textLabel.textContent = '(Screenshot)';
+        let ocrContainer = null;
+        if (canToggleOcr) {
+            ocrContainer = document.createElement('div');
+            ocrContainer.textContent = ocrText;
+            ocrContainer.style.cssText = `
+                display: none;
+                max-height: 180px;
+                overflow-y: auto;
+                white-space: pre-wrap;
+                border: 1px solid rgba(255,255,255,0.1);
+                background: rgba(0,0,0,0.18);
+                border-radius: 6px;
+                padding: 8px 9px;
+                font-size: 12px;
+                line-height: 1.45;
+            `;
+            msgDiv.appendChild(ocrContainer);
         }
-        msgDiv.appendChild(textLabel);
+
+        if (canToggleOcr && ocrContainer) {
+            const setOcrView = (view) => {
+                const showOcr = view === 'ocr';
+                imgContainer.style.display = showOcr ? 'none' : 'block';
+                ocrContainer.style.display = showOcr ? 'block' : 'none';
+                toggleBtn.innerHTML = showOcr
+                    ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="8" cy="10" r="1.5"></circle><path d="M21 15l-5-5L5 19"></path></svg> Image'
+                    : '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"></path><path d="M9 20h6"></path><path d="M12 4v16"></path></svg> OCR';
+                toggleBtn.title = showOcr ? 'Show screenshot' : 'Show OCR text';
+            };
+
+            const actionsDiv = document.createElement('div');
+            actionsDiv.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08);";
+            const toggleBtn = createChatActionButton(
+                "OCR",
+                '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"></path><path d="M9 20h6"></path><path d="M12 4v16"></path></svg>',
+                "Show OCR text",
+                false
+            );
+            toggleBtn.onclick = () => {
+                if (!metadata) return;
+                metadata.ocrView = metadata.ocrView === 'ocr' ? 'image' : 'ocr';
+                setOcrView(metadata.ocrView);
+                targetUI?.onSessionChanged?.();
+            };
+            actionsDiv.appendChild(toggleBtn);
+            msgDiv.appendChild(actionsDiv);
+            setOcrView(metadata.ocrView === 'ocr' ? 'ocr' : 'image');
+        }
         return;
     }
 
@@ -147,6 +204,7 @@ function renderAssistantMessageContent(targetUI, msgDiv, options) {
         isError,
         isRegenerated,
         messageIndex,
+        metadata,
         modelLabel,
         tokenUsage
     } = options;
@@ -174,7 +232,7 @@ function renderAssistantMessageContent(targetUI, msgDiv, options) {
     }
 
     const actionsDiv = document.createElement("div");
-    actionsDiv.style.cssText = "display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08);";
+    actionsDiv.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08);";
 
     const copyBtn = createChatActionButton(
         "Copy",
@@ -206,6 +264,19 @@ function renderAssistantMessageContent(targetUI, msgDiv, options) {
     );
     regenBtn.onclick = () => targetUI.regenerateAtIndex(messageIndex);
     actionsDiv.appendChild(regenBtn);
+
+    if (!isError &&
+        typeof targetUI._shouldShowScoutRetry === 'function' &&
+        targetUI._shouldShowScoutRetry(messageIndex, metadata)) {
+        const scoutBtn = createChatActionButton(
+            "Scout",
+            '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="2"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2"></path></svg>',
+            "Regenerate this answer with Scout vision",
+            false
+        );
+        scoutBtn.onclick = () => targetUI.retryWithScoutAtIndex(messageIndex);
+        actionsDiv.appendChild(scoutBtn);
+    }
 
     const minimizeBtn = createChatActionButton("Minimize", '-', "Minimize response", false);
     minimizeBtn.onclick = () => {
@@ -246,12 +317,16 @@ function renderChatMessage(targetUI, options) {
         isError,
         isRegenerated,
         messageIndex,
+        metadata,
         modelLabel,
         tokenUsage
     } = options;
 
     const msgDiv = document.createElement("div");
     msgDiv.style.cssText = "max-width: 85%; padding: 12px 14px; border-radius: 10px; line-height: 1.5; word-wrap: break-word; font-size: 13px; position: relative; transition: all 0.2s ease;";
+    if (Number.isInteger(messageIndex) && messageIndex >= 0) {
+        msgDiv.dataset.snipAskMessageIndex = String(messageIndex);
+    }
 
     if (role === 'user') {
         msgDiv.style.alignSelf = "flex-end";
@@ -259,7 +334,7 @@ function renderChatMessage(targetUI, options) {
         msgDiv.style.color = "#e8e8e8";
         msgDiv.style.borderRadius = "10px 10px 2px 10px";
         msgDiv.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
-        renderUserMessageContent(msgDiv, content, base64Image, displayText, (imageSrc) => targetUI._showImageModal(imageSrc));
+        renderUserMessageContent(targetUI, msgDiv, content, base64Image, displayText, (imageSrc) => targetUI._showImageModal(imageSrc), messageIndex, metadata);
     } else {
         msgDiv.style.alignSelf = "flex-start";
         msgDiv.style.background = "rgba(255,255,255,0.05)";
@@ -272,6 +347,7 @@ function renderChatMessage(targetUI, options) {
             isError,
             isRegenerated,
             messageIndex,
+            metadata,
             modelLabel,
             tokenUsage
         });
@@ -287,7 +363,7 @@ function renderClonedChatMessage(targetUI, msg, options = {}) {
         messageIndex = -1
     } = options;
 
-    renderChatMessage(targetUI, {
+    return renderChatMessage(targetUI, {
         role: msg.role,
         content: msg.content,
         displayText: msg.displayText || (typeof msg.content === 'string' ? msg.content : ''),
@@ -296,7 +372,8 @@ function renderClonedChatMessage(targetUI, msg, options = {}) {
         isError: false,
         isRegenerated: Boolean(msg.isRegenerated),
         messageIndex,
+        metadata: msg.metadata || null,
         modelLabel: msg.role === 'assistant' ? targetUI._getModelDisplayName(msg.model) : null,
-        tokenUsage: null
+        tokenUsage: msg.metadata?.tokenUsage || null
     });
 }

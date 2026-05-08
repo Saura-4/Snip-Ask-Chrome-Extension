@@ -22,7 +22,7 @@ function extractMessageDisplayText(content) {
     return '(complex content)';
 }
 
-function createChatHistoryEntry(role, content, modelName = null, base64Image = null, isRegenerated = false) {
+function createChatHistoryEntry(role, content, modelName = null, base64Image = null, isRegenerated = false, metadata = null) {
     const displayText = extractMessageDisplayText(content);
 
     return {
@@ -32,6 +32,7 @@ function createChatHistoryEntry(role, content, modelName = null, base64Image = n
         model: modelName,
         base64Image: base64Image || null,
         isRegenerated: isRegenerated || false,
+        metadata: metadata && typeof metadata === 'object' ? { ...metadata } : null,
         timestamp: Date.now()
     };
 }

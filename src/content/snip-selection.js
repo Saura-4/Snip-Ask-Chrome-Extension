@@ -27,6 +27,19 @@ const SnipSelection = {
     onComplete: null,
 
     /**
+     * Wait until browser has painted after removing selection UI.
+     * This prevents captureVisibleTab from grabbing the orange selection layer.
+     * @param {Function} callback
+     */
+    waitForOverlayRemoval(callback) {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                setTimeout(callback, 0);
+            });
+        });
+    },
+
+    /**
      * Start the snipping process
      * @param {Function} onComplete - Callback(rect) when selection completes
      */
@@ -70,23 +83,61 @@ const SnipSelection = {
         // Visual cancel button
         const cancelBtn = document.createElement("button");
         cancelBtn.id = "snip-cancel-btn";
-        cancelBtn.textContent = "✕ Cancel (Esc)";
+        cancelBtn.innerHTML = `
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M18 6 6 18"></path>
+                <path d="m6 6 12 12"></path>
+            </svg>
+            <span>Cancel</span>
+            <span style="opacity: 0.6; font-size: 10px;">Esc</span>
+        `;
         cancelBtn.style.cssText = `
             position: fixed;
             top: 20px;
             right: 20px;
             z-index: 2147483647;
-            background: #1e1e1e;
-            color: #f55036;
-            border: 1px solid #f55036;
-            padding: 8px 16px;
-            border-radius: 6px;
-            font-family: 'Segoe UI', sans-serif;
-            font-size: 14px;
+            background: rgba(16,16,16,0.92);
+            color: #b8b8b8;
+            border: 1px solid rgba(255,255,255,0.12);
+            padding: 7px 12px;
+            border-radius: 999px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 12px;
+            font-weight: 500;
             cursor: pointer;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            box-shadow: 0 10px 28px rgba(0,0,0,0.32);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            line-height: 1;
+            min-height: 32px;
+            transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
         `;
-        cancelBtn.onclick = () => this.cancel();
+        cancelBtn.onmouseenter = () => {
+            cancelBtn.style.background = 'rgba(255,255,255,0.08)';
+            cancelBtn.style.borderColor = 'rgba(255,255,255,0.18)';
+            cancelBtn.style.color = '#e5e7eb';
+        };
+        cancelBtn.onmouseleave = () => {
+            cancelBtn.style.background = 'rgba(16,16,16,0.92)';
+            cancelBtn.style.borderColor = 'rgba(255,255,255,0.12)';
+            cancelBtn.style.color = '#b8b8b8';
+            cancelBtn.style.transform = 'none';
+        };
+        cancelBtn.onmousedown = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            cancelBtn.style.transform = 'scale(0.96)';
+        };
+        cancelBtn.onmouseup = () => {
+            cancelBtn.style.transform = 'none';
+        };
+        cancelBtn.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.cancel();
+        };
         this.glassPane.appendChild(cancelBtn);
 
         // Safety timeout: auto-cancel after 30 seconds
@@ -204,8 +255,12 @@ const SnipSelection = {
         }
 
         // Call completion callback
-        if (this.onComplete) {
-            this.onComplete(rect);
+        const completionCallback = this.onComplete;
+        this.onComplete = null;
+        if (completionCallback) {
+            this.waitForOverlayRemoval(() => {
+                completionCallback(rect);
+            });
         }
     },
 
@@ -233,6 +288,7 @@ const SnipSelection = {
             this.glassPane = null;
         }
         this.isSelecting = false;
+        this.onComplete = null;
         window.restoreSnipAskPopupWindows?.();
 
         // If in snip-again mode, restore chat windows

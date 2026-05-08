@@ -22,7 +22,8 @@ const EMPTY_SIDE_PANEL_SESSION = {
     customPrompt: '',
     initialUserMessage: null,
     initialBase64Image: null,
-    allImages: []
+    allImages: [],
+    isGuestMode: false
 };
 
 async function getActiveTab() {
@@ -274,7 +275,7 @@ export function createRuntimeMessageListener() {
             const requestId = request.requestId || null;
             const controller = createTrackedAbortController(requestId);
 
-            handleAIRequest(content, type, request.model, sendResponse, request.ocrConfidence || null, request.mode, controller.signal)
+            handleAIRequest(content, type, request.model, sendResponse, request.ocrConfidence || null, request.mode, controller.signal, request.base64Image || null)
                 .finally(() => removeTrackedController(controller, requestId));
             return true;
         }

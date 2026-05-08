@@ -119,7 +119,7 @@ export async function handleContinueChat(request, sendResponse, signal) {
             const { answer, guestInfo, tokenUsage } = parseGuestResponse(guestResponse);
 
             const responseModel = guestInfo?.model || guestResponse.model || guestRequest.modelName;
-            sendResponse({ success: true, answer, model: responseModel, responseModel, selectedModel: modelName, guestInfo, tokenUsage });
+            sendResponse({ success: true, answer, model: responseModel, responseModel, selectedModel: modelName, guestInfo, tokenUsage, usedOCR: request.usedOCR === true });
             return;
         }
 
@@ -132,7 +132,7 @@ export async function handleContinueChat(request, sendResponse, signal) {
         const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
         const optimizedHistory = getBudgetedMessages(request.history, modelName, mode);
         const result = await aiService.chat(optimizedHistory, signal);
-        sendResponse({ success: true, answer: result.text, model: modelName, responseModel: result.model, tokenUsage: result.tokenUsage });
+        sendResponse({ success: true, answer: result.text, model: modelName, responseModel: result.model, tokenUsage: result.tokenUsage, usedOCR: request.usedOCR === true });
     } catch (error) {
         sendResponse({ success: false, error: error.message });
     }
@@ -207,7 +207,7 @@ export async function handleChatWindowModels(sendResponse) {
     }
 }
 
-export async function handleAIRequest(inputContent, type, explicitModel, sendResponse, ocrConfidence, explicitMode, signal = null) {
+export async function handleAIRequest(inputContent, type, explicitModel, sendResponse, ocrConfidence, explicitMode, signal = null, sourceBase64Image = null) {
     try {
         const storage = await getStorage([
             'interactionMode', 'customPrompt', 'selectedModel', 'selectedMode',
@@ -217,6 +217,7 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
         const requestedModelName = explicitModel || storage.selectedModel || GUEST_DEFAULT_MODEL;
         const inGuestMode = await isGuestMode();
         const modelName = requestedModelName;
+        const usedOCR = type === 'text' && Boolean(sourceBase64Image);
 
         if (inGuestMode) {
             if (!isGuestConfigured()) {
@@ -254,9 +255,9 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
                 selectedModel: requestedModelName,
                 responseModel,
                 initialUserMessage: messages[messages.length - 1],
-                usedOCR: type === 'text',
+                usedOCR,
                 ocrConfidence,
-                base64Image: type === 'image' ? inputContent : null,
+                base64Image: sourceBase64Image || (type === 'image' ? inputContent : null),
                 guestInfo,
                 tokenUsage
             });
@@ -280,9 +281,9 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
             responseModel: result.model,
             tokenUsage: result.tokenUsage,
             initialUserMessage: result.initialUserMessage,
-            usedOCR: type === 'text',
+            usedOCR,
             ocrConfidence,
-            base64Image: type === 'image' ? inputContent : null
+            base64Image: sourceBase64Image || (type === 'image' ? inputContent : null)
         });
     } catch (error) {
         sendResponse({ success: false, error: error.message || String(error) });

@@ -6,7 +6,12 @@
 
     function cloneChatHistory(chatHistory) {
         return Array.isArray(chatHistory)
-            ? chatHistory.map((message) => ({ ...message }))
+            ? chatHistory.map((message) => ({
+                ...message,
+                metadata: message?.metadata && typeof message.metadata === 'object'
+                    ? { ...message.metadata }
+                    : null
+            }))
             : [];
     }
 
@@ -18,22 +23,68 @@
         return apiResponse.responseModel || apiResponse.model || responseContext.model || null;
     }
 
+    function getInitialUserText(initialUserMessage) {
+        if (typeof initialUserMessage === 'string') {
+            return initialUserMessage;
+        }
+        if (Array.isArray(initialUserMessage)) {
+            const textPart = initialUserMessage.find((item) => item.type === 'text');
+            return textPart?.text || '';
+        }
+        if (initialUserMessage && typeof initialUserMessage.content === 'string') {
+            return initialUserMessage.content;
+        }
+        if (initialUserMessage && Array.isArray(initialUserMessage.content)) {
+            const textPart = initialUserMessage.content.find((item) => item.type === 'text');
+            return textPart?.text || '';
+        }
+        return '';
+    }
+
+    function createUserMetadata(apiResponse) {
+        const ocrText = getInitialUserText(apiResponse.initialUserMessage).trim();
+        if (apiResponse.usedOCR !== true || !apiResponse.base64Image || !ocrText) {
+            return null;
+        }
+        return {
+            usedOCR: true,
+            ocrText,
+            ocrView: 'image'
+        };
+    }
+
     function createApiResponseEntries(apiResponse, responseContext = {}) {
         const responseModel = getResponseModel(apiResponse, responseContext);
+        const selectedModel = getSessionModel(apiResponse, responseContext);
+        const usedOCR = apiResponse.usedOCR === true;
+        const isGuestResponse = Boolean(apiResponse.guestInfo);
+        const isScoutResponse = typeof responseModel === 'string' &&
+            responseModel.toLowerCase().includes('llama-4-scout');
+        const assistantMetadata = {
+            selectedModel,
+            responseModel,
+            usedOCR,
+            isGuestResponse,
+            scoutRetryEligible: selectedModel === 'groq:auto' && usedOCR && isGuestResponse && !isScoutResponse,
+            tokenUsage: apiResponse.tokenUsage || null
+        };
+
         return {
             userEntry: createChatHistoryEntry(
                 'user',
                 apiResponse.initialUserMessage,
                 null,
                 apiResponse.base64Image || null,
-                false
+                false,
+                createUserMetadata(apiResponse)
             ),
             assistantEntry: createChatHistoryEntry(
                 'assistant',
                 apiResponse.answer,
                 responseModel,
                 null,
-                false
+                false,
+                assistantMetadata
             )
         };
     }
@@ -53,6 +104,7 @@
             initialUserMessage: apiResponse.initialUserMessage,
             initialBase64Image: apiResponse.base64Image || null,
             allImages: apiResponse.base64Image ? [apiResponse.base64Image] : [],
+            isGuestMode: Boolean(apiResponse.guestInfo) || responseContext.isGuestMode === true,
             lastUpdated: Date.now()
         };
     }
@@ -75,6 +127,7 @@
             initialUserMessage: existingSession?.initialUserMessage || apiResponse.initialUserMessage,
             initialBase64Image: existingSession?.initialBase64Image || apiResponse.base64Image || null,
             allImages: priorImages,
+            isGuestMode: existingSession?.isGuestMode === true || Boolean(apiResponse.guestInfo) || responseContext.isGuestMode === true,
             lastUpdated: Date.now()
         };
     }
@@ -91,6 +144,7 @@
             initialUserMessage: ui.initialUserMessage || null,
             initialBase64Image: ui.initialBase64Image || null,
             allImages: cloneArray(ui.allImages),
+            isGuestMode: ui.isGuestMode === true,
             activeTabId: ui.activeTabId || null,
             windowId: ui.windowId || null,
             lastUpdated: Date.now()
@@ -111,6 +165,7 @@
         ui.initialUserMessage = session.initialUserMessage || null;
         ui.initialBase64Image = session.initialBase64Image || null;
         ui.allImages = cloneArray(session.allImages);
+        ui.isGuestMode = session.isGuestMode === true || ui.isGuestMode === true;
         ui.activeTabId = session.activeTabId || ui.activeTabId || null;
         ui.windowId = session.windowId || ui.windowId || null;
         ui.chatHistory = cloneChatHistory(session.chatHistory);

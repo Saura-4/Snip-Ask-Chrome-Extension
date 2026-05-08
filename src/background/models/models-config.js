@@ -8,7 +8,7 @@ import { isGuestConfigured } from '../guest-config.js';
  */
 export const ALL_MODELS = {
     groq: [
-        { value: 'groq:auto', name: 'Auto (Guest)' },
+        { value: 'groq:auto', name: 'Auto' },
         { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B (Fast)' },
         { value: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
