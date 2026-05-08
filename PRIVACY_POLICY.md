@@ -36,6 +36,7 @@ When you use this extension, your screenshots and queries are sent to the AI pro
 |----------|----------------|
 | Groq | [groq.com/privacy](https://groq.com/privacy) |
 | Google Gemini | [policies.google.com/privacy](https://policies.google.com/privacy) |
+| OpenAI | [openai.com/privacy](https://openai.com/privacy) |
 | OpenRouter | [openrouter.ai/privacy](https://openrouter.ai/privacy) |
 | Ollama | Local only (no external transmission) |
 

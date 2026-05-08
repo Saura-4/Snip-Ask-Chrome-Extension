@@ -245,9 +245,13 @@ export default {
                     ? AUTO_MODEL_CHAIN
                     : [groqBody.model];
             let groqResponse = null;
+            let responseData = null;
             let finalModel = null;
             let attemptedModels = [];
+            let emptyResponseModels = [];
+            let lastAutoFailure = null;
 
+            modelLoop:
             for (const candidateModel of modelChain) {
                 if (!candidateModel) continue;
                 attemptedModels.push(candidateModel);
@@ -255,7 +259,7 @@ export default {
 
                 for (const apiKey of apiKeys) {
                     try {
-                        groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        const candidateResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                             method: 'POST',
                             headers: {
                                 'Authorization': `Bearer ${apiKey}`,
@@ -263,19 +267,53 @@ export default {
                             },
                             body: JSON.stringify(candidateBody)
                         });
-                        if (groqResponse.status !== 429) {
+
+                        if (candidateResponse.status === 429) {
+                            groqResponse = candidateResponse;
+                            lastAutoFailure = { model: candidateModel, status: candidateResponse.status, reason: 'rate_limited' };
+                            continue;
+                        }
+
+                        if (!isAutoModel) {
+                            groqResponse = candidateResponse;
                             finalModel = candidateModel;
+                            break modelLoop;
+                        }
+
+                        let candidateData = null;
+                        try {
+                            candidateData = await candidateResponse.json();
+                        } catch (parseError) {
+                            lastAutoFailure = { model: candidateModel, status: candidateResponse.status, reason: 'invalid_json' };
+                            console.log(`Auto model ${candidateModel} returned invalid JSON: ${parseError.message}`);
+                            continue;
+                        }
+
+                        if (!candidateResponse.ok) {
+                            lastAutoFailure = { model: candidateModel, status: candidateResponse.status, reason: 'http_error' };
+                            console.log(`Auto model ${candidateModel} returned HTTP ${candidateResponse.status}; trying next key.`);
+                            continue;
+                        }
+
+                        if (!hasUsableAssistantContent(candidateData)) {
+                            emptyResponseModels.push(candidateModel);
+                            lastAutoFailure = { model: candidateModel, status: candidateResponse.status, reason: 'empty_answer' };
+                            console.log(`Auto model ${candidateModel} returned no usable answer; trying next model.`);
                             break;
                         }
+
+                        groqResponse = candidateResponse;
+                        responseData = candidateData;
+                        finalModel = candidateModel;
+                        break modelLoop;
                     } catch (e) {
                         console.log(`Key failed for ${candidateModel}: ${e.message}`);
+                        lastAutoFailure = { model: candidateModel, reason: 'network_error' };
                     }
                 }
-
-                if (groqResponse && groqResponse.status !== 429) break;
             }
 
-            if (!groqResponse || groqResponse.status === 429) {
+            if (!finalModel) {
                 if (!isAutoModel) {
                     return jsonResponse({
                         error: 'Selected model rate limit reached. Switch to Auto or choose another model.',
@@ -286,8 +324,12 @@ export default {
 
                 return jsonResponse({
                     error: 'Service busy',
-                    code: 'API_EXHAUSTED',
-                    message: 'All Auto guest models are currently rate limited. Please try again later.'
+                    code: lastAutoFailure?.reason === 'empty_answer' ? 'AUTO_EMPTY_RESPONSE' : 'API_EXHAUSTED',
+                    message: lastAutoFailure?.reason === 'empty_answer'
+                        ? 'Auto models did not return a usable answer. Please try again.'
+                        : 'All Auto guest models are currently unavailable. Please try again later.',
+                    attemptedModels,
+                    emptyResponseModels
                 }, 503, corsHeaders);
             }
 
@@ -298,7 +340,9 @@ export default {
                 'UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE user_id = ?'
             ).bind(userId).run();
 
-            const responseData = await groqResponse.json();
+            if (!responseData) {
+                responseData = await groqResponse.json();
+            }
 
             // Extract token usage from Groq response
             const tokenUsage = responseData.usage?.total_tokens || 0;
@@ -329,7 +373,8 @@ export default {
                     model: finalModel || responseData.model || routedModel,
                     requestedModel,
                     auto: isAutoModel,
-                    attemptedModels
+                    attemptedModels,
+                    emptyResponseModels
                 },
                 _demo: {
                     ok: true,
@@ -337,7 +382,8 @@ export default {
                     model: finalModel || responseData.model || routedModel,
                     requestedModel,
                     auto: isAutoModel,
-                    attemptedModels
+                    attemptedModels,
+                    emptyResponseModels
                 }
             }, groqResponse.status, corsHeaders);
 
@@ -389,6 +435,47 @@ export default {
         }
     }
 };
+
+function extractAssistantText(content) {
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+
+    if (Array.isArray(content)) {
+        return content
+            .map((part) => {
+                if (typeof part === 'string') return part;
+                if (part?.type === 'text' && typeof part.text === 'string') return part.text;
+                if (typeof part?.content === 'string') return part.content;
+                if (typeof part?.message === 'string') return part.message;
+                return '';
+            })
+            .filter(Boolean)
+            .join('\n')
+            .trim();
+    }
+
+    if (typeof content === 'object') {
+        if (typeof content.text === 'string') return content.text;
+        if (typeof content.content === 'string') return content.content;
+        if (typeof content.message === 'string') return content.message;
+        if (Array.isArray(content.content)) return extractAssistantText(content.content);
+    }
+
+    return '';
+}
+
+function getCleanAssistantText(responseData) {
+    const content = responseData?.choices?.[0]?.message?.content;
+    return extractAssistantText(content).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+}
+
+function hasUsableAssistantContent(responseData) {
+    const text = getCleanAssistantText(responseData);
+    if (!/[\p{L}\p{N}]/u.test(text)) return false;
+
+    const normalized = text.toLowerCase();
+    return normalized !== 'no answer returned.' && normalized !== 'no answer.';
+}
 
 function jsonResponse(data, status, corsHeaders) {
     return new Response(JSON.stringify(data), {

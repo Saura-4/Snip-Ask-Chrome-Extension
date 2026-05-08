@@ -3,6 +3,15 @@ import { CONTENT_SCRIPT_FILES, isRestrictedPage } from '../core/content-script-f
 
 const ASK_AI_MENU_ID = 'askAI';
 
+function logContextMenuSetupIssue(message, details = null) {
+    if (details) {
+        console.debug('Snip & Ask: Context menu setup skipped:', message, details);
+        return;
+    }
+
+    console.debug('Snip & Ask: Context menu setup skipped:', message);
+}
+
 function getRestrictedPageReason(url) {
     if (!url) {
         return 'No tab URL is available.';
@@ -75,12 +84,12 @@ async function ensureAskAiContextMenu() {
                 contexts: ['selection']
             }, () => {
                 if (chrome.runtime.lastError) {
-                    console.error('Snip & Ask: Failed to create context menu', chrome.runtime.lastError.message);
+                    logContextMenuSetupIssue(chrome.runtime.lastError.message);
                 }
                 resolve();
             });
         } catch (error) {
-            console.error('Snip & Ask: Failed to create context menu', error);
+            logContextMenuSetupIssue(error?.message || String(error), error);
             resolve();
         }
     });

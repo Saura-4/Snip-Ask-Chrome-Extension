@@ -1078,15 +1078,21 @@ class FloatingChatUI {
             } else {
                 // Non-vision model - need to use OCR text if there are images
                 if (imagesToSend.length > 0) {
-                    // OCR all images and build context
                     let ocrTextParts = [];
-                    for (const img of imagesToSend) {
-                        const ocrResult = await chrome.runtime.sendMessage({
-                            action: "PERFORM_OCR",
-                            base64Image: img
-                        });
-                        if (ocrResult?.success && ocrResult.text) {
-                            ocrTextParts.push(ocrResult.text);
+
+                    if (isAutoGuestModel) {
+                        const autoOcr = await this._collectReliableAutoOcrText(imagesToSend, 'regenerate');
+                        ocrTextParts = autoOcr.reliable ? autoOcr.textParts : [];
+                    } else {
+                        // OCR all images and build context
+                        for (const img of imagesToSend) {
+                            const ocrResult = await chrome.runtime.sendMessage({
+                                action: "PERFORM_OCR",
+                                base64Image: img
+                            });
+                            if (ocrResult?.success && ocrResult.text) {
+                                ocrTextParts.push(ocrResult.text);
+                            }
                         }
                     }
 
@@ -1106,22 +1112,10 @@ class FloatingChatUI {
                             requestId
                         });
                     } else if (isAutoGuestModel) {
-                        response = imagesToSend.length === 1
-                            ? await chrome.runtime.sendMessage({
-                                action: "ASK_AI",
-                                model: this.currentModel,
-                                base64Image: imagesToSend[0],
-                                mode: this.currentMode,
-                                requestId
-                            })
-                            : await chrome.runtime.sendMessage({
-                                action: "ASK_AI_MULTI_IMAGE",
-                                model: this.currentModel,
-                                images: imagesToSend,
-                                textContext: this._extractTextFromHistory(userMsgIndex),
-                                mode: this.currentMode,
-                                requestId
-                            });
+                        const textContext = this._buildApiHistory(userMsgIndex)
+                            .map(m => `${m.role}: ${m.content}`)
+                            .join('\n');
+                        response = await this._sendAutoVisionFallback(imagesToSend, textContext, requestId);
                     } else {
                         // OCR failed, use text history as fallback
                         response = await chrome.runtime.sendMessage({
@@ -1190,6 +1184,73 @@ class FloatingChatUI {
      */
     _extractTextFromHistory(upToIndex) {
         return extractUserTextFromHistory(this.chatHistory, upToIndex);
+    }
+
+    _isReliableAutoOcrResult(ocrResult) {
+        return ocrResult?.reliable === true &&
+            typeof ocrResult.text === 'string' &&
+            ocrResult.text.trim().length > 3;
+    }
+
+    _logAutoOcrFallback(context, ocrResult) {
+        console.debug(
+            "Auto OCR unreliable; using Scout fallback:",
+            context,
+            ocrResult?.reason || ocrResult?.error || 'unreliable_ocr'
+        );
+    }
+
+    async _collectReliableAutoOcrText(images, context) {
+        const ocrTextParts = [];
+
+        for (const img of images) {
+            let ocrResult;
+            try {
+                ocrResult = await chrome.runtime.sendMessage({
+                    action: "PERFORM_OCR",
+                    base64Image: img
+                });
+            } catch (error) {
+                this._logAutoOcrFallback(context, {
+                    reason: 'ocr_request_failed',
+                    error: error?.message || String(error)
+                });
+                return { reliable: false, textParts: [] };
+            }
+
+            if (!this._isReliableAutoOcrResult(ocrResult)) {
+                this._logAutoOcrFallback(context, ocrResult);
+                return { reliable: false, textParts: [] };
+            }
+
+            ocrTextParts.push(ocrResult.text);
+        }
+
+        return {
+            reliable: ocrTextParts.length > 0,
+            textParts: ocrTextParts
+        };
+    }
+
+    async _sendAutoVisionFallback(images, textContext, requestId) {
+        if (images.length === 1 && !textContext) {
+            return chrome.runtime.sendMessage({
+                action: "ASK_AI",
+                model: this.currentModel,
+                base64Image: images[0],
+                mode: this.currentMode,
+                requestId
+            });
+        }
+
+        return chrome.runtime.sendMessage({
+            action: "ASK_AI_MULTI_IMAGE",
+            model: this.currentModel,
+            images,
+            textContext,
+            mode: this.currentMode,
+            requestId
+        });
     }
 
     /**
@@ -1390,7 +1451,54 @@ class FloatingChatUI {
         // Add message with the full content AND store the base64 image
         this.addMessage('user', userContent, null, false, croppedBase64);
 
-        if (isVisionModel(this.currentModel)) {
+        const handleSnippedImageResponse = (response) => {
+            this.removeTypingIndicator();
+            if (this._requestCancelled) return; // User clicked Stop
+            if (response && response.success) {
+                this.addMessage('assistant', response.answer, this.currentModel, false, null, false, response.tokenUsage);
+                if (response.guestInfo) {
+                    updateLocalGuestCache(response.guestInfo);
+                }
+            } else {
+                this.addMessage('assistant', "Error: " + (response?.error || "Unknown error"), this.currentModel, true);
+            }
+        };
+
+        const sendSnippedImageToModel = () => {
+            chrome.runtime.sendMessage({
+                action: "ASK_AI",
+                model: this.currentModel,
+                base64Image: croppedBase64,
+                mode: this.currentMode,
+                requestId
+            }, handleSnippedImageResponse);
+        };
+
+        const sendSnippedTextToModel = (text) => {
+            chrome.runtime.sendMessage({
+                action: "ASK_AI_TEXT",
+                model: this.currentModel,
+                text,
+                mode: this.currentMode,
+                requestId
+            }, handleSnippedImageResponse);
+        };
+
+        const isAutoGuestModel = this.currentModel === 'groq:auto';
+
+        if (isAutoGuestModel) {
+            chrome.runtime.sendMessage({
+                action: "PERFORM_OCR",
+                base64Image: croppedBase64
+            }, (ocrResult) => {
+                if (this._isReliableAutoOcrResult(ocrResult)) {
+                    sendSnippedTextToModel(ocrResult.text);
+                } else {
+                    this._logAutoOcrFallback('snip-again', ocrResult);
+                    sendSnippedImageToModel();
+                }
+            });
+        } else if (isVisionModel(this.currentModel)) {
             chrome.runtime.sendMessage({
                 action: "ASK_AI",
                 model: this.currentModel,
@@ -1602,13 +1710,19 @@ class FloatingChatUI {
             } else if (!isVisionModel(newUI.currentModel) && imagesToSend.length > 0) {
                 // Non-vision model with images: Extract text via OCR first
                 let ocrTextParts = [];
-                for (const img of imagesToSend) {
-                    const ocrResult = await chrome.runtime.sendMessage({
-                        action: "PERFORM_OCR",
-                        base64Image: img
-                    });
-                    if (ocrResult?.success && ocrResult.text) {
-                        ocrTextParts.push(ocrResult.text);
+
+                if (isAutoGuestModel) {
+                    const autoOcr = await newUI._collectReliableAutoOcrText(imagesToSend, 'compare');
+                    ocrTextParts = autoOcr.reliable ? autoOcr.textParts : [];
+                } else {
+                    for (const img of imagesToSend) {
+                        const ocrResult = await chrome.runtime.sendMessage({
+                            action: "PERFORM_OCR",
+                            base64Image: img
+                        });
+                        if (ocrResult?.success && ocrResult.text) {
+                            ocrTextParts.push(ocrResult.text);
+                        }
                     }
                 }
 
@@ -1628,14 +1742,7 @@ class FloatingChatUI {
                         requestId
                     });
                 } else if (isAutoGuestModel) {
-                    response = await chrome.runtime.sendMessage({
-                        action: "ASK_AI_MULTI_IMAGE",
-                        model: newUI.currentModel,
-                        images: imagesToSend,
-                        textContext: fullTextContext,
-                        mode: newUI.currentMode,
-                        requestId
-                    });
+                    response = await newUI._sendAutoVisionFallback(imagesToSend, fullTextContext, requestId);
                 } else {
                     // OCR failed, just use text history
                     response = await chrome.runtime.sendMessage({

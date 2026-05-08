@@ -43,3 +43,4 @@ desktop-app
 
 #not req for publishing zip
 not_for
+create-publish-zip.ps1

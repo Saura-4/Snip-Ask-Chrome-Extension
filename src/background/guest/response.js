@@ -37,8 +37,8 @@ function getGuestTokenUsage(guestResponse) {
 
 function parseGuestResponse(guestResponse) {
     const messageContent = guestResponse?.choices?.[0]?.message?.content;
-    let answer = extractTextFromModelContent(messageContent) || 'No answer returned.';
-    answer = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    const rawAnswer = extractTextFromModelContent(messageContent);
+    const answer = rawAnswer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim() || 'No answer returned.';
 
     return {
         answer,
