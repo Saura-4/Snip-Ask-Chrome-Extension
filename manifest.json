@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Snip & Ask - AI Screen Assistant",
   "short_name": "Snip & Ask",
-  "version": "1.2",
+  "version": "2.0",
   "description": "Snip any part of your screen and ask AI to explain, solve, or debug it. Supports Groq, Gemini, OpenAI, OpenRouter, and Ollama.",
   "permissions": [
     "activeTab",

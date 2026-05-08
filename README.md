@@ -7,6 +7,7 @@ Snip any part of your screen and ask AI to explain, solve, or debug it. Supports
 ## Key Features
 
 - **Guest Mode**: Try the extension instantly without needing an API key.
+- **Auto Mode**: In Guest Mode, choose Auto to route requests through an available Groq model, avoid single-model rate-limit dead ends, and fall back to a vision-capable model for image snips when OCR is not enough.
 - **Bring Your Own Key (BYOK)**: Connect your own API keys for Groq, Gemini, OpenRouter, or local Ollama for unlimited access and full control.
 - **Universal Capture**: Works on any website, local file, or PDF open in Chrome.
 - **Right-Click Ask**: Simply select text or an image, right-click, and ask the AI instantly via the context menu.

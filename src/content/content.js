@@ -308,10 +308,25 @@ function handleSnipComplete(rect) {
                 }, (ocrResponse) => {
                     if (isOverlayRequestCancelled(requestId)) return;
 
+                    const sendImageFallback = () => {
+                        chrome.runtime.sendMessage({
+                            action: "ASK_AI",
+                            model: currentModel,
+                            base64Image: croppedBase64,
+                            mode: currentMode,
+                            requestId
+                        }, (apiResponse) => handleResponse(apiResponse, { ...requestConfig, model: currentModel, mode: currentMode, requestId }));
+                    };
+
                     if (chrome.runtime.lastError || !ocrResponse) {
-                        showErrorToast("OCR Failed: " + (chrome.runtime.lastError?.message || "Unknown error"));
-                        if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
-                        finishOverlayRequest(requestId);
+                        if (isAutoGuestModel) {
+                            console.debug("Auto OCR unavailable; using Scout fallback:", chrome.runtime.lastError?.message || "No OCR response");
+                            sendImageFallback();
+                        } else {
+                            showErrorToast("OCR Failed: " + (chrome.runtime.lastError?.message || "Unknown error"));
+                            if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
+                            finishOverlayRequest(requestId);
+                        }
                         return;
                     }
 
@@ -320,7 +335,11 @@ function handleSnipComplete(rect) {
                         console.debug("OCR Quality Check Failed:", ocrResponse.error);
                     }
 
-                    if (ocrResponse.success && ocrResponse.text && ocrResponse.text.length > 3) {
+                    const canUseOcrText = isAutoGuestModel
+                        ? ocrResponse.reliable === true && ocrResponse.text && ocrResponse.text.length > 3
+                        : ocrResponse.success && ocrResponse.text && ocrResponse.text.length > 3;
+
+                    if (canUseOcrText) {
                         chrome.runtime.sendMessage({
                             action: "ASK_AI_TEXT",
                             model: currentModel,
@@ -332,13 +351,10 @@ function handleSnipComplete(rect) {
                     } else {
                         console.debug("OCR Empty or Failed:", ocrResponse.error || 'No readable text');
                         if (isAutoGuestModel || isVisionModel(currentModel)) {
-                            chrome.runtime.sendMessage({
-                                action: "ASK_AI",
-                                model: currentModel,
-                                base64Image: croppedBase64,
-                                mode: currentMode,
-                                requestId
-                            }, (apiResponse) => handleResponse(apiResponse, { ...requestConfig, model: currentModel, mode: currentMode, requestId }));
+                            if (isAutoGuestModel) {
+                                console.debug("Auto OCR unreliable; using Scout fallback:", ocrResponse.reason || ocrResponse.error || 'unreliable_ocr');
+                            }
+                            sendImageFallback();
                         } else {
                             alert(`⚠️ No text found in snippet.\n\nSince '${currentModel}' cannot see images, please try snipping clearer text or switch to a Vision model.`);
                             if (typeof hideLoadingCursor === 'function') hideLoadingCursor();

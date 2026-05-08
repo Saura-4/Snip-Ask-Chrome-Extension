@@ -6,7 +6,14 @@ const OCR_CONFIG = {
     MIN_CONFIDENCE: 25,                // Below this = likely garbage (Tesseract returns 0-100)
     MIN_READABLE_RATIO: 0.3,           // At least 30% must be alphanumeric
     MAX_REPETITION_RATIO: 0.4,         // If 40%+ is same char, it's noise
-    MAX_CONSECUTIVE_GARBAGE: 20        // Max consecutive non-printable chars
+    MAX_CONSECUTIVE_GARBAGE: 20,       // Max consecutive non-printable chars
+    RELIABLE_CONFIDENCE: 70,
+    RELIABLE_MIN_CHARS: 24,
+    RELIABLE_MIN_TOKENS: 4,
+    RELIABLE_READABLE_RATIO: 0.75,
+    RELIABLE_WORD_MEDIAN_CONFIDENCE: 65,
+    RELIABLE_WORD_MIN_CONFIDENCE: 55,
+    RELIABLE_WORD_MIN_PASS_RATIO: 0.7
 };
 
 let ocrWorkerPromise = null;
@@ -20,11 +27,92 @@ function getOcrWorker() {
             cacheMethod: 'none',
             gzip: true,
             workerBlobURL: false,
-            errorHandler: e => console.error('[Offscreen] Worker Error:', e)
+            errorHandler: e => console.debug('[Offscreen] Worker Error:', e)
         });
     }
 
     return ocrWorkerPromise;
+}
+
+function getMeaningfulTokens(text) {
+    if (!text) return [];
+    return text.match(/[A-Za-z0-9][A-Za-z0-9'_:-]{1,}/g) || [];
+}
+
+function getMedian(numbers) {
+    if (!Array.isArray(numbers) || numbers.length === 0) return null;
+    const sorted = [...numbers].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0
+        ? (sorted[middle - 1] + sorted[middle]) / 2
+        : sorted[middle];
+}
+
+function analyzeWordConfidence(words) {
+    const meaningfulWords = Array.isArray(words)
+        ? words
+            .map((word) => ({
+                text: String(word?.text || '').trim(),
+                confidence: Number(word?.confidence)
+            }))
+            .filter((word) => /[A-Za-z0-9]/.test(word.text) && Number.isFinite(word.confidence))
+        : [];
+
+    if (meaningfulWords.length === 0) {
+        return { available: false, total: 0 };
+    }
+
+    const confidences = meaningfulWords.map((word) => word.confidence);
+    const passCount = confidences.filter((value) => value >= OCR_CONFIG.RELIABLE_WORD_MIN_CONFIDENCE).length;
+
+    return {
+        available: true,
+        total: meaningfulWords.length,
+        median: getMedian(confidences),
+        passRatio: passCount / confidences.length,
+        passCount
+    };
+}
+
+function analyzeReliableOCR(qualityCheck, confidence, words) {
+    const cleanedText = qualityCheck.cleanedText || '';
+    const meaningfulTokens = getMeaningfulTokens(cleanedText);
+    const readableRatioValue = qualityCheck.stats?.readableRatioValue || 0;
+    const wordConfidence = analyzeWordConfidence(words);
+    const stats = {
+        ...qualityCheck.stats,
+        confidence,
+        meaningfulTokenCount: meaningfulTokens.length,
+        wordConfidence
+    };
+
+    if (confidence < OCR_CONFIG.RELIABLE_CONFIDENCE) {
+        return { reliable: false, reason: 'low_reliable_confidence', stats };
+    }
+
+    if (cleanedText.length < OCR_CONFIG.RELIABLE_MIN_CHARS) {
+        return { reliable: false, reason: 'too_short', stats };
+    }
+
+    if (meaningfulTokens.length < OCR_CONFIG.RELIABLE_MIN_TOKENS) {
+        return { reliable: false, reason: 'too_few_meaningful_tokens', stats };
+    }
+
+    if (readableRatioValue < OCR_CONFIG.RELIABLE_READABLE_RATIO) {
+        return { reliable: false, reason: 'low_readable_ratio', stats };
+    }
+
+    if (wordConfidence.available) {
+        if (wordConfidence.median < OCR_CONFIG.RELIABLE_WORD_MEDIAN_CONFIDENCE) {
+            return { reliable: false, reason: 'low_word_median_confidence', stats };
+        }
+
+        if (wordConfidence.passRatio < OCR_CONFIG.RELIABLE_WORD_MIN_PASS_RATIO) {
+            return { reliable: false, reason: 'low_word_confidence_ratio', stats };
+        }
+    }
+
+    return { reliable: true, reason: 'reliable', stats };
 }
 
 // --- OCR TEXT QUALITY ANALYZER ---
@@ -98,7 +186,8 @@ function analyzeOCRQuality(text) {
         stats: {
             originalLength: text.length,
             cleanedLength: cleanedText.length,
-            readableRatio: (readableRatio * 100).toFixed(1) + '%'
+            readableRatio: (readableRatio * 100).toFixed(1) + '%',
+            readableRatioValue: readableRatio
         }
     };
 }
@@ -150,15 +239,19 @@ async function runOCR(base64Image) {
             ocrWorkerPromise = null;
             throw error;
         }
-        const { data: { text, confidence } } = recognitionResult;
+        const { data: { text, confidence, words } } = recognitionResult;
+        const numericConfidence = Number.isFinite(Number(confidence)) ? Number(confidence) : 0;
 
         // 3. Validate OCR quality
-        if (confidence < OCR_CONFIG.MIN_CONFIDENCE) {
-            console.debug(`[Offscreen] Low confidence OCR (${confidence}%) - likely noise`);
+        if (numericConfidence < OCR_CONFIG.MIN_CONFIDENCE) {
+            console.debug(`[Offscreen] Low confidence OCR (${numericConfidence}%) - likely noise`);
             return {
                 success: false,
-                error: `OCR confidence too low (${confidence.toFixed(0)}%). Image may be too noisy or not contain text.`,
-                confidence: confidence
+                reliable: false,
+                error: `OCR confidence too low (${numericConfidence.toFixed(0)}%). Image may be too noisy or not contain text.`,
+                confidence: numericConfidence,
+                reason: 'low_confidence',
+                stats: { confidence: numericConfidence }
             };
         }
 
@@ -168,22 +261,31 @@ async function runOCR(base64Image) {
             console.debug(`[Offscreen] OCR quality check failed: ${qualityCheck.reason}`, qualityCheck.detail);
             return {
                 success: false,
+                reliable: false,
                 error: `OCR produced unusable text (${qualityCheck.reason}). Try snipping clearer content.`,
-                confidence: confidence,
-                reason: qualityCheck.reason
+                confidence: numericConfidence,
+                reason: qualityCheck.reason,
+                stats: qualityCheck.stats
             };
+        }
+
+        const reliableCheck = analyzeReliableOCR(qualityCheck, numericConfidence, words);
+        if (!reliableCheck.reliable) {
+            console.debug(`[Offscreen] OCR not reliable for Auto routing: ${reliableCheck.reason}`, reliableCheck.stats);
         }
 
         return {
             text: qualityCheck.cleanedText,
-            confidence: confidence,
+            confidence: numericConfidence,
             success: true,
+            reliable: reliableCheck.reliable,
+            reason: reliableCheck.reason,
             wasTruncated: qualityCheck.wasTruncated,
-            stats: qualityCheck.stats
+            stats: reliableCheck.stats
         };
 
     } catch (err) {
-        console.error("[Offscreen] ERROR:", err);
-        return { success: false, error: err.message };
+        console.debug("[Offscreen] OCR failed:", err);
+        return { success: false, reliable: false, reason: 'ocr_error', error: err.message };
     }
 }
