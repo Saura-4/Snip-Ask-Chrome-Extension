@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img">
+  <title>OpenRouter</title>
+  <path fill="#e8e8e8" d="M4 7.2h9.2c2.9 0 5.2 2.3 5.2 5.2v.7l1.9-1.9 1.4 1.4-4.2 4.2-4.2-4.2 1.4-1.4 1.8 1.8v-.6c0-1.8-1.5-3.3-3.3-3.3H4V7.2Z"/>
+  <path fill="#e8e8e8" d="M4 14.9h7.8v1.9H4v-1.9Z" opacity=".72"/>
+</svg>

@@ -172,18 +172,18 @@ class FloatingChatUI {
         // Create bubble element
         this.bubble = document.createElement("div");
         this.bubble.style.cssText = `
-            min-height: 40px;
-            padding: 6px 8px 6px 12px;
+            min-height: var(--sa-control-overlay);
+            padding: var(--sa-space-3) var(--sa-space-4) var(--sa-space-3) var(--sa-space-6);
             background: rgba(18, 18, 18, 0.92);
             color: #fff4f1;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 999px;
-            box-shadow: 0 14px 38px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(245, 80, 54, 0.08);
-            backdrop-filter: blur(14px);
+            border: var(--sa-border-strong);
+            border-radius: var(--sa-radius-pill);
+            box-shadow: var(--sa-shadow-lg);
+            backdrop-filter: blur(10px);
             cursor: move;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: var(--sa-space-5);
             white-space: nowrap;
             user-select: none;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -192,8 +192,8 @@ class FloatingChatUI {
         bubbleIcon.src = chrome.runtime.getURL("assets/icons/icon-32.png");
         bubbleIcon.alt = "Snip & Ask";
         bubbleIcon.style.cssText = `
-            width: 18px;
-            height: 18px;
+            width: var(--sa-icon-lg);
+            height: var(--sa-icon-lg);
             display: block;
             object-fit: contain;
             flex: 0 0 auto;
@@ -202,8 +202,8 @@ class FloatingChatUI {
         const bubbleLabel = document.createElement('span');
         bubbleLabel.style.cssText = `
             color: #d5d5d5;
-            font-size: 12px;
-            line-height: 1;
+            font-size: var(--sa-type-small);
+            line-height: var(--sa-leading-tight);
             max-width: 180px;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -212,27 +212,27 @@ class FloatingChatUI {
 
         const expandButton = document.createElement('button');
         expandButton.type = 'button';
-        expandButton.innerHTML = '<svg viewBox="0 0 12 12" aria-hidden="true" style="width: 12px; height: 12px; display: block;"><path d="M3 7.25 6 4.25l3 3" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        expandButton.innerHTML = '<svg viewBox="0 0 12 12" aria-hidden="true" style="width: var(--sa-icon-sm); height: var(--sa-icon-sm); display: block;"><path d="M3 7.25 6 4.25l3 3" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         expandButton.style.cssText = `
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 30px;
-            height: 30px;
+            width: var(--sa-control-md);
+            height: var(--sa-control-md);
             background: transparent;
             color: #d5d5d5;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 999px;
+            border: var(--sa-border-strong);
+            border-radius: var(--sa-radius-pill);
             padding: 0;
             font: inherit;
             cursor: pointer;
-            transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+            transition: transform var(--sa-transition-fast), background var(--sa-transition-fast), border-color var(--sa-transition-fast), color var(--sa-transition-fast);
         `;
         expandButton.title = 'Expand';
         expandButton.addEventListener('mouseenter', () => {
-            expandButton.style.background = 'rgba(245, 80, 54, 0.14)';
-            expandButton.style.borderColor = 'rgba(245, 80, 54, 0.5)';
-            expandButton.style.color = '#ff6b4a';
+            expandButton.style.background = 'rgba(255, 255, 255, 0.06)';
+            expandButton.style.borderColor = 'rgba(255, 107, 74, 0.28)';
+            expandButton.style.color = '#ff8a6d';
             expandButton.style.transform = 'translateY(-1px)';
         });
         expandButton.addEventListener('mouseleave', () => {
@@ -290,12 +290,12 @@ class FloatingChatUI {
             this.container.style.minHeight = this._savedState.minHeight || '200px';
             this.container.style.maxWidth = this._savedState.maxWidth || '90vw';
             this.container.style.maxHeight = this._savedState.maxHeight || '90vh';
-            this.container.style.background = this._savedState.background || 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)';
-            this.container.style.border = this._savedState.border || '1px solid rgba(255, 107, 74, 0.4)';
-            this.container.style.borderRadius = this._savedState.borderRadius || '12px';
-            this.container.style.boxShadow = this._savedState.boxShadow || '0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05)';
+            this.container.style.background = this._savedState.background || 'var(--sa-surface-base)';
+            this.container.style.border = this._savedState.border || 'var(--sa-border-strong)';
+            this.container.style.borderRadius = this._savedState.borderRadius || 'var(--sa-radius-xl)';
+            this.container.style.boxShadow = this._savedState.boxShadow || 'var(--sa-shadow-overlay)';
             this.container.style.overflow = this._savedState.overflow || 'hidden';
-            this.container.style.backdropFilter = this._savedState.backdropFilter || 'blur(10px)';
+            this.container.style.backdropFilter = this._savedState.backdropFilter || 'blur(6px)';
             this.container.style.resize = 'both';
         }
 
@@ -355,22 +355,25 @@ class FloatingChatUI {
         this.container.style.cssText = `
             position: fixed; 
             width: 480px; height: 580px;
-            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
-            color: #e8e8e8;
-            border: 1px solid rgba(255, 107, 74, 0.4); border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05);
+            background: var(--sa-surface-base);
+            color: var(--sa-text-primary);
+            border: var(--sa-border-strong); border-radius: var(--sa-radius-xl);
+            box-shadow: var(--sa-shadow-overlay);
             display: flex; flex-direction: column;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; font-size: 14px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; font-size: var(--sa-type-ui); line-height: var(--sa-leading-normal);
             resize: both; overflow: hidden; 
             min-width: 320px; min-height: 280px;
             max-width: 90vw; max-height: 90vh;
-            backdrop-filter: blur(10px);
-            animation: slideIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+            backdrop-filter: blur(6px);
+            animation: slideIn var(--sa-transition-entrance) both;
         `;
 
         // Inject UX Polish Styles (Tables, Code Blocks, Typing Indicator)
         const style = document.createElement('style');
+        const designVars = window.SNIP_ASK_DESIGN?.cssVars?.(':host') || '';
         style.textContent = `
+            ${designVars}
+
             /* WINDOW TRANSITIONS */
             @keyframes slideIn {
                 from { opacity: 0; transform: translateY(20px) scale(0.95); }
@@ -382,84 +385,238 @@ class FloatingChatUI {
             }
 
             /* MARKDOWN TABLES */
-            .table-container { overflow-x: auto; border-radius: 8px; border: 1px solid #333; background: #111; margin: 10px 0; }
-            table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
-            th { background: #1f1f1f; padding: 10px 12px; color: #aaa; font-weight: 600; border-bottom: 1px solid #333; }
-            td { padding: 10px 12px; border-bottom: 1px solid #222; color: #ddd; }
+            .table-container { overflow-x: auto; border-radius: var(--sa-radius-md); border: var(--sa-border-default); background: var(--sa-surface-panel); margin: var(--sa-space-5) 0; box-shadow: inset 0 1px 0 rgba(255,255,255,0.02); }
+            table { width: 100%; border-collapse: collapse; font-size: var(--sa-type-body); line-height: var(--sa-leading-normal); text-align: left; }
+            th { background: var(--sa-surface-header); padding: var(--sa-space-5) var(--sa-space-6); color: var(--sa-text-muted); font-weight: var(--sa-font-semibold); border-bottom: var(--sa-border-default); }
+            td { padding: var(--sa-space-5) var(--sa-space-6); border-bottom: var(--sa-border-subtle); color: var(--sa-text-soft); }
             tr:last-child td { border-bottom: none; }
             
             /* ENHANCED CODE BLOCKS */
-            .code-block-wrapper { background: #0d0d0d; border: 1px solid #333; border-radius: 8px; overflow: hidden; margin: 10px 0; }
-            .code-header { display: flex; justify-content: space-between; align-items: center; background: #1a1a1a; padding: 6px 12px; border-bottom: 1px solid #333; }
-            .lang-label { font-size: 10px; color: #666; font-weight: 700; letter-spacing: 0.5px; }
-            .copy-btn { background: transparent; border: none; color: #888; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
-            .copy-btn:hover { color: #fff; }
-            pre { margin: 0; padding: 12px; overflow-x: auto; }
-            code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #ccc; }
+            .code-block-wrapper { background: var(--sa-surface-field); border: var(--sa-border-default); border-radius: var(--sa-radius-md); overflow: hidden; margin: var(--sa-space-5) 0; }
+            .code-header { display: flex; justify-content: space-between; align-items: center; background: var(--sa-surface-header); padding: var(--sa-space-3) var(--sa-space-6); border-bottom: var(--sa-border-default); }
+            .lang-label { font-size: var(--sa-type-caption); line-height: var(--sa-leading-tight); color: var(--sa-text-subtle); font-weight: var(--sa-font-semibold); letter-spacing: 0; }
+            .copy-btn { background: transparent; border: none; color: var(--sa-text-muted); font-size: var(--sa-type-meta); line-height: var(--sa-leading-tight); cursor: pointer; display: flex; align-items: center; gap: var(--sa-space-2); }
+            .copy-btn:hover { color: var(--sa-text-strong); }
+            pre { margin: 0; padding: var(--sa-space-6); overflow-x: auto; }
+            code { font-family: 'JetBrains Mono', monospace; font-size: var(--sa-type-small); line-height: var(--sa-leading-normal); color: var(--sa-text-soft); }
 
-            /* HEADER ICON BUTTONS */
+            /* HEADER TOOLBAR */
             .chat-header-select {
-                height: 36px;
-                background: #080808;
-                color: #f1f1f1;
-                border: 1px solid rgba(255,255,255,0.12);
-                border-radius: 8px;
-                padding: 0 12px;
-                font-size: 13px;
-                font-weight: 500;
+                box-sizing: border-box;
+                height: var(--sa-control-xl);
+                background: var(--sa-surface-control);
+                color: var(--sa-text-strong);
+                border: var(--sa-border-strong);
+                border-radius: var(--sa-radius-md);
+                padding: 0 var(--sa-space-5);
+                font-size: var(--sa-type-body);
+                font-weight: var(--sa-font-medium);
+                line-height: var(--sa-leading-tight);
                 cursor: pointer;
                 outline: none;
-                transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+                box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+                transition: background var(--sa-transition-normal), border-color var(--sa-transition-normal), color var(--sa-transition-normal);
             }
             .chat-header-select:hover,
             .chat-header-select:focus {
-                background: #0d0d0d;
-                border-color: rgba(255,107,74,0.38);
+                background: var(--sa-surface-control-hover);
+                border-color: rgba(255,107,74,0.20);
+            }
+            .chat-header-actions {
+                box-sizing: border-box;
+                height: var(--sa-control-xl);
+                display: inline-flex;
+                align-items: center;
+                gap: var(--sa-space-1);
+                padding: var(--sa-space-1);
+                flex: 0 0 auto;
+                background: var(--sa-surface-base);
+                border: var(--sa-border-default);
+                border-radius: var(--sa-radius-lg);
+                box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
             }
             .chat-header-action {
-                width: 30px;
-                height: 30px;
-                background: #0d0d0d;
-                color: #c4c4c4;
-                border: 1px solid rgba(255,255,255,0.13);
-                border-radius: 999px;
+                box-sizing: border-box;
+                width: var(--sa-control-sm);
+                height: var(--sa-control-sm);
+                appearance: none;
+                background: transparent;
+                color: #b8b8b8;
+                border: 1px solid transparent;
+                border-radius: var(--sa-radius-md);
                 cursor: pointer;
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
                 padding: 0;
                 flex: 0 0 auto;
-                transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+                transition: background var(--sa-transition-normal), border-color var(--sa-transition-normal), color var(--sa-transition-normal), transform var(--sa-transition-fast);
             }
             .chat-header-action:hover {
-                background: #101010;
-                border-color: rgba(255,107,74,0.42);
-                color: #ff8a6d;
+                background: var(--sa-surface-hover);
+                border-color: rgba(255,255,255,0.08);
+                color: var(--sa-accent-soft);
             }
-            .chat-header-action:active { transform: scale(0.94); }
+            .chat-header-action:focus-visible {
+                outline: none;
+                border-color: rgba(255,107,74,0.24);
+            }
+            .chat-header-action:active { transform: scale(0.96); }
             .chat-header-action svg {
-                width: 14px;
-                height: 14px;
+                width: var(--sa-icon-md);
+                height: var(--sa-icon-md);
                 display: block;
+            }
+            .chat-action-btn--quiet {
+                width: var(--sa-control-xs);
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+            }
+            .chat-action-btn--quiet svg {
+                width: var(--sa-icon-xs);
+                height: var(--sa-icon-xs);
+                display: block;
+            }
+            .chat-action-btn svg {
+                width: var(--sa-icon-xs);
+                height: var(--sa-icon-xs);
+                display: block;
+                flex: 0 0 auto;
+            }
+            .assistant-actions {
+                opacity: 0.72;
+                transition: opacity var(--sa-transition-normal);
+            }
+            .assistant-message:hover .assistant-actions,
+            .assistant-message:focus-within .assistant-actions {
+                opacity: 1;
+            }
+            .snip-message {
+                max-width: 68% !important;
+                padding: var(--sa-space-3) !important;
+                opacity: 0.86;
+                transition: opacity var(--sa-transition-normal), border-color var(--sa-transition-normal);
+            }
+            .snip-message:hover,
+            .snip-message:focus-within {
+                opacity: 1;
+            }
+            .snip-ocr-toggle:focus-visible {
+                outline: none;
+                border-color: rgba(255,107,74,0.32) !important;
+                color: var(--sa-accent-soft) !important;
+            }
+
+            /* CHAT COMPOSER */
+            .chat-input-area {
+                box-sizing: border-box;
+                padding: var(--sa-space-4) var(--sa-space-5) var(--sa-space-5);
+                border-top: var(--sa-border-subtle);
+                background: var(--sa-surface-canvas);
+                border-radius: 0 0 var(--sa-radius-xl) var(--sa-radius-xl);
+                flex-shrink: 0;
+            }
+            .chat-input-shell {
+                box-sizing: border-box;
+                display: flex;
+                align-items: flex-end;
+                gap: var(--sa-space-2);
+                min-height: var(--sa-control-input);
+                background: var(--sa-surface-base);
+                border: var(--sa-border-default);
+                border-radius: var(--sa-radius-lg);
+                padding: var(--sa-space-2) var(--sa-space-2) var(--sa-space-2) var(--sa-space-6);
+                box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+                transition: border-color var(--sa-transition-normal), background var(--sa-transition-normal), box-shadow var(--sa-transition-normal);
+            }
+            .chat-input-shell:focus-within {
+                background: var(--sa-surface-panel);
+                border-color: rgba(255,107,74,0.18);
+                box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
+            }
+            .chat-followup-input {
+                box-sizing: border-box;
+                flex: 1 1 auto;
+                min-width: 0;
+                min-height: 22px;
+                max-height: 112px;
+                background: transparent;
+                border: none;
+                color: var(--sa-text-primary);
+                padding: var(--sa-space-3) 0;
+                resize: none;
+                font-family: inherit;
+                font-size: var(--sa-type-body);
+                line-height: var(--sa-leading-normal);
+                outline: none;
+                scrollbar-width: thin;
+                scrollbar-color: #404040 transparent;
+            }
+            .chat-followup-input::placeholder {
+                color: var(--sa-text-subtle);
+            }
+            .chat-send-btn {
+                box-sizing: border-box;
+                width: var(--sa-control-lg);
+                height: var(--sa-control-lg);
+                min-width: var(--sa-control-lg);
+                border: 1px solid rgba(255,107,74,0.18);
+                border-radius: var(--sa-radius-md);
+                background: rgba(255,107,74,0.14);
+                color: var(--sa-accent-soft);
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 0;
+                font-size: var(--sa-type-ui);
+                font-weight: var(--sa-font-semibold);
+                line-height: var(--sa-leading-tight);
+                box-shadow: none;
+                margin-left: var(--sa-space-1);
+                transition: background var(--sa-transition-normal), border-color var(--sa-transition-normal), color var(--sa-transition-normal), transform var(--sa-transition-fast), opacity var(--sa-transition-normal);
+            }
+            .chat-send-btn svg {
+                width: var(--sa-icon-md);
+                height: var(--sa-icon-md);
+                display: block;
+            }
+            .chat-send-btn:hover:not(:disabled) {
+                background: rgba(255,107,74,0.20);
+                border-color: rgba(255,107,74,0.30);
+                color: var(--sa-accent-soft);
+            }
+            .chat-send-btn:focus-visible {
+                outline: none;
+                border-color: rgba(255,107,74,0.36);
+            }
+            .chat-send-btn:active:not(:disabled) {
+                transform: scale(0.96);
+            }
+            .chat-send-btn:disabled {
+                cursor: default;
+                background: rgba(255,255,255,0.035);
+                border-color: transparent;
+                color: var(--sa-text-muted);
             }
             
             /* TYPING INDICATOR */
-            .typing-container { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; padding: 8px 10px; width: fit-content; max-width: 100%; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; box-shadow: 0 8px 22px rgba(0,0,0,0.22); }
-            .typing-bubble { background: transparent; padding: 0; display: flex; gap: 4px; width: fit-content; }
+            .typing-container { display: flex; align-items: center; gap: var(--sa-space-5); margin-bottom: var(--sa-space-5); padding: var(--sa-space-4) var(--sa-space-5); width: fit-content; max-width: 100%; background: rgba(255,255,255,0.035); border: var(--sa-border-default); border-radius: var(--sa-radius-pill); box-shadow: var(--sa-shadow-md); }
+            .typing-bubble { background: transparent; padding: 0; display: flex; gap: var(--sa-space-2); width: fit-content; }
             .dot { width: 6px; height: 6px; background: #666; border-radius: 50%; animation: bounce 1.4s infinite ease-in-out both; }
             .dot:nth-child(1) { animation-delay: -0.32s; }
             .dot:nth-child(2) { animation-delay: -0.16s; }
             @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); background: #f55036; } }
-            .thinking-text { font-size: 11px; color: #9ca3af; font-style: normal; animation: pulse 1.5s infinite; }
+            .thinking-text { font-size: var(--sa-type-meta); line-height: var(--sa-leading-tight); color: var(--sa-text-muted); font-style: normal; animation: pulse 1.5s infinite; }
             @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
-            .stop-btn { width: 26px; height: 26px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); color: #b8b8b8; padding: 0; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: all 0.18s ease; margin-left: 2px; }
-            .stop-btn svg { width: 12px; height: 12px; display: block; }
-            .stop-btn:hover { border-color: rgba(245, 80, 54, 0.55); color: #ff6b4a; background: rgba(245, 80, 54, 0.12); }
+            .stop-btn { width: var(--sa-control-xs); height: var(--sa-control-xs); background: rgba(255,255,255,0.04); border: var(--sa-border-strong); color: #b8b8b8; padding: 0; border-radius: var(--sa-radius-pill); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background var(--sa-transition-normal), border-color var(--sa-transition-normal), color var(--sa-transition-normal), transform var(--sa-transition-fast); margin-left: var(--sa-space-1); }
+            .stop-btn svg { width: var(--sa-icon-sm); height: var(--sa-icon-sm); display: block; }
+            .stop-btn:hover { border-color: rgba(245, 80, 54, 0.32); color: #ff8a6d; background: rgba(245, 80, 54, 0.08); }
             .stop-btn:active { transform: scale(0.94); }
             
             /* MATH BLOCKS (LaTeX) */
-            .math-block { background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 12px 16px; margin: 10px 0; overflow-x: auto; text-align: center; }
-            .math-inline { background: rgba(139, 92, 246, 0.15); padding: 2px 6px; border-radius: 4px; color: #c4b5fd; }
+            .math-block { background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: var(--sa-radius-sm); padding: var(--sa-space-6) var(--sa-space-8); margin: var(--sa-space-5) 0; overflow-x: auto; text-align: center; }
+            .math-inline { background: rgba(139, 92, 246, 0.15); padding: var(--sa-space-1) var(--sa-space-3); border-radius: var(--sa-radius-xs); color: #c4b5fd; }
             .katex { font-size: 1.1em; color: #c4b5fd; }
             .katex-display { margin: 0.5em 0; }
         `;
@@ -469,24 +626,24 @@ class FloatingChatUI {
         const header = document.createElement("div");
         this.header = header;
         header.style.cssText = `
-            padding: 8px 10px;
-            background: #232323;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
-            cursor: move; display: flex; justify-content: space-between; align-items: center;
-            border-radius: 12px 12px 0 0; user-select: none; gap: 4px;
+            padding: 7px var(--sa-space-5);
+            background: var(--sa-surface-header);
+            border-bottom: var(--sa-border-default);
+            cursor: move; display: flex; justify-content: flex-start; align-items: center;
+            border-radius: var(--sa-radius-xl) var(--sa-radius-xl) 0 0; user-select: none; gap: var(--sa-space-4);
             position: relative;
-            border-top: 2px solid rgba(255, 107, 74, 0.6);
+            border-top: var(--sa-border-top-accent);
         `;
 
         const titleSection = document.createElement("div");
-        titleSection.style.cssText = "display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;";
+        titleSection.style.cssText = "display: flex; align-items: center; gap: var(--sa-space-4); flex: 1 1 auto; min-width: 0;";
 
         const brandIcon = document.createElement("img");
         brandIcon.src = chrome.runtime.getURL("assets/icons/icon-32.png");
         brandIcon.alt = "Snip & Ask";
         brandIcon.style.cssText = `
-            width: 18px;
-            height: 18px;
+            width: var(--sa-icon-lg);
+            height: var(--sa-icon-lg);
             flex: 0 0 auto;
             display: block;
             object-fit: contain;
@@ -497,8 +654,8 @@ class FloatingChatUI {
         this.modelSelect = document.createElement("select");
         this.modelSelect.className = "chat-header-select";
         this.modelSelect.style.cssText = `
-            flex: 1;
-            min-width: 0;
+            flex: 1 1 auto;
+            min-width: 72px;
             max-width: 220px;
         `;
 
@@ -526,7 +683,9 @@ class FloatingChatUI {
         this.modeSelect = document.createElement("select");
         this.modeSelect.className = "chat-header-select";
         this.modeSelect.style.cssText = `
-            min-width: 144px;
+            flex: 0 1 140px;
+            min-width: 124px;
+            max-width: 150px;
         `;
 
         // Load all modes from storage (includes built-in and user-created modes)
@@ -574,25 +733,32 @@ class FloatingChatUI {
         titleSection.appendChild(this.modeSelect);
         header.appendChild(titleSection);
 
+        const actionGroup = document.createElement("div");
+        this.actionGroup = actionGroup;
+        actionGroup.className = "chat-header-actions";
+
         // Snip Again button
         const snipAgainBtn = document.createElement("button");
+        snipAgainBtn.type = "button";
         this.snipAgainBtn = snipAgainBtn;
         snipAgainBtn.className = "chat-header-action";
         snipAgainBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>`;
         snipAgainBtn.title = "Snip and add to this chat";
         snipAgainBtn.onclick = () => this.startSnipAgain();
-        header.appendChild(snipAgainBtn);
+        actionGroup.appendChild(snipAgainBtn);
 
         // Compare button
         const compareBtn = document.createElement("button");
+        compareBtn.type = "button";
         this.compareBtn = compareBtn;
         compareBtn.className = "chat-header-action";
         compareBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`;
         compareBtn.title = "Compare with another model";
         compareBtn.onclick = () => this.spawnCompareWindow();
-        header.appendChild(compareBtn);
+        actionGroup.appendChild(compareBtn);
 
         const displayModeBtn = document.createElement("button");
+        displayModeBtn.type = "button";
         this.displayModeBtn = displayModeBtn;
         displayModeBtn.className = "chat-header-action";
         displayModeBtn.onclick = async () => {
@@ -622,32 +788,35 @@ class FloatingChatUI {
                 showErrorToast(result?.error || 'Could not move popup chat to sidebar.');
             }
         };
-        header.appendChild(displayModeBtn);
+        actionGroup.appendChild(displayModeBtn);
 
         // Minimize button
         const minimizeBtn = document.createElement("button");
+        minimizeBtn.type = "button";
         this.minimizeBtn = minimizeBtn;
         minimizeBtn.className = "chat-header-action";
         minimizeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
         minimizeBtn.title = "Minimize to bubble";
         minimizeBtn.onclick = () => this.minimize();
-        header.appendChild(minimizeBtn);
+        actionGroup.appendChild(minimizeBtn);
 
-        const closeBtn = document.createElement("span");
+        const closeBtn = document.createElement("button");
+        closeBtn.type = "button";
         this.closeBtn = closeBtn;
         closeBtn.id = "closeBtn";
         closeBtn.className = "chat-header-action";
         closeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
-        header.appendChild(closeBtn);
+        actionGroup.appendChild(closeBtn);
+        header.appendChild(actionGroup);
 
         this.container.appendChild(header);
 
         // Chat Body
         this.chatBody = document.createElement("div");
         this.chatBody.style.cssText = `
-            flex-grow: 1; overflow-y: auto; overflow-x: hidden; padding: 16px; 
-            display: flex; flex-direction: column; gap: 16px;
-            background: linear-gradient(180deg, #0a0a0a 0%, #121212 100%); 
+            flex-grow: 1; overflow-y: auto; overflow-x: hidden; padding: var(--sa-space-8);
+            display: flex; flex-direction: column; gap: var(--sa-space-8);
+            background: var(--sa-surface-canvas);
             scrollbar-width: thin; scrollbar-color: #404040 transparent;
             scroll-behavior: smooth;
             min-height: 0;
@@ -657,25 +826,20 @@ class FloatingChatUI {
         // Input Area
         const inputArea = document.createElement("div");
         this.inputArea = inputArea;
-        inputArea.style.cssText = `
-            padding: 12px 14px; border-top: 1px solid rgba(255,255,255,0.08); 
-            background: linear-gradient(135deg, #1f1f1f 0%, #171717 100%);
-            display: flex; gap: 10px; border-radius: 0 0 12px 12px; align-items: flex-end;
-            flex-shrink: 0;
-        `;
+        inputArea.className = "chat-input-area";
+
+        const inputShell = document.createElement("div");
+        this.inputShell = inputShell;
+        inputShell.className = "chat-input-shell";
 
         this.input = document.createElement("textarea");
+        this.input.className = "chat-followup-input";
         this.input.placeholder = "Ask a follow-up...";
         this.input.rows = 1;
-        this.input.style.cssText = `
-            flex-grow: 1; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); color: #e8e8e8;
-            padding: 10px 12px; border-radius: 8px; resize: none; font-family: inherit; font-size: 13px;
-            min-height: 38px; max-height: 120px; line-height: 1.5; transition: all 0.2s;
-        `;
 
         this.input.addEventListener('input', () => {
             this.input.style.height = 'auto';
-            this.input.style.height = Math.min(this.input.scrollHeight, 120) + 'px';
+            this.input.style.height = Math.min(this.input.scrollHeight, 112) + 'px';
         });
 
         // Prevent host page (GitHub, Gmail, etc.) from capturing keyboard events
@@ -694,13 +858,11 @@ class FloatingChatUI {
         this.input.addEventListener('focusout', stopPropagation);
 
         this.sendBtn = document.createElement("button");
-        this.sendBtn.innerText = "➤";
-        this.sendBtn.style.cssText = `
-            background: linear-gradient(135deg, #ff6b4a 0%, #ff5533 100%); color: white; border: none; 
-            padding: 0 18px; height: 38px; border-radius: 8px; cursor: pointer; font-weight: 600;
-            box-shadow: 0 2px 8px rgba(255,107,74,0.3); transition: all 0.2s;
-        `;
-
+        this.sendBtn.type = "button";
+        this.sendBtn.className = "chat-send-btn";
+        this.sendBtn.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.75M4.5 7.25 8 3.75l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        this.sendBtn.title = "Send";
+        this.sendBtn.setAttribute("aria-label", "Send");
         this.sendBtn.onclick = () => this.handleSend();
 
         // Consolidated keyboard handlers for follow-up input.
@@ -730,8 +892,9 @@ class FloatingChatUI {
             }
         });
 
-        inputArea.appendChild(this.input);
-        inputArea.appendChild(this.sendBtn);
+        inputShell.appendChild(this.input);
+        inputShell.appendChild(this.sendBtn);
+        inputArea.appendChild(inputShell);
         this.container.appendChild(inputArea);
 
         this.shadow.appendChild(this.container);
@@ -800,7 +963,8 @@ class FloatingChatUI {
             this.container.style.margin = '0';
             this.header.style.cursor = 'default';
             this.header.style.borderRadius = '0';
-            this.header.style.padding = '10px 12px';
+            this.header.style.padding = '7px var(--sa-space-5)';
+            if (this.inputArea) this.inputArea.style.borderRadius = '0';
             if (this.minimizeBtn) this.minimizeBtn.style.display = 'none';
             this.hasSavedPosition = false;
         } else {
@@ -814,14 +978,16 @@ class FloatingChatUI {
             this.container.style.maxHeight = '90vh';
             this.container.style.top = this.container.style.top || '50px';
             this.container.style.bottom = 'auto';
-            this.container.style.borderRadius = '12px';
-            this.container.style.borderTop = '1px solid rgba(255, 107, 74, 0.4)';
-            this.container.style.borderRight = '1px solid rgba(255, 107, 74, 0.4)';
+            this.container.style.borderRadius = 'var(--sa-radius-xl)';
+            this.container.style.border = 'var(--sa-border-strong)';
+            this.container.style.borderTop = 'var(--sa-border-top-accent)';
+            this.container.style.borderRight = 'var(--sa-border-strong)';
             this.container.style.resize = 'both';
-            this.container.style.boxShadow = '0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05)';
+            this.container.style.boxShadow = 'var(--sa-shadow-overlay)';
             this.header.style.cursor = 'move';
-            this.header.style.borderRadius = '12px 12px 0 0';
-            this.header.style.padding = '10px 12px';
+            this.header.style.borderRadius = 'var(--sa-radius-xl) var(--sa-radius-xl) 0 0';
+            this.header.style.padding = '7px var(--sa-space-5)';
+            if (this.inputArea) this.inputArea.style.borderRadius = '0 0 var(--sa-radius-xl) var(--sa-radius-xl)';
             if (this.minimizeBtn) this.minimizeBtn.style.display = 'flex';
             this.loadState();
         }
@@ -901,6 +1067,27 @@ class FloatingChatUI {
 
         this.chatBody.scrollTop = this.chatBody.scrollHeight;
         this.onSessionChanged?.();
+        if (role === 'assistant') {
+            this._prepareFollowUpInput(isError);
+        }
+    }
+
+    _prepareFollowUpInput(isError = false) {
+        if (!this.input) return;
+        this.input.placeholder = isError ? 'Ask a follow-up or adjust the request...' : 'Ask about this answer...';
+
+        setTimeout(() => {
+            if (!this.input || this.input.disabled || this.isGeneratingResponse()) return;
+            if (WindowManager.pendingResponses > 0) return;
+            if (this.isMinimized || this.container?.style.display === 'none') return;
+            if (WindowManager.windows.length > 1 && this.displayMode !== 'sidebar') return;
+
+            try {
+                this.input.focus({ preventScroll: true });
+            } catch {
+                this.input.focus();
+            }
+        }, 80);
     }
 
     /**
@@ -1474,8 +1661,8 @@ class FloatingChatUI {
             max-width: 90vw;
             max-height: 85vh;
             object-fit: contain;
-            border-radius: 8px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            border-radius: var(--sa-radius-md);
+            box-shadow: var(--sa-shadow-overlay);
         `;
         fullImg.alt = "Full size screenshot";
 
@@ -1485,22 +1672,33 @@ class FloatingChatUI {
             position: absolute;
             top: -15px;
             right: -15px;
-            width: 32px;
-            height: 32px;
-            background: #ff6b4a;
+            width: var(--sa-control-lg);
+            height: var(--sa-control-lg);
+            background: var(--sa-surface-header);
+            border: var(--sa-border-strong);
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            font-size: 18px;
-            color: white;
-            box-shadow: 0 4px 12px rgba(255, 107, 74, 0.4);
-            transition: transform 0.2s;
+            font-size: var(--sa-type-title);
+            color: var(--sa-text-primary);
+            box-shadow: var(--sa-shadow-md);
+            transition: transform var(--sa-transition-normal), border-color var(--sa-transition-normal), color var(--sa-transition-normal), background var(--sa-transition-normal);
         `;
         closeBtn.innerHTML = '×';
-        closeBtn.onmouseenter = () => closeBtn.style.transform = 'scale(1.1)';
-        closeBtn.onmouseleave = () => closeBtn.style.transform = 'scale(1)';
+        closeBtn.onmouseenter = () => {
+            closeBtn.style.transform = 'scale(1.06)';
+            closeBtn.style.borderColor = 'rgba(255,107,74,0.26)';
+            closeBtn.style.color = 'var(--sa-accent-soft)';
+            closeBtn.style.background = '#242424';
+        };
+        closeBtn.onmouseleave = () => {
+            closeBtn.style.transform = 'scale(1)';
+            closeBtn.style.borderColor = 'rgba(255,255,255,0.12)';
+            closeBtn.style.color = 'var(--sa-text-primary)';
+            closeBtn.style.background = 'var(--sa-surface-header)';
+        };
 
         // Hint text
         const hint = document.createElement('div');
@@ -1509,8 +1707,8 @@ class FloatingChatUI {
             bottom: -30px;
             left: 50%;
             transform: translateX(-50%);
-            color: #888;
-            font-size: 12px;
+            color: var(--sa-text-muted);
+            font-size: var(--sa-type-small);
             white-space: nowrap;
         `;
         hint.textContent = 'Click anywhere or press ESC to close';
@@ -2049,6 +2247,7 @@ class FloatingChatUI {
         if (this.input) {
             this.input.disabled = disabled;
             this.input.style.opacity = disabled ? '0.5' : '1';
+            this.input.placeholder = disabled ? 'Waiting for responses...' : 'Ask about this answer...';
         }
         if (this.sendBtn) {
             this.sendBtn.disabled = disabled;
