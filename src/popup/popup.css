@@ -69,11 +69,16 @@ body {
 .logo-container {
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: center;
+    gap: 9px;
 }
 
-.logo-icon {
-    color: #ff6b4a;
+.popup-logo-icon {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    display: block;
+    object-fit: contain;
 }
 
 .header h2 {
