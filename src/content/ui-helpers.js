@@ -8,11 +8,34 @@
 let _loadingOverlay = null;
 let _loadingOverlayEscapeHandler = null;
 
+function getSnipAskDesign() {
+    return window.SNIP_ASK_DESIGN || {
+        radius: { md: '8px', pill: '999px' },
+        space: { 2: '4px', 3: '6px', 4: '8px', 7: '14px', 9: '18px', 10: '20px' },
+        shadow: {
+            md: '0 8px 22px rgba(0, 0, 0, 0.22)',
+            lg: '0 12px 30px rgba(0, 0, 0, 0.30), 0 0 0 1px rgba(255, 255, 255, 0.055)'
+        },
+        border: { strong: '1px solid rgba(255, 255, 255, 0.1)' },
+        color: { surfaceHeader: '#1d1d1d', textSoft: '#d5d5d5' },
+        icon: { sm: '12px' },
+        control: { md: '30px', overlay: '40px' },
+        type: { small: '12px', ui: '14px' },
+        leading: { tight: '1.2' },
+        weight: { medium: '500' },
+        transition: {
+            fast: '0.16s ease',
+            entrance: '0.3s cubic-bezier(0.2, 0.8, 0.2, 1)'
+        }
+    };
+}
+
 /**
  * Show a draggable, nonblocking thinking panel while processing a snip.
  */
 function showLoadingCursor() {
     hideLoadingCursor({ immediate: true });
+    const design = getSnipAskDesign();
 
     _loadingOverlay = document.createElement('div');
     _loadingOverlay.id = 'snip-loading-overlay';
@@ -32,17 +55,17 @@ function showLoadingCursor() {
         transform: translate(-50%, -50%);
         display: flex;
         align-items: center;
-        gap: 14px;
+        gap: ${design.space[7]};
         background: rgba(18, 18, 18, 0.92);
         color: #fff4f1;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 999px;
+        border: ${design.border.strong};
+        border-radius: ${design.radius.pill};
         min-width: 150px;
-        min-height: 40px;
-        padding: 6px 8px 6px 18px;
+        min-height: ${design.control.overlay};
+        padding: ${design.space[3]} ${design.space[4]} ${design.space[3]} ${design.space[9]};
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        box-shadow: 0 14px 38px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(245, 80, 54, 0.08);
-        backdrop-filter: blur(14px);
+        box-shadow: ${design.shadow.lg};
+        backdrop-filter: blur(10px);
         pointer-events: auto;
         cursor: grab;
         user-select: none;
@@ -98,7 +121,7 @@ function showLoadingCursor() {
     thinkingContainer.style.cssText = `
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: ${design.space[4]};
         flex: 1;
         min-width: 0;
     `;
@@ -106,7 +129,7 @@ function showLoadingCursor() {
     const bubble = document.createElement('div');
     bubble.style.cssText = `
         display: flex;
-        gap: 4px;
+        gap: ${design.space[2]};
         width: fit-content;
     `;
 
@@ -126,8 +149,10 @@ function showLoadingCursor() {
     const text = document.createElement('span');
     text.textContent = 'Thinking...';
     text.style.cssText = `
-        font-size: 12px;
-        color: #d5d5d5;
+        font-size: ${design.type.small};
+        line-height: ${design.leading.tight};
+        font-weight: ${design.weight.medium};
+        color: ${design.color.textSoft};
         font-style: normal;
         animation: thinkingPulse 1.5s infinite;
         white-space: nowrap;
@@ -137,28 +162,28 @@ function showLoadingCursor() {
 
     const cancelButton = document.createElement('button');
     cancelButton.type = 'button';
-    cancelButton.innerHTML = '<svg viewBox="0 0 12 12" aria-hidden="true" style="width: 12px; height: 12px; display: block;"><path d="M3.25 3.25 8.75 8.75M8.75 3.25 3.25 8.75" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"/></svg>';
+    cancelButton.innerHTML = `<svg viewBox="0 0 12 12" aria-hidden="true" style="width: ${design.icon.sm}; height: ${design.icon.sm}; display: block;"><path d="M3.25 3.25 8.75 8.75M8.75 3.25 3.25 8.75" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"/></svg>`;
     cancelButton.title = 'Stop generating';
     cancelButton.style.cssText = `
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 30px;
-        height: 30px;
+        width: ${design.control.md};
+        height: ${design.control.md};
         background: transparent;
-        color: #d5d5d5;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 999px;
+        color: ${design.color.textSoft};
+        border: ${design.border.strong};
+        border-radius: ${design.radius.pill};
         padding: 0;
         margin-left: auto;
         font: inherit;
         cursor: pointer;
-        transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+        transition: transform ${design.transition.fast}, background ${design.transition.fast}, border-color ${design.transition.fast};
     `;
     cancelButton.addEventListener('mouseenter', () => {
-        cancelButton.style.background = 'rgba(245, 80, 54, 0.14)';
-        cancelButton.style.borderColor = 'rgba(245, 80, 54, 0.5)';
-        cancelButton.style.color = '#ff6b4a';
+        cancelButton.style.background = 'rgba(255, 255, 255, 0.06)';
+        cancelButton.style.borderColor = 'rgba(255, 107, 74, 0.28)';
+        cancelButton.style.color = '#ff8a6d';
         cancelButton.style.transform = 'translateY(-1px)';
     });
     cancelButton.addEventListener('mouseleave', () => {
@@ -397,6 +422,7 @@ function sanitizeModelText(rawText) {
 function showErrorToast(message) {
     const existing = document.getElementById('snip-error-toast');
     if (existing) existing.remove();
+    const design = getSnipAskDesign();
 
     const normalizedMessage = (() => {
         if (typeof message === 'string') return message;
@@ -417,12 +443,12 @@ function showErrorToast(message) {
     const toast = document.createElement('div');
     toast.id = 'snip-error-toast';
     toast.style.cssText = `
-        position: fixed; top: 20px; right: 20px; z-index: 2147483647;
-        padding: 15px 20px; background: #1e1e1e; color: #f55036;
-        border: 1px solid #f55036; border-radius: 8px;
-        font-family: 'Segoe UI', sans-serif; font-size: 14px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-        animation: slideIn 0.3s ease;
+        position: fixed; top: ${design.space[10]}; right: ${design.space[10]}; z-index: 2147483647;
+        padding: 15px ${design.space[10]}; background: ${design.color.surfaceHeader}; color: #f55036;
+        border: 1px solid #f55036; border-radius: ${design.radius.md};
+        font-family: 'Segoe UI', sans-serif; font-size: ${design.type.ui};
+        box-shadow: ${design.shadow.md};
+        animation: slideIn ${design.transition.entrance};
         max-width: 350px;
     `;
 
@@ -443,7 +469,7 @@ function showErrorToast(message) {
         messageLine.textContent = 'Warning: ' + normalizedMessage;
 
         const helpLine = document.createElement('div');
-        helpLine.style.cssText = 'font-size: 12px; color: #ccc;';
+        helpLine.style.cssText = `font-size: ${design.type.small}; line-height: ${design.leading.tight}; color: ${design.color.textSoft};`;
         helpLine.textContent = 'This build is not allowlisted for Guest Mode.';
 
         toast.appendChild(messageLine);
@@ -454,7 +480,7 @@ function showErrorToast(message) {
         messageLine.textContent = 'Warning: ' + normalizedMessage;
 
         const helpLine = document.createElement('div');
-        helpLine.style.cssText = 'font-size: 12px; color: #ccc;';
+        helpLine.style.cssText = `font-size: ${design.type.small}; line-height: ${design.leading.tight}; color: ${design.color.textSoft};`;
         helpLine.textContent = 'Click the extension icon to update your API key.';
 
         toast.appendChild(messageLine);

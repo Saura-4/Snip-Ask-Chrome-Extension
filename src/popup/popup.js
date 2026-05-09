@@ -332,10 +332,8 @@ async function loadModelsList(enabledProviders, enabledModels) {
       }
       const modelValue = button.dataset.model;
       const provider = button.dataset.provider;
-      if (confirm('Delete this custom model?')) {
-        await removeCustomModel(provider, modelValue);
-        await loadSettings();
-      }
+      await removeCustomModel(provider, modelValue);
+      await loadSettings();
     });
   });
 

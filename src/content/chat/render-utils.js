@@ -1,33 +1,43 @@
-function createChatActionButton(text, icon, title, isPrimary) {
+function createChatActionButton(text, icon, title, isPrimary, variant = 'default') {
     const button = document.createElement("button");
-    button.innerHTML = `${icon} ${text}`;
+    const isQuiet = variant === 'quiet';
+    button.className = `chat-action-btn${isPrimary ? ' chat-action-btn--primary' : ''}${isQuiet ? ' chat-action-btn--quiet' : ''}`;
+    button.innerHTML = isQuiet ? icon : `${icon} ${text}`;
     button.title = title;
+    button.setAttribute('aria-label', title || text);
+    const baseBackground = isPrimary ? 'rgba(245, 80, 54, 0.1)' : (isQuiet ? 'var(--sa-button-quiet-bg)' : 'var(--sa-surface-control)');
+    const baseColor = isPrimary ? 'var(--sa-accent-soft)' : (isQuiet ? 'var(--sa-button-quiet-text)' : '#b8b8b8');
+    const baseBorder = isPrimary ? 'rgba(245, 80, 54, 0.28)' : (isQuiet ? 'transparent' : 'rgba(255,255,255,0.09)');
+    const hoverBackground = isPrimary ? 'rgba(245, 80, 54, 0.13)' : 'var(--sa-surface-control-hover)';
+    const hoverBorder = isPrimary ? 'rgba(245, 80, 54, 0.38)' : 'rgba(255,255,255,0.12)';
+    const hoverColor = isPrimary ? 'var(--sa-accent-soft)' : '#e2e2e2';
     button.style.cssText = `
-        background: ${isPrimary ? 'rgba(245, 80, 54, 0.12)' : 'rgba(255,255,255,0.04)'};
-        color: ${isPrimary ? '#ff6b4a' : '#b8b8b8'};
-        border: 1px solid ${isPrimary ? 'rgba(245, 80, 54, 0.5)' : 'rgba(255,255,255,0.1)'};
-        padding: 5px 10px;
-        border-radius: 999px;
-        font-size: 11px;
+        background: ${baseBackground};
+        color: ${baseColor};
+        border: 1px solid ${baseBorder};
+        padding: 5px 9px;
+        border-radius: var(--sa-radius-md);
+        font-size: var(--sa-type-meta);
         cursor: pointer;
-        transition: all 0.18s ease;
+        transition: background var(--sa-transition-normal), border-color var(--sa-transition-normal), color var(--sa-transition-normal);
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: 5px;
-        font-weight: 500;
-        line-height: 1;
-        min-height: 26px;
+        gap: var(--sa-space-3);
+        font-weight: var(--sa-font-medium);
+        line-height: var(--sa-leading-tight);
+        min-height: var(--sa-control-xs);
+        white-space: nowrap;
     `;
     button.onmouseenter = () => {
-        button.style.background = isPrimary ? 'rgba(245, 80, 54, 0.18)' : 'rgba(255,255,255,0.08)';
-        button.style.borderColor = isPrimary ? 'rgba(245, 80, 54, 0.65)' : 'rgba(255,255,255,0.16)';
-        button.style.color = isPrimary ? '#ff7a5c' : '#e5e7eb';
+        button.style.background = hoverBackground;
+        button.style.borderColor = hoverBorder;
+        button.style.color = hoverColor;
     };
     button.onmouseleave = () => {
-        button.style.background = isPrimary ? 'rgba(245, 80, 54, 0.12)' : 'rgba(255,255,255,0.04)';
-        button.style.borderColor = isPrimary ? 'rgba(245, 80, 54, 0.5)' : 'rgba(255,255,255,0.1)';
-        button.style.color = isPrimary ? '#ff6b4a' : '#b8b8b8';
+        button.style.background = baseBackground;
+        button.style.borderColor = baseBorder;
+        button.style.color = baseColor;
     };
     return button;
 }
@@ -68,13 +78,14 @@ function renderUserMessageContent(targetUI, msgDiv, content, base64Image, displa
 
     if (hasImage) {
         const imgSrc = getMessageImageSource(content, base64Image);
+        msgDiv.classList.add('snip-message');
         const imgContainer = document.createElement('div');
         imgContainer.style.cssText = `
-            margin-bottom: 8px;
-            border-radius: 6px;
+            margin-bottom: 0;
+            border-radius: var(--sa-radius-sm);
             overflow: hidden;
-            border: 1px solid rgba(255,255,255,0.1);
-            background: #1a1a1a;
+            border: var(--sa-border-default);
+            background: var(--sa-surface-control);
             position: relative;
         `;
 
@@ -82,11 +93,12 @@ function renderUserMessageContent(targetUI, msgDiv, content, base64Image, displa
         thumbnail.src = imgSrc;
         thumbnail.style.cssText = `
             width: 100%;
-            max-height: 120px;
+            height: 72px;
+            max-height: 72px;
             object-fit: cover;
             cursor: pointer;
             display: block;
-            transition: transform 0.2s;
+            transition: opacity var(--sa-transition-normal), transform var(--sa-transition-normal);
         `;
         thumbnail.title = "Click to view full size";
         thumbnail.alt = "Screenshot thumbnail";
@@ -98,22 +110,7 @@ function renderUserMessageContent(targetUI, msgDiv, content, base64Image, displa
         };
         thumbnail.onclick = () => showImageModal(imgSrc);
 
-        const iconOverlay = document.createElement('div');
-        iconOverlay.style.cssText = `
-            position: absolute;
-            bottom: 4px;
-            right: 4px;
-            background: rgba(0,0,0,0.6);
-            border-radius: 4px;
-            padding: 2px 6px;
-            font-size: 10px;
-            color: #ccc;
-            pointer-events: none;
-        `;
-        iconOverlay.textContent = 'Click to expand';
-
         imgContainer.appendChild(thumbnail);
-        imgContainer.appendChild(iconOverlay);
         msgDiv.appendChild(imgContainer);
 
         let ocrContainer = null;
@@ -122,46 +119,70 @@ function renderUserMessageContent(targetUI, msgDiv, content, base64Image, displa
             ocrContainer.textContent = ocrText;
             ocrContainer.style.cssText = `
                 display: none;
-                max-height: 180px;
+                max-height: 118px;
                 overflow-y: auto;
                 white-space: pre-wrap;
-                border: 1px solid rgba(255,255,255,0.1);
-                background: rgba(0,0,0,0.18);
-                border-radius: 6px;
-                padding: 8px 9px;
-                font-size: 12px;
-                line-height: 1.45;
+                border: var(--sa-border-default);
+                background: var(--sa-surface-field);
+                border-radius: var(--sa-radius-sm);
+                padding: 28px var(--sa-space-5) var(--sa-space-4);
+                font-size: var(--sa-type-small);
+                line-height: var(--sa-leading-normal);
             `;
             msgDiv.appendChild(ocrContainer);
         }
 
         if (canToggleOcr && ocrContainer) {
+            const ocrToggle = document.createElement('button');
+            ocrToggle.type = 'button';
+            ocrToggle.className = 'chat-action-btn snip-ocr-toggle';
+            ocrToggle.title = 'Show OCR text';
+            ocrToggle.setAttribute('aria-label', 'Show OCR text');
+            ocrToggle.style.cssText = `
+                position: absolute;
+                top: var(--sa-space-2);
+                right: var(--sa-space-2);
+                min-height: var(--sa-control-xxs);
+                padding: 0 var(--sa-space-3);
+                border-radius: var(--sa-radius-sm);
+                border: var(--sa-border-default);
+                background: rgba(8,8,8,0.76);
+                color: var(--sa-text-soft);
+                font-size: var(--sa-type-caption);
+                font-weight: var(--sa-font-semibold);
+                line-height: var(--sa-leading-tight);
+                cursor: pointer;
+                transition: background var(--sa-transition-normal), border-color var(--sa-transition-normal), color var(--sa-transition-normal);
+            `;
+
             const setOcrView = (view) => {
                 const showOcr = view === 'ocr';
                 imgContainer.style.display = showOcr ? 'none' : 'block';
                 ocrContainer.style.display = showOcr ? 'block' : 'none';
-                toggleBtn.innerHTML = showOcr
-                    ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="8" cy="10" r="1.5"></circle><path d="M21 15l-5-5L5 19"></path></svg> Image'
-                    : '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"></path><path d="M9 20h6"></path><path d="M12 4v16"></path></svg> OCR';
-                toggleBtn.title = showOcr ? 'Show screenshot' : 'Show OCR text';
+                ocrToggle.textContent = showOcr ? 'Image' : 'OCR';
+                ocrToggle.title = showOcr ? 'Show screenshot' : 'Show OCR text';
+                ocrToggle.setAttribute('aria-label', ocrToggle.title);
             };
 
-            const actionsDiv = document.createElement('div');
-            actionsDiv.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08);";
-            const toggleBtn = createChatActionButton(
-                "OCR",
-                '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"></path><path d="M9 20h6"></path><path d="M12 4v16"></path></svg>',
-                "Show OCR text",
-                false
-            );
-            toggleBtn.onclick = () => {
+            ocrToggle.onmouseenter = () => {
+                ocrToggle.style.background = 'rgba(255,255,255,0.08)';
+                ocrToggle.style.borderColor = 'rgba(255,107,74,0.24)';
+                ocrToggle.style.color = 'var(--sa-accent-soft)';
+            };
+            ocrToggle.onmouseleave = () => {
+                ocrToggle.style.background = 'rgba(8,8,8,0.76)';
+                ocrToggle.style.borderColor = 'rgba(255,255,255,0.08)';
+                ocrToggle.style.color = 'var(--sa-text-soft)';
+            };
+            ocrToggle.onclick = (event) => {
+                event.stopPropagation();
                 if (!metadata) return;
                 metadata.ocrView = metadata.ocrView === 'ocr' ? 'image' : 'ocr';
                 setOcrView(metadata.ocrView);
                 targetUI?.onSessionChanged?.();
             };
-            actionsDiv.appendChild(toggleBtn);
-            msgDiv.appendChild(actionsDiv);
+            msgDiv.appendChild(ocrToggle);
+            ocrContainer.addEventListener('dblclick', () => showImageModal(imgSrc));
             setOcrView(metadata.ocrView === 'ocr' ? 'ocr' : 'image');
         }
         return;
@@ -173,13 +194,12 @@ function renderUserMessageContent(targetUI, msgDiv, content, base64Image, displa
             : { text: content.content };
         const label = document.createElement('em');
         label.textContent = '(Snippet)';
-        label.style.opacity = "0.8";
-        label.style.fontSize = "0.9em";
+        label.style.cssText = "display: block; margin-bottom: var(--sa-space-2); color: var(--sa-text-muted); font-size: var(--sa-type-caption); line-height: var(--sa-leading-tight); font-style: normal; font-weight: var(--sa-font-medium);";
         msgDiv.appendChild(label);
-        msgDiv.appendChild(document.createElement('br'));
 
         const textSpan = document.createElement('span');
         textSpan.textContent = textPart ? textPart.text : '';
+        textSpan.style.cssText = "display: block; line-height: var(--sa-leading-normal);";
         msgDiv.appendChild(textSpan);
         return;
     }
@@ -187,14 +207,17 @@ function renderUserMessageContent(targetUI, msgDiv, content, base64Image, displa
     msgDiv.innerText = typeof displayText === 'string' ? displayText : String(content);
 }
 
-function buildAssistantLabel(modelLabel, isRegenerated, tokenUsage) {
+function buildAssistantMetaParts(modelLabel, isRegenerated, tokenUsage) {
     const tokenInfo = tokenUsage?.totalTokens ? tokenUsage.totalTokens.toLocaleString() : null;
+    const detailParts = [];
 
-    if (isRegenerated) {
-        return `${modelLabel}${tokenInfo ? ` • ${tokenInfo} tokens` : ''} Regenerated`;
-    }
+    if (tokenInfo) detailParts.push(`${tokenInfo} tokens`);
+    if (isRegenerated) detailParts.push('Regenerated');
 
-    return `${modelLabel}${tokenInfo ? ` • ${tokenInfo} tokens` : ''}`;
+    return {
+        model: modelLabel || 'AI',
+        details: detailParts.join(' / ')
+    };
 }
 
 function renderAssistantMessageContent(targetUI, msgDiv, options) {
@@ -209,13 +232,25 @@ function renderAssistantMessageContent(targetUI, msgDiv, options) {
         tokenUsage
     } = options;
 
+    const labelParts = buildAssistantMetaParts(modelLabel, isRegenerated, tokenUsage);
     const labelDiv = document.createElement("div");
-    labelDiv.style.cssText = "font-size: 10px; color: #ff6b4a; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; display: inline-flex; align-items: center; gap: 4px; background: rgba(255,107,74,0.1); padding: 3px 8px; border-radius: 4px;";
-    labelDiv.textContent = buildAssistantLabel(modelLabel, isRegenerated, tokenUsage);
+    labelDiv.style.cssText = "font-size: var(--sa-type-caption); line-height: var(--sa-leading-tight); color: var(--sa-text-subtle); margin-bottom: var(--sa-space-6); font-weight: var(--sa-font-medium); letter-spacing: 0; display: flex; align-items: center; gap: var(--sa-space-3);";
+
+    const modelSpan = document.createElement("span");
+    modelSpan.textContent = labelParts.model;
+    modelSpan.style.cssText = "color: rgba(255,138,109,0.70);";
+    labelDiv.appendChild(modelSpan);
+
+    if (labelParts.details) {
+        const detailsSpan = document.createElement("span");
+        detailsSpan.textContent = labelParts.details;
+        detailsSpan.style.cssText = "color: var(--sa-text-subtle);";
+        labelDiv.appendChild(detailsSpan);
+    }
     msgDiv.appendChild(labelDiv);
 
     const contentDiv = document.createElement("div");
-    contentDiv.style.cssText = "max-height: 350px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #404040 transparent;";
+    contentDiv.style.cssText = "max-height: 360px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #404040 transparent; color: var(--sa-text-primary); font-size: var(--sa-type-body-large); line-height: var(--sa-leading-reading); padding: 0 var(--sa-space-1) var(--sa-space-1) 0;";
     const cleanText = sanitizeModelText(content);
     if (typeof parseMarkdown === 'function') {
         contentDiv.innerHTML = parseMarkdown(cleanText);
@@ -232,25 +267,33 @@ function renderAssistantMessageContent(targetUI, msgDiv, options) {
     }
 
     const actionsDiv = document.createElement("div");
-    actionsDiv.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08);";
+    actionsDiv.className = 'assistant-actions';
+    actionsDiv.style.cssText = "display: flex; flex-wrap: wrap; align-items: center; gap: var(--sa-space-3); margin-top: var(--sa-space-8); padding-top: var(--sa-space-6); border-top: var(--sa-border-subtle);";
 
+    const copyIcon = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
     const copyBtn = createChatActionButton(
         "Copy",
-        '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
+        copyIcon,
         "Copy entire response",
-        false
+        false,
+        'quiet'
     );
     copyBtn.onclick = () => {
         const responseText = contentDiv.textContent || '';
         navigator.clipboard.writeText(responseText).then(() => {
             const originalHTML = copyBtn.innerHTML;
-            copyBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied';
+            const originalTitle = copyBtn.title;
+            copyBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+            copyBtn.title = 'Copied';
+            copyBtn.setAttribute('aria-label', 'Copied');
             copyBtn.style.borderColor = "#4ade80";
             copyBtn.style.color = "#4ade80";
             setTimeout(() => {
                 copyBtn.innerHTML = originalHTML;
-                copyBtn.style.borderColor = "rgba(255,255,255,0.1)";
-                copyBtn.style.color = "#b8b8b8";
+                copyBtn.title = originalTitle;
+                copyBtn.setAttribute('aria-label', originalTitle);
+                copyBtn.style.borderColor = "transparent";
+                copyBtn.style.color = "var(--sa-button-quiet-text)";
             }, 2000);
         });
     };
@@ -260,7 +303,8 @@ function renderAssistantMessageContent(targetUI, msgDiv, options) {
         "Regenerate",
         '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>',
         "Regenerate from this point",
-        false
+        false,
+        'quiet'
     );
     regenBtn.onclick = () => targetUI.regenerateAtIndex(messageIndex);
     actionsDiv.appendChild(regenBtn);
@@ -272,23 +316,26 @@ function renderAssistantMessageContent(targetUI, msgDiv, options) {
             "Scout",
             '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="2"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2"></path></svg>',
             "Regenerate this answer with Scout vision",
-            false
+            false,
+            'quiet'
         );
         scoutBtn.onclick = () => targetUI.retryWithScoutAtIndex(messageIndex);
         actionsDiv.appendChild(scoutBtn);
     }
 
-    const minimizeBtn = createChatActionButton("Minimize", '-', "Minimize response", false);
+    const minimizeBtn = createChatActionButton("Minimize", '-', "Minimize response", false, 'quiet');
     minimizeBtn.onclick = () => {
         const isMinimized = contentDiv.style.display === 'none';
         if (isMinimized) {
             contentDiv.style.display = 'block';
-            minimizeBtn.innerHTML = '- Minimize';
+            minimizeBtn.innerHTML = '-';
             minimizeBtn.title = 'Minimize response';
+            minimizeBtn.setAttribute('aria-label', 'Minimize response');
         } else {
             contentDiv.style.display = 'none';
-            minimizeBtn.innerHTML = '+ Expand';
+            minimizeBtn.innerHTML = '+';
             minimizeBtn.title = 'Expand response';
+            minimizeBtn.setAttribute('aria-label', 'Expand response');
         }
     };
     actionsDiv.appendChild(minimizeBtn);
@@ -323,24 +370,29 @@ function renderChatMessage(targetUI, options) {
     } = options;
 
     const msgDiv = document.createElement("div");
-    msgDiv.style.cssText = "max-width: 85%; padding: 12px 14px; border-radius: 10px; line-height: 1.5; word-wrap: break-word; font-size: 13px; position: relative; transition: all 0.2s ease;";
+    msgDiv.style.cssText = "max-width: 85%; padding: var(--sa-space-6) var(--sa-space-7); border-radius: var(--sa-radius-lg); line-height: var(--sa-leading-normal); word-wrap: break-word; font-size: var(--sa-type-body); position: relative; transition: background var(--sa-transition-normal), border-color var(--sa-transition-normal);";
     if (Number.isInteger(messageIndex) && messageIndex >= 0) {
         msgDiv.dataset.snipAskMessageIndex = String(messageIndex);
     }
 
     if (role === 'user') {
+        msgDiv.classList.add('user-message');
         msgDiv.style.alignSelf = "flex-end";
-        msgDiv.style.background = "linear-gradient(135deg, #3a3a3a 0%, #2d2d2d 100%)";
-        msgDiv.style.color = "#e8e8e8";
-        msgDiv.style.borderRadius = "10px 10px 2px 10px";
-        msgDiv.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
+        msgDiv.style.background = "var(--sa-surface-control-hover)";
+        msgDiv.style.color = "var(--sa-text-soft)";
+        msgDiv.style.border = "var(--sa-border-default)";
+        msgDiv.style.borderRadius = "var(--sa-radius-lg) var(--sa-radius-lg) var(--sa-space-1) var(--sa-radius-lg)";
+        msgDiv.style.boxShadow = "var(--sa-shadow-sm)";
         renderUserMessageContent(targetUI, msgDiv, content, base64Image, displayText, (imageSrc) => targetUI._showImageModal(imageSrc), messageIndex, metadata);
     } else {
+        msgDiv.classList.add('assistant-message');
         msgDiv.style.alignSelf = "flex-start";
-        msgDiv.style.background = "rgba(255,255,255,0.05)";
-        msgDiv.style.color = "#e8e8e8";
-        msgDiv.style.border = "1px solid rgba(255,255,255,0.08)";
-        msgDiv.style.borderRadius = "10px 10px 10px 2px";
+        msgDiv.style.background = "var(--sa-surface-panel)";
+        msgDiv.style.color = "var(--sa-text-primary)";
+        msgDiv.style.border = "var(--sa-border-default)";
+        msgDiv.style.borderRadius = "var(--sa-radius-lg) var(--sa-radius-lg) var(--sa-radius-lg) var(--sa-space-1)";
+        msgDiv.style.padding = "var(--sa-space-8) var(--sa-space-8) var(--sa-space-7)";
+        msgDiv.style.boxShadow = "var(--sa-shadow-sm)";
         renderAssistantMessageContent(targetUI, msgDiv, {
             content,
             includeActions,
