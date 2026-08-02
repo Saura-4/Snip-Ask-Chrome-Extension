@@ -1,42 +1,13 @@
 // Snip & Ask Guest Mode - Anti-Abuse Worker with Role-Based Access
 // Deploy: wrangler deploy
 //
-// REQUIRED DB SCHEMA MIGRATIONS (run these in D1 console before deploying):
-// 
-// 1. Add 'tokens' column to velocity_events (rowid is built-in to SQLite):
-//    ALTER TABLE velocity_events ADD COLUMN tokens INTEGER DEFAULT 0;
-//
-// 2. Add 'model' column to velocity_events:
-//    ALTER TABLE velocity_events ADD COLUMN model TEXT;
-//
-// 3. Add 'mode' column to velocity_events:
-//    ALTER TABLE velocity_events ADD COLUMN mode TEXT;
-//
-// 4. Add 'token_count' column to usage_stats:
-//    ALTER TABLE usage_stats ADD COLUMN token_count INTEGER DEFAULT 0;
-//
-// 5. Create experimental analytics table:
-//    CREATE TABLE analytics_users (
-//      user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-//      install_id TEXT UNIQUE NOT NULL,
-//      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-//      last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP
-//    );
-//    CREATE TABLE analytics_daily_requests (
-//      id INTEGER PRIMARY KEY AUTOINCREMENT,
-//      user_id INTEGER NOT NULL,
-//      provider TEXT NOT NULL,
-//      model TEXT NOT NULL,
-//      success INTEGER NOT NULL DEFAULT 0,
-//      token_count INTEGER NOT NULL DEFAULT 0,
-//      requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-//      FOREIGN KEY (user_id) REFERENCES analytics_users(user_id)
-//    );
+// Apply cloudflare-worker/migrations/0001_guest_rate_limit_hardening.sql to
+// existing D1 databases before deploying this version.
 
 export default {
     async fetch(request, env) {
         const url = new URL(request.url);
-        const corsHeaders = buildCorsHeaders(request, env, url.pathname === '/analytics/summary');
+        const corsHeaders = buildCorsHeaders(request, env);
 
         if (request.method === 'OPTIONS') {
             const extensionOriginCheck = validateExtensionOrigin(request, env, { preflight: true });
@@ -49,16 +20,12 @@ export default {
             return new Response(null, { headers: corsHeaders });
         }
 
-        if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/analytics/summary') {
-            return handleAnalyticsSummary(env, corsHeaders, request.method === 'HEAD');
-        }
-
         if (request.method !== 'POST') {
             return jsonResponse({ error: 'Method not allowed' }, 405, corsHeaders);
         }
 
         if (url.pathname === '/analytics') {
-            return handleAnalyticsWrite(request, env, corsHeaders);
+            return jsonResponse({ error: 'Analytics are disabled', code: 'NOT_FOUND' }, 404, corsHeaders);
         }
 
         const extensionOriginCheck = validateExtensionOrigin(request, env);
@@ -74,10 +41,14 @@ export default {
                 return jsonResponse({ error: 'Database not configured', code: 'CONFIG_ERROR' }, 500, corsHeaders);
             }
 
-            const body = await request.json();
+            const bodyResult = await readGuestRequestBody(request);
+            if (!bodyResult.ok) {
+                return jsonResponse({ error: bodyResult.error, code: bodyResult.code }, 400, corsHeaders);
+            }
+            const body = bodyResult.body;
             const clientUuid = body._meta?.clientUuid;
             const deviceFingerprint = body._meta?.deviceFingerprint;
-            const parallelCount = body._meta?.parallelCount ?? 1;
+            const parallelCount = normalizeParallelCount(body._meta?.parallelCount);
             const requestedMode = typeof body._meta?.mode === 'string' ? body._meta.mode : null;
 
             if (!clientUuid || !deviceFingerprint) {
@@ -87,9 +58,19 @@ export default {
                 }, 400, corsHeaders);
             }
 
+            const ipHash = await getRequestIpHash(request, env);
+            if (!ipHash) {
+                return jsonResponse({
+                    error: 'Rate-limit configuration is incomplete',
+                    code: 'CONFIG_ERROR'
+                }, 500, corsHeaders);
+            }
+
             // Fallback limits
             const DEFAULT_VELOCITY_LIMIT = parseInt(env.VELOCITY_LIMIT || '10');
             const DEFAULT_DAILY_LIMIT = parseInt(env.HARD_CAP_DAILY || '100');
+            const IP_VELOCITY_LIMIT = parsePositiveInteger(env.IP_VELOCITY_LIMIT, 60);
+            const IP_DAILY_LIMIT = parsePositiveInteger(env.IP_DAILY_LIMIT, 500);
             const VELOCITY_WINDOW_SECONDS = parseInt(env.VELOCITY_WINDOW || '60');
 
             // =================================================================
@@ -163,19 +144,15 @@ export default {
                 const recentEvents = await env.DB.prepare(
                     'SELECT COUNT(*) as count FROM velocity_events WHERE user_id = ? AND requested_at > ?'
                 ).bind(userId, velocityWindow).first();
+                const recentIpEvents = await env.DB.prepare(
+                    'SELECT COUNT(*) as count FROM velocity_events WHERE ip_hash = ? AND requested_at > ?'
+                ).bind(ipHash, velocityWindow).first();
 
-                if (recentEvents?.count >= velocityLimit) {
-                    // Auto-ban logic: Ban the fingerprint (so all accounts on this device are banned)
-                    await env.DB.prepare(
-                        "UPDATE users SET role_id = 'banned', ban_reason = ? WHERE device_fingerprint = ?"
-                    ).bind('Automated: Velocity abuse', deviceFingerprint).run();
-
-                    console.log(`AUTO-BAN: Fingerprint ${deviceFingerprint} (User ${userId}) for velocity`);
-
+                if (recentEvents?.count >= velocityLimit || recentIpEvents?.count >= IP_VELOCITY_LIMIT) {
                     return jsonResponse({
                         error: 'Rate limit exceeded',
-                        code: 'VELOCITY_BAN',
-                        message: 'Too many requests. Device suspended.'
+                        code: 'RATE_LIMITED',
+                        message: 'Too many requests. Please wait a minute and try again.'
                     }, 429, corsHeaders);
                 }
 
@@ -195,6 +172,17 @@ export default {
                         message: 'Daily limit reached. Try again tomorrow.'
                     }, 429, corsHeaders);
                 }
+
+                const ipUsage = await env.DB.prepare(
+                    'SELECT usage_count FROM ip_usage_stats WHERE ip_hash = ?'
+                ).bind(ipHash).first();
+                if ((ipUsage?.usage_count || 0) + incrementBy > IP_DAILY_LIMIT) {
+                    return jsonResponse({
+                        error: 'Guest capacity for this network is exhausted',
+                        code: 'NETWORK_DAILY_LIMIT',
+                        message: 'Please try again tomorrow or add your own API key.'
+                    }, 429, corsHeaders);
+                }
             }
 
             // =================================================================
@@ -208,10 +196,18 @@ export default {
             // Hotfix: If a client is pinned to a deprecated/removed Groq model, rewrite to a stable fallback.
             // This lets us fix Guest Mode immediately without waiting for a Chrome Web Store update.
             const MODEL_FALLBACKS = {
-                'meta-llama/llama-4-maverick-17b-128e-instruct': 'meta-llama/llama-4-scout-17b-16e-instruct'
+                'meta-llama/llama-4-maverick-17b-128e-instruct': 'qwen/qwen3.6-27b',
+                'meta-llama/llama-4-scout-17b-16e-instruct': 'qwen/qwen3.6-27b',
+                'llama-3.1-8b-instant': 'openai/gpt-oss-20b',
+                'llama-3.3-70b-versatile': 'openai/gpt-oss-120b'
             };
             if (typeof groqBody.model === 'string' && MODEL_FALLBACKS[groqBody.model]) {
                 groqBody.model = MODEL_FALLBACKS[groqBody.model];
+            }
+
+            const payloadValidation = validateGuestPayload(groqBody);
+            if (!payloadValidation.ok) {
+                return jsonResponse({ error: payloadValidation.error, code: payloadValidation.code }, 400, corsHeaders);
             }
 
             const requestedModel = typeof body._meta?.requestedModel === 'string'
@@ -219,8 +215,8 @@ export default {
                 : (typeof groqBody.model === 'string' ? groqBody.model : null);
             const routedModel = typeof groqBody.model === 'string' ? groqBody.model : null;
             const velocityResult = await env.DB.prepare(
-                'INSERT INTO velocity_events (user_id, model, mode) VALUES (?, ?, ?) RETURNING id'
-            ).bind(userId, requestedModel || routedModel, requestedMode).first();
+                'INSERT INTO velocity_events (user_id, ip_hash, model, mode) VALUES (?, ?, ?, ?) RETURNING id'
+            ).bind(userId, ipHash, requestedModel || routedModel, requestedMode).first();
             const velocityEventId = velocityResult?.id;
 
             // Get API keys
@@ -232,16 +228,17 @@ export default {
             const AUTO_GUEST_MODEL = 'groq:auto';
             const AUTO_MODEL_CHAIN = [
                 'openai/gpt-oss-20b',
-                'llama-3.3-70b-versatile',
                 'qwen/qwen3-32b',
                 'openai/gpt-oss-120b',
-                'meta-llama/llama-4-scout-17b-16e-instruct'
+                'qwen/qwen3.6-27b'
             ];
+            const VISION_MODEL_CHAIN = ['qwen/qwen3.6-27b'];
             const forceVisionFallback = body._meta?.forceVisionFallback === true;
-            const isAutoModel = !forceVisionFallback && (requestedModel === AUTO_GUEST_MODEL || groqBody.model === AUTO_GUEST_MODEL);
+            const isAutoRequest = requestedModel === AUTO_GUEST_MODEL || groqBody.model === AUTO_GUEST_MODEL;
+            const isAutoModel = isAutoRequest || forceVisionFallback;
             const modelChain = forceVisionFallback
-                ? ['meta-llama/llama-4-scout-17b-16e-instruct']
-                : isAutoModel
+                ? VISION_MODEL_CHAIN
+                : isAutoRequest
                     ? AUTO_MODEL_CHAIN
                     : [groqBody.model];
             let groqResponse = null;
@@ -255,7 +252,7 @@ export default {
             for (const candidateModel of modelChain) {
                 if (!candidateModel) continue;
                 attemptedModels.push(candidateModel);
-                const candidateBody = { ...groqBody, model: candidateModel };
+                const candidateBody = buildGroqRequestBody(groqBody, candidateModel);
 
                 for (const apiKey of apiKeys) {
                     try {
@@ -274,12 +271,6 @@ export default {
                             continue;
                         }
 
-                        if (!isAutoModel) {
-                            groqResponse = candidateResponse;
-                            finalModel = candidateModel;
-                            break modelLoop;
-                        }
-
                         let candidateData = null;
                         try {
                             candidateData = await candidateResponse.json();
@@ -296,6 +287,13 @@ export default {
                         }
 
                         if (!hasUsableAssistantContent(candidateData)) {
+                            if (!isAutoModel) {
+                                return jsonResponse({
+                                    error: 'The selected model returned no final answer. Please try again.',
+                                    code: 'EMPTY_MODEL_RESPONSE',
+                                    model: candidateModel
+                                }, 502, corsHeaders);
+                            }
                             emptyResponseModels.push(candidateModel);
                             lastAutoFailure = { model: candidateModel, status: candidateResponse.status, reason: 'empty_answer' };
                             console.log(`Auto model ${candidateModel} returned no usable answer; trying next model.`);
@@ -363,6 +361,12 @@ export default {
                     ON CONFLICT(user_id) 
                     DO UPDATE SET usage_count = usage_count + ?, token_count = token_count + ?
                 `).bind(userId, incrementBy, tokenUsage, incrementBy, tokenUsage).run();
+                await env.DB.prepare(`
+                    INSERT INTO ip_usage_stats (ip_hash, usage_count)
+                    VALUES (?, ?)
+                    ON CONFLICT(ip_hash)
+                    DO UPDATE SET usage_count = usage_count + ?
+                `).bind(ipHash, incrementBy, incrementBy).run();
             }
 
             return jsonResponse({
@@ -421,7 +425,9 @@ export default {
             if (istHours === 0) {
                 // Clear daily usage stats
                 const usageCleanup = await env.DB.prepare('DELETE FROM usage_stats').run();
+                const ipUsageCleanup = await env.DB.prepare('DELETE FROM ip_usage_stats').run();
                 console.log(`Daily reset at IST midnight: Cleared ${usageCleanup.meta?.changes || 0} usage stats`);
+                console.log(`Daily reset at IST midnight: Cleared ${ipUsageCleanup.meta?.changes || 0} network usage stats`);
 
                 // Also clear all velocity events for a fresh start each day
                 const velocityDailyCleanup = await env.DB.prepare('DELETE FROM velocity_events').run();
@@ -484,76 +490,8 @@ function jsonResponse(data, status, corsHeaders) {
     });
 }
 
-async function handleAnalyticsWrite(request, env, corsHeaders) {
-    try {
-        const extensionOriginCheck = validateExtensionOrigin(request, env);
-        if (!extensionOriginCheck.ok) {
-            return jsonResponse({ error: 'Unauthorized', code: extensionOriginCheck.code }, 403, corsHeaders);
-        }
-
-        if (!env.DB) {
-            return jsonResponse({ error: 'Database not configured', code: 'CONFIG_ERROR' }, 500, corsHeaders);
-        }
-
-        const body = await request.json();
-        const installId = typeof body.installId === 'string' ? body.installId.trim() : '';
-        const provider = typeof body.provider === 'string' ? body.provider.trim() : '';
-        const model = typeof body.model === 'string' ? body.model.trim() : '';
-
-        if (!installId || !provider || !model) {
-            return jsonResponse({ error: 'Missing analytics fields', code: 'BAD_REQUEST' }, 400, corsHeaders);
-        }
-
-        let analyticsUser = await env.DB.prepare(
-            'SELECT user_id FROM analytics_users WHERE install_id = ?'
-        ).bind(installId).first();
-
-        if (!analyticsUser) {
-            await env.DB.prepare(
-                'INSERT INTO analytics_users (install_id) VALUES (?)'
-            ).bind(installId).run();
-
-            analyticsUser = await env.DB.prepare(
-                'SELECT user_id FROM analytics_users WHERE install_id = ?'
-            ).bind(installId).first();
-        } else {
-            await env.DB.prepare(
-                'UPDATE analytics_users SET last_seen_at = CURRENT_TIMESTAMP WHERE user_id = ?'
-            ).bind(analyticsUser.user_id).run();
-        }
-
-        await env.DB.prepare(`
-            INSERT INTO analytics_daily_requests (
-                user_id, provider, model, success, token_count
-            ) VALUES (?, ?, ?, ?, ?)
-        `).bind(
-            analyticsUser.user_id,
-            provider,
-            model,
-            body.success ? 1 : 0,
-            Number(body.tokenCount || 0)
-        ).run();
-
-        return jsonResponse({ ok: true }, 200, corsHeaders);
-    } catch (error) {
-        console.error('Analytics write error:', error);
-        return jsonResponse({ error: 'Analytics error', code: 'ANALYTICS_ERROR' }, 500, corsHeaders);
-    }
-}
-
-function buildCorsHeaders(request, env, isPublicRead = false) {
-    const publicReadHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, X-Extension-Id',
-        'Vary': 'Origin'
-    };
-
+function buildCorsHeaders(request, env) {
     const allowedIds = getAllowedExtensionIds(env);
-    if (isPublicRead) {
-        return publicReadHeaders;
-    }
-
     if (allowedIds.length === 0) {
         return {
             'Access-Control-Allow-Origin': 'null',
@@ -565,9 +503,7 @@ function buildCorsHeaders(request, env, isPublicRead = false) {
 
     const allowedOrigins = getAllowedExtensionOrigins(env);
     const requestOrigin = request.headers.get('Origin');
-    const allowOrigin = isChromeExtensionOrigin(requestOrigin)
-        ? requestOrigin
-        : (allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0]);
+    const allowOrigin = allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0];
 
     return {
         'Access-Control-Allow-Origin': allowOrigin,
@@ -575,6 +511,132 @@ function buildCorsHeaders(request, env, isPublicRead = false) {
         'Access-Control-Allow-Headers': 'Content-Type, X-Extension-Id',
         'Vary': 'Origin'
     };
+}
+
+function buildGroqRequestBody(body, model) {
+    const requestBody = {
+        ...body,
+        model,
+        max_completion_tokens: body.max_completion_tokens || body.max_tokens
+    };
+    delete requestBody.max_tokens;
+
+    if (typeof model === 'string' && model.toLowerCase().includes('qwen3.6-27b')) {
+        requestBody.temperature = 0.7;
+        requestBody.reasoning_effort = 'none';
+        requestBody.reasoning_format = 'hidden';
+        // Qwen 3.6 performs hidden reasoning that consumes the completion budget.
+        // Enforce a minimum so the model has room to produce a final answer.
+        if (requestBody.max_completion_tokens < 1024) {
+            requestBody.max_completion_tokens = 1024;
+        }
+    }
+
+    return requestBody;
+}
+
+const MAX_GUEST_REQUEST_BYTES = 700 * 1024;
+const MAX_GUEST_MESSAGES = 20;
+const MAX_GUEST_TEXT_CHARS = 60_000;
+const MAX_GUEST_IMAGES = 4;
+const MAX_GUEST_IMAGE_CHARS = 700_000;
+const GUEST_MODEL_ALLOWLIST = new Set([
+    'groq:auto',
+    'openai/gpt-oss-20b',
+    'openai/gpt-oss-120b',
+    'qwen/qwen3-32b',
+    'qwen/qwen3.6-27b',
+    'groq/compound-mini',
+    'groq/compound'
+]);
+
+async function readGuestRequestBody(request) {
+    const declaredLength = Number(request.headers.get('Content-Length') || 0);
+    if (declaredLength > MAX_GUEST_REQUEST_BYTES) {
+        return { ok: false, code: 'REQUEST_TOO_LARGE', error: 'Guest request is too large.' };
+    }
+
+    const raw = await request.text();
+    if (new TextEncoder().encode(raw).length > MAX_GUEST_REQUEST_BYTES) {
+        return { ok: false, code: 'REQUEST_TOO_LARGE', error: 'Guest request is too large.' };
+    }
+
+    try {
+        return { ok: true, body: JSON.parse(raw) };
+    } catch {
+        return { ok: false, code: 'INVALID_JSON', error: 'Request body must be valid JSON.' };
+    }
+}
+
+function normalizeParallelCount(value) {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed >= 1 && parsed <= 4 ? parsed : 1;
+}
+
+function parsePositiveInteger(value, fallback) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function validateGuestPayload(body) {
+    if (!body || typeof body !== 'object' || !GUEST_MODEL_ALLOWLIST.has(body.model)) {
+        return { ok: false, code: 'UNSUPPORTED_MODEL', error: 'The requested guest model is not available.' };
+    }
+    if (!Array.isArray(body.messages) || body.messages.length === 0 || body.messages.length > MAX_GUEST_MESSAGES) {
+        return { ok: false, code: 'INVALID_MESSAGES', error: 'Guest requests must contain between 1 and 20 messages.' };
+    }
+    if (!Number.isFinite(body.max_tokens) || body.max_tokens < 1 || body.max_tokens > 2048) {
+        return { ok: false, code: 'INVALID_MAX_TOKENS', error: 'Invalid guest output-token limit.' };
+    }
+    if (body.temperature !== undefined && (!Number.isFinite(body.temperature) || body.temperature < 0 || body.temperature > 1)) {
+        return { ok: false, code: 'INVALID_TEMPERATURE', error: 'Invalid guest temperature.' };
+    }
+
+    let textChars = 0;
+    let imageCount = 0;
+    for (const message of body.messages) {
+        if (!message || !['system', 'user', 'assistant'].includes(message.role)) {
+            return { ok: false, code: 'INVALID_MESSAGES', error: 'Guest messages have an invalid role.' };
+        }
+        const parts = Array.isArray(message.content) ? message.content : [message.content];
+        for (const part of parts) {
+            const text = typeof part === 'string' ? part : part?.type === 'text' ? part.text : null;
+            if (typeof text === 'string') {
+                textChars += text.length;
+                continue;
+            }
+            const imageUrl = part?.type === 'image_url' ? part.image_url?.url : null;
+            if (typeof imageUrl === 'string' && imageUrl.startsWith('data:image/')) {
+                imageCount += 1;
+                if (imageUrl.length > MAX_GUEST_IMAGE_CHARS) {
+                    return { ok: false, code: 'REQUEST_TOO_LARGE', error: 'Guest image is too large.' };
+                }
+                continue;
+            }
+            return { ok: false, code: 'INVALID_MESSAGES', error: 'Guest message content is invalid.' };
+        }
+    }
+
+    if (textChars > MAX_GUEST_TEXT_CHARS || imageCount > MAX_GUEST_IMAGES) {
+        return { ok: false, code: 'REQUEST_TOO_LARGE', error: 'Guest request exceeds content limits.' };
+    }
+    return { ok: true };
+}
+
+async function getRequestIpHash(request, env) {
+    const ip = request.headers.get('CF-Connecting-IP');
+    const secret = env.RATE_LIMIT_HMAC_KEY;
+    if (!ip || !secret) return null;
+
+    const key = await crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+    );
+    const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(ip));
+    return Array.from(new Uint8Array(signature), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function getAllowedExtensionIds(env) {
@@ -605,7 +667,7 @@ function validateExtensionOrigin(request, env, options = {}) {
     const providedExtId = request.headers.get('X-Extension-Id');
 
     if (preflight) {
-        if (origin && !isChromeExtensionOrigin(origin)) {
+        if (!allowedOrigins.includes(origin)) {
             return { ok: false, code: 'INVALID_ORIGIN' };
         }
         return { ok: true };
@@ -625,55 +687,12 @@ function validateExtensionOrigin(request, env, options = {}) {
     return { ok: true };
 }
 
-async function handleAnalyticsSummary(env, corsHeaders, headOnly = false) {
-    try {
-        if (!env.DB) {
-            return jsonResponse({ error: 'Database not configured', code: 'CONFIG_ERROR' }, 500, corsHeaders);
-        }
-
-        const totals = await env.DB.prepare(`
-            SELECT
-                COUNT(*) as total_requests,
-                COUNT(DISTINCT adr.user_id) as total_installs,
-                SUM(CASE WHEN adr.success = 1 THEN 1 ELSE 0 END) as successful_requests,
-                SUM(adr.token_count) as total_tokens
-            FROM analytics_daily_requests adr
-        `).first();
-
-        const byModel = await env.DB.prepare(`
-            SELECT
-                adr.provider,
-                adr.model,
-                COUNT(*) as requests,
-                COUNT(DISTINCT adr.user_id) as installs,
-                SUM(CASE WHEN adr.success = 1 THEN 1 ELSE 0 END) as successes,
-                SUM(CASE WHEN adr.success = 0 THEN 1 ELSE 0 END) as failures,
-                SUM(adr.token_count) as total_tokens
-            FROM analytics_daily_requests adr
-            GROUP BY adr.provider, adr.model
-            ORDER BY requests DESC, adr.provider ASC, adr.model ASC
-            LIMIT 100
-        `).all();
-
-        const payload = {
-            experimental: true,
-            totals: totals || {},
-            byModel: byModel?.results || []
-        };
-
-        if (headOnly) {
-            return new Response(null, {
-                status: 200,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
-        }
-
-        return jsonResponse(payload, 200, corsHeaders);
-    } catch (error) {
-        console.error('Analytics summary error:', error);
-        return jsonResponse({ error: 'Analytics summary error', code: 'ANALYTICS_ERROR' }, 500, corsHeaders);
-    }
-}
+export {
+    GUEST_MODEL_ALLOWLIST,
+    buildGroqRequestBody,
+    normalizeParallelCount,
+    validateGuestPayload
+};
 
 
 

@@ -12,7 +12,7 @@ Snip any part of your screen and ask AI to explain, solve, or debug it. Supports
 - **Universal Capture**: Works on any website, local file, or PDF open in Chrome.
 - **Right-Click Ask**: Simply select text or an image, right-click, and ask the AI instantly via the context menu.
 - **Custom Modes**: Create and tailor custom system prompts and modes for your specific workflows.
-- **Temporary Chat**: Conversations are ephemeral and focused on the task at hand for privacy by default.
+- **Temporary Chat**: Conversations can be cleared from the side panel and are intended for focused, task-specific use.
 - **Compare Mode**: Ask two different models simultaneously and compare their answers side-by-side to verify truth.
 - **On-Device OCR**: Built-in text extraction using Tesseract.js ensures text-only models can understand screen content.
 
@@ -22,9 +22,9 @@ Snip any part of your screen and ask AI to explain, solve, or debug it. Supports
 - **Language**: Vanilla JavaScript (ES6+), HTML, CSS
 - **OCR Engine**: Tesseract.js (Client-side, WebAssembly)
 - **Math Rendering**: KaTeX
-- **Security**: DOMPurify
+- **Security**: DOMPurify, strict content limits, and provider-specific host permissions
 - **Backend/Rate Limiting**: Cloudflare Workers (for Guest Mode)
-- **Database**: Cloudflare D1 (Analytics and Rate Limiting state)
+- **Database**: Cloudflare D1 (rate-limiting state only)
 - **Deployment**: Chrome Web Store
 
 ## Prerequisites
@@ -80,8 +80,8 @@ cd Snip-Ask-Chrome-Extension
 2. Content script captures the screen or text and sends it to the background worker.
 3. If an image is captured and the selected AI model is text-only, the background worker delegates the image to the offscreen document for local OCR via Tesseract.js.
 4. Background worker routes the query to the appropriate AI service (Groq, Gemini, OpenRouter, or local Ollama).
-5. If using Guest Mode, the request routes through the Cloudflare Worker proxy which enforces rate limits and tracks analytics via D1.
-6. The AI response is streamed back to the popup or side panel UI and rendered using KaTeX and DOMPurify.
+5. If using Guest Mode, the request routes through the Cloudflare Worker proxy, which enforces request, device, and network rate limits via D1.
+6. The AI response is returned to the popup or side panel UI and rendered using KaTeX and DOMPurify.
 
 ## Environment Variables
 
@@ -92,6 +92,7 @@ Environment variables are strictly used for the Cloudflare Worker proxy (`cloudf
 | Variable | Description | Example |
 | --- | --- | --- |
 | `GROQ_API_KEY` | Proxy API key for Groq Guest Mode | `gsk_...` |
+| `RATE_LIMIT_HMAC_KEY` | Worker secret used to hash Cloudflare client IPs | Set with `wrangler secret put` |
 
 ### Optional (Cloudflare Worker)
 
@@ -99,6 +100,8 @@ Environment variables are strictly used for the Cloudflare Worker proxy (`cloudf
 | --- | --- | --- |
 | `VELOCITY_LIMIT` | Max requests per minute | `10` |
 | `HARD_CAP_DAILY` | Max requests per day | `100` |
+| `IP_VELOCITY_LIMIT` | Max guest requests per minute per network | `60` |
+| `IP_DAILY_LIMIT` | Max guest requests per day per network | `500` |
 | `ALLOWED_EXTENSION_ID` | CORS allowed origin | `bhbmfojjmimjpdkebhhipkffjkcglofo` |
 
 ## Available Scripts
@@ -115,7 +118,7 @@ For the Cloudflare Worker:
 
 ## Testing
 
-No automated test suite is currently configured. Manual testing is required by loading the unpacked extension into Chrome.
+Run the dependency-free unit tests with `npm test`. They cover model routing, token-budget behavior, and guest-request validation. Manual browser checks are still required for capture, OCR, side-panel handoff, and each enabled provider.
 
 1. Navigate to `chrome://extensions`.
 2. Reload the extension after making file changes.

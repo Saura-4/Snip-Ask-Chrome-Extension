@@ -6,7 +6,7 @@ function getMissingConfigMessage(model, storage) {
     }
 
     if (isGoogleModel(model) && !storage.geminiKey) {
-        return 'Please set Google API Key';
+        return 'Please set Gemini API Key';
     }
 
     if (isOpenRouterModel(model) && !storage.openrouterKey) {

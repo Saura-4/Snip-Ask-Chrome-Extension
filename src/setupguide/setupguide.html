@@ -202,6 +202,57 @@
             transform: translateY(-2px);
         }
 
+        .provider-logo-inline {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            flex: 0 0 18px;
+            color: #bbb;
+        }
+
+        .provider-logo-inline img {
+            display: block;
+            width: 16px;
+            height: 16px;
+            max-width: 16px;
+            max-height: 16px;
+            object-fit: contain;
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .provider-logo-inline-groq img {
+            width: 22px;
+            height: auto;
+            max-width: 22px;
+            max-height: 12px;
+        }
+
+        .provider-logo-inline-groq {
+            width: 22px;
+            flex-basis: 22px;
+        }
+
+        .provider-logo-inline-openai img,
+        .provider-logo-inline-ollama img {
+            filter: invert(1) brightness(1.25);
+            opacity: 0.9;
+        }
+
+        .step-number .provider-logo-inline {
+            width: 22px;
+            height: 22px;
+        }
+
+        .step-number .provider-logo-inline img {
+            width: 20px;
+            height: 20px;
+            max-width: 20px;
+            max-height: 20px;
+        }
+
         .btn-primary-action {
             background: #ee4b06;
             border: none;
@@ -288,6 +339,9 @@
         }
 
         .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
             color: #bbb;
@@ -380,13 +434,30 @@
                         Unlock the full power of Snip & Ask with an API key from your preferred provider.
                         <div class="btn-group">
                             <a href="https://console.groq.com/keys" target="_blank" class="btn btn-provider">
-                                🚀 Groq
+                                <span class="provider-logo-inline provider-logo-inline-groq" aria-hidden="true">
+                                    <img src="../../assets/logos/groq/Groq Logo_Orange 25.svg" alt="" draggable="false">
+                                </span>
+                                Groq
                             </a>
                             <a href="https://aistudio.google.com/app/apikey" target="_blank" class="btn btn-provider">
-                                ✨ Google Gemini
+                                <span class="provider-logo-inline" aria-hidden="true">
+                                    <img src="../../assets/logos/gemini/gemini-color.svg" alt="" draggable="false">
+                                </span>
+                                Gemini
+                            </a>
+                            <a href="https://platform.openai.com/api-keys" target="_blank" class="btn btn-provider">
+                                <span class="provider-logo-inline provider-logo-inline-openai" aria-hidden="true">
+                                    <img src="../../assets/logos/openai/openai-svgrepo-com.svg" alt=""
+                                        draggable="false">
+                                </span>
+                                OpenAI
                             </a>
                             <a href="https://openrouter.ai/keys" target="_blank" class="btn btn-provider">
-                                🌐 OpenRouter
+                                <span class="provider-logo-inline" aria-hidden="true">
+                                    <img src="../../assets/logos/openrouter/openrouter-color.svg" alt=""
+                                        draggable="false">
+                                </span>
+                                OpenRouter
                             </a>
                         </div>
                     </div>
@@ -457,7 +528,11 @@
             Local AI Setup (Ollama)</h2>
         <div class="card">
             <div class="step">
-                <div class="step-number">🦙</div>
+                <div class="step-number">
+                    <span class="provider-logo-inline provider-logo-inline-ollama" aria-hidden="true">
+                        <img src="../../assets/logos/ollama/ollama.svg" alt="" draggable="false">
+                    </span>
+                </div>
                 <div class="step-content">
                     <div class="step-title">Enable Local Models</div>
                     <div class="step-desc">
@@ -598,10 +673,36 @@
 
         <div class="footer">
             <div class="provider-badges">
-                <span class="badge">🚀 Groq</span>
-                <span class="badge">✨ Google Gemini</span>
-                <span class="badge">🌐 OpenRouter</span>
-                <span class="badge">🦙 Ollama</span>
+                <span class="badge">
+                    <span class="provider-logo-inline provider-logo-inline-groq" aria-hidden="true">
+                        <img src="../../assets/logos/groq/Groq Logo_Orange 25.svg" alt="" draggable="false">
+                    </span>
+                    Groq
+                </span>
+                <span class="badge">
+                    <span class="provider-logo-inline" aria-hidden="true">
+                        <img src="../../assets/logos/gemini/gemini-color.svg" alt="" draggable="false">
+                    </span>
+                    Gemini
+                </span>
+                <span class="badge">
+                    <span class="provider-logo-inline provider-logo-inline-openai" aria-hidden="true">
+                        <img src="../../assets/logos/openai/openai-svgrepo-com.svg" alt="" draggable="false">
+                    </span>
+                    OpenAI
+                </span>
+                <span class="badge">
+                    <span class="provider-logo-inline" aria-hidden="true">
+                        <img src="../../assets/logos/openrouter/openrouter-color.svg" alt="" draggable="false">
+                    </span>
+                    OpenRouter
+                </span>
+                <span class="badge">
+                    <span class="provider-logo-inline provider-logo-inline-ollama" aria-hidden="true">
+                        <img src="../../assets/logos/ollama/ollama.svg" alt="" draggable="false">
+                    </span>
+                    Ollama
+                </span>
                 <span class="badge" title="Powered by Tesseract.js">📝 Tesseract.js</span>
             </div>
 
@@ -625,7 +726,7 @@
                     Discord
                 </a>
             </div>
-            <p style="margin-top: 15px; color: #444; font-size: 11px;">Version 1.0 • Built with ❤️</p>
+            <p style="margin-top: 15px; color: #444; font-size: 11px;">Version 2.0 • Built by Saurav</p>
         </div>
     </div>
 

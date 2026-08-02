@@ -1,5 +1,5 @@
 function sanitizeUserSnip(rawText) {
-    return rawText
+    return String(rawText ?? '')
         .replace(/</g, "\\<")
         .replace(/>/g, "\\>");
 }

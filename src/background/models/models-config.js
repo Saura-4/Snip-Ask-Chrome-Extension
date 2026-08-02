@@ -10,11 +10,9 @@ export const ALL_MODELS = {
     groq: [
         { value: 'groq:auto', name: 'Auto' },
         { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B (Fast)' },
-        { value: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
-        { value: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (Text)' },
-        { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout (Vision, Preview)' },
         { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B (Text)' },
+        { value: 'qwen/qwen3.6-27b', name: 'Qwen 3.6 27B (Vision)' },
         { value: 'groq/compound-mini', name: 'Compound Mini (Tools, Slower)' },
         { value: 'groq/compound', name: 'Compound (Tools, Slower)' },
         { value: 'groq:custom', name: 'Custom Model' }
@@ -68,11 +66,9 @@ export const CHAT_WINDOW_MODELS = {
     groq: [
         { value: 'groq:auto', name: 'Auto' },
         { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B' },
-        { value: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
-        { value: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B' },
-        { value: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout' },
         { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B' },
+        { value: 'qwen/qwen3.6-27b', name: 'Qwen 3.6 27B' },
         { value: 'groq/compound-mini', name: 'Compound Mini' },
         { value: 'groq/compound', name: 'Compound' }
     ],
@@ -116,7 +112,7 @@ export const CHAT_WINDOW_MODELS = {
  */
 export const PROVIDER_LABELS = {
     groq: 'Groq',
-    google: 'Google (Gemini)',
+    google: 'Gemini',
     openai: 'OpenAI',
     openrouter: 'OpenRouter',
     ollama: 'Ollama (Local)'

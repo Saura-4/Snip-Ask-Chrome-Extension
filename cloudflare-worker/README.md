@@ -1,106 +1,53 @@
-# Cloudflare Worker - Role-Based Anti-Abuse System
+# Snip & Ask Guest Worker
 
-Proxies Groq API requests for Guest Mode with **role-based access control** and **API key rotation**.
+The Worker proxies bounded Guest Mode requests to Groq. It rotates configured Groq keys and applies per-installation, per-device, and per-network limits. It does not provide strong authentication: extension IDs and browser fingerprints are client-visible signals, so production deployments should also enable Cloudflare WAF/rate-limit rules.
 
-## Quick Setup
+## New database
+
+Create a new D1 database, set its binding in `wrangler.toml`, then apply the bootstrap schema:
 
 ```bash
-# 1. Login
-wrangler login
-
-# 2. Initialize/reset schema (WARNING: clears existing data)
-wrangler d1 execute snip-ask-guest-db --file=./schema.sql
-
-# 3. Deploy
+wrangler d1 execute snip-ask-guest-db --remote --file=./schema.sql
 wrangler deploy
 ```
 
-## Live Migration
+The bootstrap schema is non-destructive. Do not use it as an upgrade procedure for an existing database.
 
-For an existing live database, add the new columns without resetting data:
+## Existing database upgrade
+
+Before deploying this Worker version, apply the one-time migration exactly once:
 
 ```bash
-wrangler d1 execute snip-ask-guest-db --command="ALTER TABLE velocity_events ADD COLUMN tokens INTEGER DEFAULT 0"
-wrangler d1 execute snip-ask-guest-db --command="ALTER TABLE velocity_events ADD COLUMN model TEXT"
-wrangler d1 execute snip-ask-guest-db --command="ALTER TABLE velocity_events ADD COLUMN mode TEXT"
-wrangler d1 execute snip-ask-guest-db --command="ALTER TABLE usage_stats ADD COLUMN token_count INTEGER DEFAULT 0"
+wrangler d1 execute snip-ask-guest-db --remote --file=./migrations/0001_guest_rate_limit_hardening.sql
 ```
 
-## Required Environment Variables
+The migration adds token accounting and keyed network-rate-limit storage. Record its execution in your release log; SQLite `ADD COLUMN` migrations cannot safely be rerun.
 
-In [Cloudflare Dashboard](https://dash.cloudflare.com) → Workers → Settings → Variables:
+## Required configuration
+
+Set these in the Cloudflare dashboard or with Wrangler secrets:
 
 | Variable | Required | Description |
-|----------|----------|-------------|
-| `GROQ_API_KEY` | Yes | Primary Groq key (encrypted) |
-| `GROQ_API_KEY_2` | No | Backup key for rotation |
-| `GROQ_API_KEY_3` | No | Third backup |
-| `ALLOWED_EXTENSION_ID` | Recommended | Your Chrome extension ID |
+| --- | --- | --- |
+| `GROQ_API_KEY` | Yes | Primary Groq key; store as a secret. |
+| `RATE_LIMIT_HMAC_KEY` | Yes | Random secret used to HMAC the Cloudflare-supplied client IP. |
+| `ALLOWED_EXTENSION_IDS` | Yes | Comma-separated Chrome extension IDs allowed to call Guest Mode. |
+| `GROQ_API_KEY_2`, `GROQ_API_KEY_3` | No | Backup Groq keys for rotation. |
+| `VELOCITY_LIMIT` | No | Per-installation requests per minute; default `10`. |
+| `HARD_CAP_DAILY` | No | Per-installation daily requests; default `100`. |
+| `IP_VELOCITY_LIMIT` | No | Per-network requests per minute; default `60`. |
+| `IP_DAILY_LIMIT` | No | Per-network daily requests; default `500`. |
 
-## Role System
-
-| Role | ID | Daily Limit | Velocity Limit | Description |
-|------|----|-------------|----------------|-------------|
-| `banned` | 0 | 0 | 0 | Blocked from all access |
-| `guest` | 1 | 100 | 10/min | Default for new users |
-| `admin` | 2 | Unlimited | Unlimited | Bypass all checks |
-
-### Adding New Roles
-
-```sql
--- Add a new role (no other table changes needed)
-INSERT INTO roles (id, name, daily_limit, velocity_limit, description) 
-VALUES (3, 'tester', 50, 15, 'Beta testers');
-```
-
-## Anti-Abuse Flow
-
-```
-Request → Banned? → Admin? → Velocity? → Daily Limit? → LLM API
-            ↓         ↓          ↓            ↓
-         REJECT    BYPASS    AUTO-BAN      REJECT
-```
-
-## Admin Commands
+Example secret setup:
 
 ```bash
-# View all users with their roles
-wrangler d1 execute snip-ask-guest-db --command="SELECT u.id, u.client_uuid, r.name as role, u.created_at FROM users u JOIN roles r ON u.role_id = r.id"
-
-# View banned users
-wrangler d1 execute snip-ask-guest-db --command="SELECT * FROM users WHERE role_id = 0"
-
-# Promote a user to admin
-wrangler d1 execute snip-ask-guest-db --command="UPDATE users SET role_id = 2 WHERE client_uuid = 'target-uuid'"
-
-# Ban a user
-wrangler d1 execute snip-ask-guest-db --command="UPDATE users SET role_id = 0, ban_reason = 'Manual ban' WHERE client_uuid = 'target-uuid'"
-
-# Unban a user (set back to guest)
-wrangler d1 execute snip-ask-guest-db --command="UPDATE users SET role_id = 1, ban_reason = NULL WHERE client_uuid = 'target-uuid'"
-
-# View top users today
-wrangler d1 execute snip-ask-guest-db --command="SELECT u.client_uuid, d.usage_count FROM daily_usage d JOIN users u ON d.user_id = u.id WHERE d.usage_date = date('now') ORDER BY d.usage_count DESC LIMIT 10"
-
-# View recent requests with model + mode + token usage
-wrangler d1 execute snip-ask-guest-db --command="SELECT v.requested_at, u.client_uuid, v.model, v.mode, v.tokens FROM velocity_events v JOIN users u ON v.user_id = u.user_id ORDER BY v.id DESC LIMIT 20"
-
-# View all roles
-wrangler d1 execute snip-ask-guest-db --command="SELECT * FROM roles"
+wrangler secret put GROQ_API_KEY
+wrangler secret put RATE_LIMIT_HMAC_KEY
 ```
 
-## Schema Overview
+## Operational notes
 
-```
-roles (lookup table)
-  ├── id, name, daily_limit, velocity_limit, description
-  │
-users (one per client)
-  ├── id, client_uuid, device_fingerprint, role_id (FK → roles)
-  │
-request_log (velocity tracking)
-  ├── id, user_id (FK → users), requested_at
-  │
-daily_usage (quota tracking)
-  └── id, user_id (FK → users), usage_date, usage_count
-```
+- Velocity events are retained for one hour; daily counters reset at midnight IST.
+- The Worker accepts only its configured Guest Mode model allowlist, a maximum of 20 messages, four images, 700 KiB requests, and 2,048 output tokens.
+- `/analytics` and `/analytics/summary` are disabled. The D1 schema contains rate-limit data only.
+- Use Cloudflare WAF/rate-limit rules as a second layer against non-browser clients and distributed abuse.

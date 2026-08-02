@@ -320,7 +320,7 @@ function handleSnipComplete(rect) {
 
                     if (chrome.runtime.lastError || !ocrResponse) {
                         if (isAutoGuestModel) {
-                            console.debug("Auto OCR unavailable; using Scout fallback:", chrome.runtime.lastError?.message || "No OCR response");
+                            console.debug("Auto OCR unavailable; using vision fallback:", chrome.runtime.lastError?.message || "No OCR response");
                             sendImageFallback();
                         } else {
                             showErrorToast("OCR Failed: " + (chrome.runtime.lastError?.message || "Unknown error"));
@@ -353,7 +353,7 @@ function handleSnipComplete(rect) {
                         console.debug("OCR Empty or Failed:", ocrResponse.error || 'No readable text');
                         if (isAutoGuestModel || isVisionModel(currentModel)) {
                             if (isAutoGuestModel) {
-                                console.debug("Auto OCR unreliable; using Scout fallback:", ocrResponse.reason || ocrResponse.error || 'unreliable_ocr');
+                                console.debug("Auto OCR unreliable; using vision fallback:", ocrResponse.reason || ocrResponse.error || 'unreliable_ocr');
                             }
                             sendImageFallback();
                         } else {

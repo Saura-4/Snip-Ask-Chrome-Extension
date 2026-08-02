@@ -38,7 +38,7 @@ const DEFAULT_MODES = [
 
 const API_KEY_CONFIG = {
   groq: { id: 'apiKey', placeholder: 'Groq Key (gsk_...)', type: 'password', storageKey: 'groqKey' },
-  google: { id: 'geminiKey', placeholder: 'Google Key (AIza...)', type: 'password', storageKey: 'geminiKey' },
+  google: { id: 'geminiKey', placeholder: 'Gemini Key (AIza...)', type: 'password', storageKey: 'geminiKey' },
   openai: { id: 'openaiKey', placeholder: 'OpenAI Key (sk-...)', type: 'password', storageKey: 'openaiKey' },
   openrouter: { id: 'openrouterKey', placeholder: 'OpenRouter Key (sk-or-...)', type: 'password', storageKey: 'openrouterKey' },
   ollama: { id: 'ollamaHost', placeholder: 'Ollama URL (http://localhost:11434)', type: 'text', storageKey: 'ollamaHost' }
@@ -395,6 +395,24 @@ function loadApiKeyInputs(enabledProviders, savedValues) {
           return;
         }
 
+        if (provider === 'ollama' && value) {
+          let originPattern;
+          try {
+            const host = new URL(value);
+            if (!['http:', 'https:'].includes(host.protocol)) throw new Error('Unsupported protocol');
+            originPattern = `${host.protocol}//${host.hostname}/*`;
+          } catch {
+            alert('Enter a valid HTTP or HTTPS Ollama URL.');
+            return;
+          }
+
+          const granted = await chrome.permissions.request({ origins: [originPattern] });
+          if (!granted) {
+            alert('Snip & Ask needs access to that Ollama host before it can connect.');
+            return;
+          }
+        }
+
         const wasGuestMode = isGuestModeActive;
         await chrome.storage.local.set({ [config.storageKey]: value });
         lastSavedValue = value;
@@ -644,7 +662,7 @@ function setupEventListeners() {
   // Reset All Keys
   document.getElementById('resetAllKeys')?.addEventListener('click', async (e) => {
     e.preventDefault();
-    if (confirm('⚠️ Are you sure you want to reset all API keys? This will clear all stored keys (Groq, Google, OpenAI, OpenRouter, and Ollama host).')) {
+    if (confirm('⚠️ Are you sure you want to reset all API keys? This will clear all stored keys (Groq, Gemini, OpenAI, OpenRouter, and Ollama host).')) {
       await chrome.storage.local.remove(['groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost']);
       alert('✅ All API keys have been cleared.');
       await loadSettings(); // Reload to clear the input fields

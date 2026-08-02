@@ -182,12 +182,16 @@ async function makeGuestRequest(requestBody, externalSignal = null) {
         throw new Error(data.message || 'Access denied. Please contact support.');
     }
 
-    if (data.code === 'VELOCITY_BAN') {
-        throw new Error('Too many requests. Please slow down and try again later.');
+    if (data.code === 'RATE_LIMITED') {
+        throw new Error(data.message || 'Too many requests. Please wait a minute and try again.');
     }
 
     if (data.code === 'HARD_CAP') {
         throw new Error(data.message || 'Daily limit reached. Get your own free API key at console.groq.com!');
+    }
+
+    if (data.code === 'NETWORK_DAILY_LIMIT') {
+        throw new Error(data.message || 'Guest capacity for this network is exhausted. Please try again tomorrow or add your own API key.');
     }
 
     if (data.code === 'API_EXHAUSTED') {

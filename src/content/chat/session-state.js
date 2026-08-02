@@ -58,14 +58,14 @@
         const selectedModel = getSessionModel(apiResponse, responseContext);
         const usedOCR = apiResponse.usedOCR === true;
         const isGuestResponse = Boolean(apiResponse.guestInfo);
-        const isScoutResponse = typeof responseModel === 'string' &&
-            responseModel.toLowerCase().includes('llama-4-scout');
+        const isVisionFallbackResponse = typeof responseModel === 'string' &&
+            responseModel.toLowerCase().includes('qwen3.6-27b');
         const assistantMetadata = {
             selectedModel,
             responseModel,
             usedOCR,
             isGuestResponse,
-            scoutRetryEligible: selectedModel === 'groq:auto' && usedOCR && isGuestResponse && !isScoutResponse,
+            visionRetryEligible: selectedModel === 'groq:auto' && usedOCR && isGuestResponse && !isVisionFallbackResponse,
             tokenUsage: apiResponse.tokenUsage || null
         };
 

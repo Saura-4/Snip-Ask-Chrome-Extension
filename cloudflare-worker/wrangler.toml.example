@@ -7,6 +7,8 @@ compatibility_date = "2024-01-01"
 VELOCITY_LIMIT = "10"      # Requests per minute before auto-ban
 VELOCITY_WINDOW = "60"     # Seconds for velocity check
 HARD_CAP_DAILY = "100"     # Max requests per day per device
+IP_VELOCITY_LIMIT = "60"   # Max guest requests per minute per network
+IP_DAILY_LIMIT = "500"     # Max guest requests per day per network
 
 # D1 Database binding
 # Create your database: wrangler d1 create snip-ask-guest-db
@@ -25,3 +27,4 @@ crons = ["0 * * * *"]
 # GROQ_API_KEY_2 = Backup key (optional, encrypted)
 # GROQ_API_KEY_3 = Third backup (optional, encrypted)
 # ALLOWED_EXTENSION_ID = Your Chrome extension ID after publishing
+# RATE_LIMIT_HMAC_KEY = Required secret used to hash Cloudflare's client IP

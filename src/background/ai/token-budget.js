@@ -20,11 +20,8 @@ const MODEL_CONTEXT_BUDGETS = [
     { pattern: 'openrouter/free', contextWindow: 200000, maxOutputTokens: 8192 },
 
     { pattern: 'groq:auto', contextWindow: 131072, maxOutputTokens: 8192 },
-    { pattern: 'llama-3.3', contextWindow: 131072, maxOutputTokens: 32768 },
-    { pattern: 'llama-3.1', contextWindow: 131072, maxOutputTokens: 8192 },
-    { pattern: 'llama-4', contextWindow: 131072, maxOutputTokens: 8192 },
     { pattern: 'gpt-oss', contextWindow: 131072, maxOutputTokens: 32768 },
-    { pattern: 'qwen', contextWindow: 131072, maxOutputTokens: 8192 },
+    { pattern: 'qwen', contextWindow: 131072, maxOutputTokens: 32768 },
     { pattern: 'compound', contextWindow: 131072, maxOutputTokens: 8192 },
     { pattern: 'groq:', contextWindow: 131072, maxOutputTokens: 8192 },
     { pattern: 'openrouter', contextWindow: 64000, maxOutputTokens: 8192 }
