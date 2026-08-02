@@ -21,7 +21,7 @@ export function populateModelSelect({
 
     const visibleModels = isGuestModeActive
       ? models.filter((model) => !model.value.endsWith(':custom') && !model.isCustom)
-      : models.filter((model) => hiddenModels?.[model.value] !== true);
+      : models.filter((model) => hiddenModels?.[model.value] !== true && model.value !== 'groq:auto');
 
     const enabledModelsInProvider = isGuestModeActive && provider === 'groq'
       ? visibleModels

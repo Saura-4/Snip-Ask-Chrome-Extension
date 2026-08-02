@@ -245,6 +245,12 @@ async function loadModels(enabledProviders, enabledModels, hiddenModels, selecte
   const customSavedModels = await getCustomSavedModels();
   const mergedModels = getMergedModelsWithCustom(ALL_MODELS, customSavedModels);
 
+  // Edge case: if leaving guest mode with Auto selected, fallback to Qwen 3.6 Vision
+  if (!isGuestModeActive && selectedModel === 'groq:auto') {
+    selectedModel = 'qwen/qwen3.6-27b';
+    await chrome.storage.local.set({ selectedModel });
+  }
+
   const selection = populateModelSelect({
     modelSelect,
     mergedModels,
