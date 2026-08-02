@@ -310,17 +310,17 @@ function renderAssistantMessageContent(targetUI, msgDiv, options) {
     actionsDiv.appendChild(regenBtn);
 
     if (!isError &&
-        typeof targetUI._shouldShowScoutRetry === 'function' &&
-        targetUI._shouldShowScoutRetry(messageIndex, metadata)) {
-        const scoutBtn = createChatActionButton(
-            "Scout",
+        typeof targetUI._shouldShowVisionRetry === 'function' &&
+        targetUI._shouldShowVisionRetry(messageIndex, metadata)) {
+        const visionBtn = createChatActionButton(
+            "Vision",
             '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="2"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2"></path></svg>',
-            "Regenerate this answer with Scout vision",
+            "Regenerate this answer with the vision fallback model",
             false,
             'quiet'
         );
-        scoutBtn.onclick = () => targetUI.retryWithScoutAtIndex(messageIndex);
-        actionsDiv.appendChild(scoutBtn);
+        visionBtn.onclick = () => targetUI.retryWithVisionAtIndex(messageIndex);
+        actionsDiv.appendChild(visionBtn);
     }
 
     const minimizeBtn = createChatActionButton("Minimize", '-', "Minimize response", false, 'quiet');

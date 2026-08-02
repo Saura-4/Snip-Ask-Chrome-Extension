@@ -5,10 +5,37 @@ import { getBudgetedMessages, getMaxTokensForMode } from '../token-budget.js';
 import { CLOUD_TIMEOUT_MS, fetchWithTimeout } from '../transport.js';
 import { createTextSnipMessage, stripThinkingTags } from '../text-utils.js';
 
+function isQwen36Model(modelName) {
+    return typeof modelName === 'string' && modelName.toLowerCase().includes('qwen3.6-27b');
+}
+
+function buildGroqRequestBody({ messages, model, mode }) {
+    const requestBody = {
+        messages,
+        model,
+        temperature: isQwen36Model(model) ? 0.7 : 0.3,
+        max_completion_tokens: getMaxTokensForMode(mode, model)
+    };
+
+    // Qwen 3.6 reasons by default. In the extension's short interactive modes,
+    // that can consume the entire completion budget before it emits final text.
+    if (isQwen36Model(model)) {
+        requestBody.reasoning_effort = 'none';
+        requestBody.reasoning_format = 'hidden';
+        // Qwen 3.6 performs hidden reasoning that consumes the completion budget.
+        // Enforce a minimum so the model has room to produce a final answer.
+        if (requestBody.max_completion_tokens < 1024) {
+            requestBody.max_completion_tokens = 1024;
+        }
+    }
+
+    return requestBody;
+}
+
 class GroqService extends AbstractAIService {
     constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
         super(apiKey, modelName, interactionMode, customPrompt, customModes);
-        this.actualModel = normalizeProviderScopedModelName(modelName) || "meta-llama/llama-4-scout-17b-16e-instruct";
+        this.actualModel = normalizeProviderScopedModelName(modelName) || "qwen/qwen3.6-27b";
         this.API_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
     }
 
@@ -19,12 +46,11 @@ class GroqService extends AbstractAIService {
         }
         const requestMessages = getBudgetedMessages(finalMessages, this.actualModel, this.mode);
 
-        const requestBody = {
+        const requestBody = buildGroqRequestBody({
             messages: requestMessages,
             model: this.actualModel,
-            temperature: 0.3,
-            max_tokens: getMaxTokensForMode(this.mode, this.actualModel)
-        };
+            mode: this.mode
+        });
 
         const response = await fetchWithTimeout(this.API_ENDPOINT, {
             method: "POST",
@@ -35,8 +61,11 @@ class GroqService extends AbstractAIService {
         const data = await response.json();
         if (!response.ok) throw new Error(normalizeProviderErrorMessage(response, data, 'Groq'));
 
-        const rawContent = data.choices?.[0]?.message?.content || "No answer.";
+        const rawContent = data.choices?.[0]?.message?.content;
         const text = stripThinkingTags(rawContent);
+        if (!text) {
+            throw new Error('Groq returned no final answer. Please try again.');
+        }
         const usage = data.usage || {};
 
         return {
@@ -70,4 +99,4 @@ class GroqService extends AbstractAIService {
     }
 }
 
-export { GroqService };
+export { GroqService, buildGroqRequestBody, isQwen36Model };

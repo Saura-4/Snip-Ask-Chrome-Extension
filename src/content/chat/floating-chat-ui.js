@@ -694,17 +694,16 @@ class FloatingChatUI {
             this.customModes.forEach(m => {
                 const opt = document.createElement("option");
                 opt.value = m.id;
-                // Add 📝 prefix only for user-created modes (isDefault !== true)
-                opt.textContent = m.isDefault ? m.name : `📝 ${m.name}`;
+                opt.textContent = m.name;
                 if (m.id === this.currentMode) opt.selected = true;
                 this.modeSelect.appendChild(opt);
             });
         } else {
             // Fallback if no modes in storage (shouldn't normally happen)
             const defaultModes = [
-                { id: 'short', name: '⚡ Short Answer' },
-                { id: 'detailed', name: '🧠 Detailed' },
-                { id: 'code', name: '💻 Code Debug' }
+                { id: 'short', name: 'Short Answer' },
+                { id: 'detailed', name: 'Detailed' },
+                { id: 'code', name: 'Code Debug' }
             ];
             defaultModes.forEach(m => {
                 const opt = document.createElement("option");
@@ -719,7 +718,7 @@ class FloatingChatUI {
         if (this.customPrompt) {
             const customOpt = document.createElement("option");
             customOpt.value = 'custom';
-            customOpt.textContent = '✍️ Custom Prompt';
+            customOpt.textContent = 'Custom Prompt';
             if (this.currentMode === 'custom') customOpt.selected = true;
             this.modeSelect.appendChild(customOpt);
         }
@@ -1177,9 +1176,9 @@ class FloatingChatUI {
         return parts[parts.length - 1] || 'AI';
     }
 
-    _isScoutModel(modelValue) {
+    _isVisionFallbackModel(modelValue) {
         return typeof modelValue === 'string' &&
-            modelValue.toLowerCase().includes('llama-4-scout');
+            modelValue.toLowerCase().includes('qwen3.6-27b');
     }
 
     _createAssistantMetadata(response = {}, overrides = {}) {
@@ -1188,17 +1187,18 @@ class FloatingChatUI {
         const tokenUsage = response.tokenUsage || overrides.tokenUsage || null;
         const usedOCR = response.usedOCR === true || overrides.usedOCR === true;
         const isGuestResponse = Boolean(response.guestInfo) || overrides.isGuestResponse === true;
-        const scoutRetryEligible = overrides.scoutRetryEligible === true ||
-            (selectedModel === 'groq:auto' && usedOCR && isGuestResponse && !this._isScoutModel(responseModel));
+        const visionRetryEligible = overrides.visionRetryEligible === true ||
+            overrides.scoutRetryEligible === true ||
+            (selectedModel === 'groq:auto' && usedOCR && isGuestResponse && !this._isVisionFallbackModel(responseModel));
 
         return {
             selectedModel,
             responseModel,
             usedOCR,
             isGuestResponse,
-            scoutRetryEligible,
+            visionRetryEligible,
             tokenUsage,
-            scoutRetry: overrides.scoutRetry === true
+            visionRetry: overrides.visionRetry === true || overrides.scoutRetry === true
         };
     }
 
@@ -1211,7 +1211,7 @@ class FloatingChatUI {
         return -1;
     }
 
-    _getScoutRetryImageForIndex(assistantIndex) {
+    _getVisionRetryImageForIndex(assistantIndex) {
         const userIndex = this._getTriggeringUserMessageIndex(assistantIndex);
         if (userIndex >= 0 && this.chatHistory[userIndex]?.base64Image) {
             return this.chatHistory[userIndex].base64Image;
@@ -1220,7 +1220,7 @@ class FloatingChatUI {
         return this.initialBase64Image || null;
     }
 
-    _shouldShowScoutRetry(messageIndex, metadata = null) {
+    _shouldShowVisionRetry(messageIndex, metadata = null) {
         const message = this.chatHistory[messageIndex];
         if (!message || message.role !== 'assistant') return false;
 
@@ -1230,10 +1230,10 @@ class FloatingChatUI {
 
         if (meta.isGuestResponse !== true && this.isGuestMode !== true) return false;
         if (selectedModel !== 'groq:auto') return false;
-        if (meta.scoutRetryEligible === false) return false;
+        if (meta.visionRetryEligible === false || meta.scoutRetryEligible === false) return false;
         if (meta.usedOCR !== true) return false;
-        if (this._isScoutModel(responseModel)) return false;
-        return Boolean(this._getScoutRetryImageForIndex(messageIndex));
+        if (this._isVisionFallbackModel(responseModel)) return false;
+        return Boolean(this._getVisionRetryImageForIndex(messageIndex));
     }
 
     _rerenderChatHistory() {
@@ -1264,11 +1264,11 @@ class FloatingChatUI {
         }
     }
 
-    async retryWithScoutAtIndex(index) {
+    async retryWithVisionAtIndex(index) {
         if (this.isGeneratingResponse()) return;
-        if (!this._shouldShowScoutRetry(index)) return;
+        if (!this._shouldShowVisionRetry(index)) return;
 
-        const image = this._getScoutRetryImageForIndex(index);
+        const image = this._getVisionRetryImageForIndex(index);
         if (!image) return;
 
         const requestId = this.showTypingIndicator();
@@ -1286,12 +1286,12 @@ class FloatingChatUI {
             if (this._requestCancelled) return;
 
             if (response && response.success) {
-                const responseModel = response.responseModel || response.model || 'meta-llama/llama-4-scout-17b-16e-instruct';
+                const responseModel = response.responseModel || response.model || 'qwen/qwen3.6-27b';
                 const metadata = this._createAssistantMetadata(response, {
                     selectedModel: 'groq:auto',
                     responseModel,
                     usedOCR: false,
-                    scoutRetry: true
+                    visionRetry: true
                 });
                 const replacement = createChatHistoryEntry(
                     'assistant',
@@ -1309,17 +1309,17 @@ class FloatingChatUI {
                 }
                 this.onSessionChanged?.();
             } else if (typeof showErrorToast === 'function') {
-                showErrorToast("Scout failed: " + (response?.error || "Unknown error"));
+                showErrorToast("Vision retry failed: " + (response?.error || "Unknown error"));
             } else {
-                console.warn("Scout failed:", response?.error || "Unknown error");
+                console.warn("Vision retry failed:", response?.error || "Unknown error");
             }
         } catch (error) {
             this.removeTypingIndicator();
             if (this._requestCancelled) return;
             if (typeof showErrorToast === 'function') {
-                showErrorToast("Scout failed: " + (error?.message || String(error)));
+                showErrorToast("Vision retry failed: " + (error?.message || String(error)));
             } else {
-                console.warn("Scout failed:", error);
+                console.warn("Vision retry failed:", error);
             }
         }
     }
@@ -1554,7 +1554,7 @@ class FloatingChatUI {
 
     _logAutoOcrFallback(context, ocrResult) {
         console.debug(
-            "Auto OCR unreliable; using Scout fallback:",
+            "Auto OCR unreliable; using vision fallback:",
             context,
             ocrResult?.reason || ocrResult?.error || 'unreliable_ocr'
         );

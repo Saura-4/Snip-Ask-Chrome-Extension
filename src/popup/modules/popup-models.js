@@ -299,24 +299,24 @@ function isLikelyValidOpenAIModelId(name) {
 }
 
 export function promptForCustomModel(model) {
-  if (model === 'groq:custom') {
-    const name = prompt("Enter your Groq model ID:", "moonshotai/kimi-k2-instruct");
-    if (!name) {
-      return { cancelled: true };
+    if (model === 'groq:custom') {
+        const name = prompt("Enter your Groq model ID:", "moonshotai/kimi-k2-instruct");
+        if (!name) {
+            return { cancelled: true };
+        }
+        if (!isLikelyValidGroqModelId(name)) {
+            return {
+                cancelled: false,
+                error: 'Invalid Groq model ID. Use a full model ID like moonshotai/kimi-k2-instruct or qwen/qwen3.6-27b.'
+            };
+        }
+        return {
+            cancelled: false,
+            provider: 'groq',
+            modelValue: `groq:${name}`,
+            displayName: formatSimpleCustomDisplayName(name)
+        };
     }
-    if (!isLikelyValidGroqModelId(name)) {
-      return {
-        cancelled: false,
-        error: 'Invalid Groq model ID. Use a full model ID like moonshotai/kimi-k2-instruct or llama-3.3-70b-versatile.'
-      };
-    }
-    return {
-      cancelled: false,
-      provider: 'groq',
-      modelValue: `groq:${name}`,
-      displayName: formatSimpleCustomDisplayName(name)
-    };
-  }
 
   if (model === 'google:custom') {
     const name = prompt("Enter your Gemini model ID:", "gemini-3.1-flash-lite-preview");

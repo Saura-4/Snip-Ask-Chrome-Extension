@@ -1,5 +1,6 @@
 export const CONTENT_SCRIPT_FILES = [
     'lib/katex.min.js',
+    'lib/purify.min.js',
     'src/content/utils.js',
     'src/content/design-system.js',
     'src/content/ui-helpers.js',

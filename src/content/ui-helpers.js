@@ -289,6 +289,7 @@ function isVisionModel(modelName) {
     if (!modelName) return false;
     const lower = modelName.toLowerCase();
     return lower.includes("llama-4") ||
+        lower.includes("qwen3.6") ||
         lower.includes("vision") ||
         lower.includes("gemini") ||
         lower.includes("gemma-3") ||
