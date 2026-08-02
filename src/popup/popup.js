@@ -540,6 +540,14 @@ async function trackProviderHidden(provider, isEnabled) {
 function setupEventListeners() {
   // Settings panel toggle
   document.getElementById('openSettingsBtn').addEventListener('click', () => {
+    // Clear forced inline dimensions from previous close so panel can expand
+    document.documentElement.style.width = '';
+    document.documentElement.style.height = '';
+    document.body.style.width = '';
+    document.body.style.height = '';
+    document.body.style.minWidth = '';
+    document.body.style.minHeight = '';
+
     document.getElementById('settingsPanel').classList.add('open');
     document.body.classList.add('settings-open');
   });
@@ -561,6 +569,13 @@ function setupEventListeners() {
 
   // Provider hint link
   document.getElementById('enableMoreProviders')?.addEventListener('click', () => {
+    document.documentElement.style.width = '';
+    document.documentElement.style.height = '';
+    document.body.style.width = '';
+    document.body.style.height = '';
+    document.body.style.minWidth = '';
+    document.body.style.minHeight = '';
+
     document.getElementById('settingsPanel').classList.add('open');
     document.body.classList.add('settings-open');
   });
