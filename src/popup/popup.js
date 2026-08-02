@@ -547,11 +547,16 @@ function setupEventListeners() {
   document.getElementById('closeSettingsBtn').addEventListener('click', () => {
     document.getElementById('settingsPanel').classList.remove('open');
     document.body.classList.remove('settings-open');
-    // Reset body dimensions to default popup size
-    document.body.style.width = '';
-    document.body.style.height = '';
-    document.body.style.minWidth = '';
-    document.body.style.minHeight = '';
+    
+    // Explicitly force html and body to shrink, as Chrome popups 
+    // often ignore CSS-based shrinking (e.g. when setting style.width = '')
+    document.documentElement.style.width = '340px';
+    document.body.style.width = '340px';
+    document.body.style.minWidth = '340px';
+    
+    document.documentElement.style.height = 'auto';
+    document.body.style.height = 'auto';
+    document.body.style.minHeight = '400px';
   });
 
   // Provider hint link
