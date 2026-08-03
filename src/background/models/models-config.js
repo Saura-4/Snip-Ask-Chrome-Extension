@@ -11,7 +11,6 @@ export const ALL_MODELS = {
         { value: 'groq:auto', name: 'Auto' },
         { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B (Fast)' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
-        { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B (Text)' },
         { value: 'qwen/qwen3.6-27b', name: 'Qwen 3.6 27B (Vision)' },
         { value: 'groq/compound-mini', name: 'Compound Mini (Tools, Slower)' },
         { value: 'groq/compound', name: 'Compound (Tools, Slower)' },
@@ -67,7 +66,6 @@ export const CHAT_WINDOW_MODELS = {
         { value: 'groq:auto', name: 'Auto' },
         { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
-        { value: 'qwen/qwen3-32b', name: 'Qwen 3 32B' },
         { value: 'qwen/qwen3.6-27b', name: 'Qwen 3.6 27B' },
         { value: 'groq/compound-mini', name: 'Compound Mini' },
         { value: 'groq/compound', name: 'Compound' }
