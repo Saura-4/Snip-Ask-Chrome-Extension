@@ -228,7 +228,6 @@ export default {
             const AUTO_GUEST_MODEL = 'groq:auto';
             const AUTO_MODEL_CHAIN = [
                 'openai/gpt-oss-20b',
-                'qwen/qwen3-32b',
                 'openai/gpt-oss-120b',
                 'qwen/qwen3.6-27b'
             ];
@@ -544,7 +543,6 @@ const GUEST_MODEL_ALLOWLIST = new Set([
     'groq:auto',
     'openai/gpt-oss-20b',
     'openai/gpt-oss-120b',
-    'qwen/qwen3-32b',
     'qwen/qwen3.6-27b',
     'groq/compound-mini',
     'groq/compound'
