@@ -3,6 +3,7 @@ import { AbstractAIService } from '../base-service.js';
 import { normalizeProviderErrorMessage } from '../errors.js';
 import { getBudgetedMessages, getMaxTokensForMode } from '../token-budget.js';
 import { CLOUD_TIMEOUT_MS, fetchWithTimeout } from '../transport.js';
+import { streamGeminiContent } from '../streaming.js';
 import { createTextSnipMessage } from '../text-utils.js';
 
 class GeminiService extends AbstractAIService {
@@ -12,7 +13,7 @@ class GeminiService extends AbstractAIService {
         this.baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${this.actualModel}:generateContent`;
     }
 
-    async chat(messages, signal = null) {
+    async chat(messages, signal = null, onDelta = null) {
         const isGemma = this.actualModel.toLowerCase().includes('gemma');
         let finalMessages = [...messages];
         if (finalMessages.length === 0 || finalMessages[0].role !== 'system') {
@@ -68,12 +69,31 @@ class GeminiService extends AbstractAIService {
 
         if (finalSystemInstruction) payload.system_instruction = finalSystemInstruction;
 
+        const requestHeaders = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": this.apiKey
+        };
+
+        if (typeof onDelta === 'function') {
+            const result = await streamGeminiContent({
+                url: this.baseUrl,
+                headers: requestHeaders,
+                body: payload,
+                onDelta,
+                signal,
+                timeoutMs: CLOUD_TIMEOUT_MS,
+                providerName: 'Google Gemini'
+            });
+            return {
+                text: result.text || "No answer returned.",
+                model: this.actualModel,
+                tokenUsage: result.tokenUsage
+            };
+        }
+
         const response = await fetchWithTimeout(this.baseUrl, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "x-goog-api-key": this.apiKey
-            },
+            headers: requestHeaders,
             body: JSON.stringify(payload)
         }, CLOUD_TIMEOUT_MS, signal);
 

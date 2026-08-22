@@ -1,3 +1,5 @@
+import { promptDialog } from './popup-dialogs.js';
+
 export function getProvidersToShow(enabledProviders, isGuestModeActive, guestModeProviders) {
   return isGuestModeActive === true ? guestModeProviders : enabledProviders;
 }
@@ -282,10 +284,6 @@ function formatOpenRouterDisplayName(slug) {
   return modelPart.charAt(0).toUpperCase() + modelPart.slice(1).replace(/-/g, ' ');
 }
 
-function formatSimpleCustomDisplayName(name) {
-  return name;
-}
-
 function isLikelyValidGroqModelId(name) {
   return /^(?:[a-zA-Z][a-zA-Z0-9_-]*\/[a-zA-Z0-9][a-zA-Z0-9._:-]*|[a-zA-Z0-9]+(?:[._-][a-zA-Z0-9]+)+)$/.test(name);
 }
@@ -298,9 +296,13 @@ function isLikelyValidOpenAIModelId(name) {
   return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name);
 }
 
-export function promptForCustomModel(model) {
+export async function promptForCustomModel(model) {
     if (model === 'groq:custom') {
-        const name = prompt("Enter your Groq model ID:", "moonshotai/kimi-k2-instruct");
+        const name = await promptDialog({
+            title: 'Add Groq model',
+            label: 'Enter your Groq model ID:',
+            placeholder: 'moonshotai/kimi-k2-instruct'
+        });
         if (!name) {
             return { cancelled: true };
         }
@@ -314,12 +316,16 @@ export function promptForCustomModel(model) {
             cancelled: false,
             provider: 'groq',
             modelValue: `groq:${name}`,
-            displayName: formatSimpleCustomDisplayName(name)
+            displayName: name
         };
     }
 
   if (model === 'google:custom') {
-    const name = prompt("Enter your Gemini model ID:", "gemini-3.1-flash-lite-preview");
+    const name = await promptDialog({
+      title: 'Add Gemini model',
+      label: 'Enter your Gemini model ID:',
+      placeholder: 'gemini-3.1-flash-lite-preview'
+    });
     if (!name) {
       return { cancelled: true };
     }
@@ -333,12 +339,16 @@ export function promptForCustomModel(model) {
       cancelled: false,
       provider: 'google',
       modelValue: `google:${name}`,
-      displayName: formatSimpleCustomDisplayName(name)
+      displayName: name
     };
   }
 
   if (model === 'openai:custom') {
-    const name = prompt("Enter your OpenAI model ID:", "gpt-4.1-mini");
+    const name = await promptDialog({
+      title: 'Add OpenAI model',
+      label: 'Enter your OpenAI model ID:',
+      placeholder: 'gpt-4.1-mini'
+    });
     if (!name) {
       return { cancelled: true };
     }
@@ -352,12 +362,16 @@ export function promptForCustomModel(model) {
       cancelled: false,
       provider: 'openai',
       modelValue: `openai:${name}`,
-      displayName: formatSimpleCustomDisplayName(name)
+      displayName: name
     };
   }
 
   if (model === 'ollama:custom') {
-    const name = prompt("Enter your Ollama model name:", "llama3");
+    const name = await promptDialog({
+      title: 'Add Ollama model',
+      label: 'Enter your Ollama model name:',
+      placeholder: 'llama3'
+    });
     if (!name) {
       return { cancelled: true };
     }
@@ -376,7 +390,11 @@ export function promptForCustomModel(model) {
   }
 
   if (model === 'openrouter:custom') {
-    const slug = prompt("Enter OpenRouter model slug (e.g., openai/gpt-4):", "openai/gpt-4");
+    const slug = await promptDialog({
+      title: 'Add OpenRouter model',
+      label: 'Enter OpenRouter model slug:',
+      placeholder: 'openai/gpt-4'
+    });
     if (!slug) {
       return { cancelled: true };
     }

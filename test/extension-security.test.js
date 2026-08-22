@@ -18,3 +18,12 @@ test('DOMPurify loads before markdown rendering utilities', () => {
     assert.ok(purifier >= 0);
     assert.ok(purifier < renderer);
 });
+
+test('sidepanel loads DOMPurify before markdown rendering utilities', async () => {
+    const html = await readFile(new URL('../src/sidepanel/sidepanel.html', import.meta.url), 'utf8');
+    const purifier = html.indexOf('lib/purify.min.js');
+    const renderer = html.indexOf('../content/utils.js');
+    assert.ok(purifier >= 0, 'sidepanel.html must load lib/purify.min.js');
+    assert.ok(renderer >= 0, 'sidepanel.html must load src/content/utils.js');
+    assert.ok(purifier < renderer, 'DOMPurify must load before utils.js in sidepanel.html');
+});

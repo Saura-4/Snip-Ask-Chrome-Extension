@@ -214,7 +214,7 @@ function handleSnipComplete(rect) {
             if (requestConfig.restorePopupWindowsAfterSnip) {
                 restorePopupWindowsAfterSidebarSnip();
             }
-            alert("Screenshot failed. Reload page.");
+            showErrorToast("Screenshot failed. Reload page.");
             if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
             finishOverlayRequest(requestId);
             return;
@@ -357,7 +357,7 @@ function handleSnipComplete(rect) {
                             }
                             sendImageFallback();
                         } else {
-                            alert(`⚠️ No text found in snippet.\n\nSince '${currentModel}' cannot see images, please try snipping clearer text or switch to a Vision model.`);
+                            showErrorToast(`No text found in snippet. Since '${currentModel}' cannot see images, please snip clearer text or switch to a Vision model.`);
                             if (typeof hideLoadingCursor === 'function') hideLoadingCursor();
                             finishOverlayRequest(requestId);
                         }

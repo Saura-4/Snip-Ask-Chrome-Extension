@@ -1,6 +1,7 @@
 import { AbstractAIService } from '../base-service.js';
 import { getBudgetedMessages, getMaxTokensForMode } from '../token-budget.js';
 import { LOCAL_TIMEOUT_MS, fetchWithTimeout } from '../transport.js';
+import { streamOllamaChat } from '../streaming.js';
 import { createTextSnipMessage } from '../text-utils.js';
 
 function isValidOllamaHost(url) {
@@ -55,7 +56,7 @@ class OllamaService extends AbstractAIService {
         this.baseUrl = hostUrl.replace(/\/$/, "");
     }
 
-    async chat(messages, signal = null) {
+    async chat(messages, signal = null, onDelta = null) {
         const endpoint = `${this.baseUrl}/api/chat`;
         let finalMessages = [...messages];
         if (finalMessages.length > 0 && finalMessages[0].role !== 'system') {
@@ -89,6 +90,26 @@ class OllamaService extends AbstractAIService {
             stream: false,
             options: { temperature: 0.3, num_ctx: 4096 }
         };
+
+        if (typeof onDelta === 'function') {
+            try {
+                const result = await streamOllamaChat({
+                    url: endpoint,
+                    headers: { "Content-Type": "application/json" },
+                    body: payload,
+                    onDelta,
+                    signal,
+                    timeoutMs: LOCAL_TIMEOUT_MS
+                });
+                return {
+                    text: result.text,
+                    model: result.model || this.actualModel,
+                    tokenUsage: result.tokenUsage
+                };
+            } catch (e) {
+                throw new Error(`Ollama Error: ${e.message}. Ensure 'OLLAMA_ORIGINS="*"' is set.`);
+            }
+        }
 
         try {
             const response = await fetchWithTimeout(endpoint, {

@@ -9,6 +9,7 @@ import {
 } from '../openai-format.js';
 import { getBudgetedMessages } from '../token-budget.js';
 import { CLOUD_TIMEOUT_MS, fetchWithTimeout } from '../transport.js';
+import { streamChatCompletions, streamOpenAIResponses } from '../streaming.js';
 import { createTextSnipMessage } from '../text-utils.js';
 
 class OpenAICompatibleService extends AbstractAIService {
@@ -22,7 +23,7 @@ class OpenAICompatibleService extends AbstractAIService {
         this.extraBody = options.extraBody || null;
     }
 
-    async chat(messages, signal = null) {
+    async chat(messages, signal = null, onDelta = null) {
         const finalMessages = [...messages];
         if (finalMessages.length === 0 || finalMessages[0].role !== 'system') {
             finalMessages.unshift({ role: "system", content: this._getSystemInstruction() });
@@ -34,13 +35,32 @@ class OpenAICompatibleService extends AbstractAIService {
             Object.assign(requestBody, this.extraBody);
         }
 
+        const headers = {
+            "Authorization": `Bearer ${this.apiKey}`,
+            "Content-Type": "application/json",
+            ...this.headers
+        };
+
+        if (typeof onDelta === 'function') {
+            const result = await streamChatCompletions({
+                url: this.apiEndpoint,
+                headers,
+                body: requestBody,
+                onDelta,
+                signal,
+                timeoutMs: this.timeoutMs,
+                providerName: this.providerName
+            });
+            return {
+                text: result.text || "No answer.",
+                model: result.model || this.actualModel,
+                tokenUsage: result.tokenUsage
+            };
+        }
+
         const response = await fetchWithTimeout(this.apiEndpoint, {
             method: "POST",
-            headers: {
-                "Authorization": `Bearer ${this.apiKey}`,
-                "Content-Type": "application/json",
-                ...this.headers
-            },
+            headers,
             body: JSON.stringify(requestBody)
         }, this.timeoutMs, signal);
 
@@ -89,7 +109,7 @@ class OpenAIService extends OpenAICompatibleService {
         });
     }
 
-    async chat(messages, signal = null) {
+    async chat(messages, signal = null, onDelta = null) {
         const finalMessages = [...messages];
         if (finalMessages.length === 0 || finalMessages[0].role !== 'system') {
             finalMessages.unshift({ role: "system", content: this._getSystemInstruction() });
@@ -100,12 +120,26 @@ class OpenAIService extends OpenAICompatibleService {
 
         const requestBody = buildOpenAIResponsesRequestBody(requestMessages, this.actualModel, this.mode);
 
+        const headers = {
+            "Authorization": `Bearer ${this.apiKey}`,
+            "Content-Type": "application/json"
+        };
+
+        if (typeof onDelta === 'function') {
+            return streamOpenAIResponses({
+                url: this.apiEndpoint,
+                headers,
+                body: requestBody,
+                onDelta,
+                signal,
+                timeoutMs: this.timeoutMs,
+                providerName: this.providerName
+            });
+        }
+
         const response = await fetchWithTimeout(this.apiEndpoint, {
             method: "POST",
-            headers: {
-                "Authorization": `Bearer ${this.apiKey}`,
-                "Content-Type": "application/json"
-            },
+            headers,
             body: JSON.stringify(requestBody)
         }, this.timeoutMs, signal);
 
