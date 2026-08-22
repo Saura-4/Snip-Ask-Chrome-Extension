@@ -3,10 +3,39 @@ import { AbstractAIService } from '../base-service.js';
 import { normalizeProviderErrorMessage } from '../errors.js';
 import { getBudgetedMessages, getMaxTokensForMode } from '../token-budget.js';
 import { CLOUD_TIMEOUT_MS, fetchWithTimeout } from '../transport.js';
+import { streamChatCompletions } from '../streaming.js';
 import { createTextSnipMessage, stripThinkingTags } from '../text-utils.js';
 
 function isQwen36Model(modelName) {
     return typeof modelName === 'string' && modelName.toLowerCase().includes('qwen3.6-27b');
+}
+
+function isGptOssModel(modelName) {
+    return typeof modelName === 'string' && modelName.toLowerCase().includes('gpt-oss');
+}
+
+// Reasoning models spend completion tokens on hidden reasoning before any
+// visible text. Without a floor, small modes (short = 150) are consumed
+// entirely by reasoning and the model returns an empty answer.
+const REASONING_MODEL_MIN_COMPLETION_TOKENS = 1024;
+
+function applyReasoningModelGuards(requestBody, modelName) {
+    if (isQwen36Model(modelName)) {
+        requestBody.temperature = 0.7;
+        requestBody.reasoning_effort = 'none';
+        requestBody.reasoning_format = 'hidden';
+    } else if (isGptOssModel(modelName)) {
+        // gpt-oss does not support reasoning_effort 'none' — use the lowest
+        // effort and hide whatever reasoning remains.
+        requestBody.reasoning_effort = 'low';
+        requestBody.reasoning_format = 'hidden';
+    } else {
+        return;
+    }
+
+    if (requestBody.max_completion_tokens < REASONING_MODEL_MIN_COMPLETION_TOKENS) {
+        requestBody.max_completion_tokens = REASONING_MODEL_MIN_COMPLETION_TOKENS;
+    }
 }
 
 function buildGroqRequestBody({ messages, model, mode }) {
@@ -17,17 +46,7 @@ function buildGroqRequestBody({ messages, model, mode }) {
         max_completion_tokens: getMaxTokensForMode(mode, model)
     };
 
-    // Qwen 3.6 reasons by default. In the extension's short interactive modes,
-    // that can consume the entire completion budget before it emits final text.
-    if (isQwen36Model(model)) {
-        requestBody.reasoning_effort = 'none';
-        requestBody.reasoning_format = 'hidden';
-        // Qwen 3.6 performs hidden reasoning that consumes the completion budget.
-        // Enforce a minimum so the model has room to produce a final answer.
-        if (requestBody.max_completion_tokens < 1024) {
-            requestBody.max_completion_tokens = 1024;
-        }
-    }
+    applyReasoningModelGuards(requestBody, model);
 
     return requestBody;
 }
@@ -39,7 +58,7 @@ class GroqService extends AbstractAIService {
         this.API_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
     }
 
-    async chat(messages, signal = null) {
+    async chat(messages, signal = null, onDelta = null) {
         const finalMessages = [...messages];
         if (finalMessages.length === 0 || finalMessages[0].role !== 'system') {
             finalMessages.unshift({ role: "system", content: this._getSystemInstruction() });
@@ -52,9 +71,34 @@ class GroqService extends AbstractAIService {
             mode: this.mode
         });
 
-        const response = await fetchWithTimeout(this.API_ENDPOINT, {
+        const requestInit = {
             method: "POST",
             headers: { "Authorization": `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
+        };
+
+        if (typeof onDelta === 'function') {
+            const result = await streamChatCompletions({
+                url: this.API_ENDPOINT,
+                headers: requestInit.headers,
+                body: requestBody,
+                onDelta,
+                signal,
+                timeoutMs: CLOUD_TIMEOUT_MS,
+                providerName: 'Groq'
+            });
+            const streamedText = stripThinkingTags(result.text);
+            if (!streamedText) {
+                throw new Error('Groq returned no final answer. Please try again.');
+            }
+            return {
+                text: streamedText,
+                model: result.model || this.actualModel,
+                tokenUsage: result.tokenUsage
+            };
+        }
+
+        const response = await fetchWithTimeout(this.API_ENDPOINT, {
+            ...requestInit,
             body: JSON.stringify(requestBody)
         }, CLOUD_TIMEOUT_MS, signal);
 

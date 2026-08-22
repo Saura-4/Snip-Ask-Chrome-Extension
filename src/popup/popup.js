@@ -27,6 +27,7 @@ import {
   populateModesList,
   validateModeInput
 } from './modules/popup-modes.js';
+import { showToast, confirmDialog } from './modules/popup-dialogs.js';
 
 // --- DEFAULT DATA ---
 const DEFAULT_MODES = [
@@ -155,8 +156,6 @@ async function initializeDefaults() {
   if (!result.selectedMode) {
     await chrome.storage.local.set({ selectedMode: DEFAULT_MODE });
   }
-
-  await chrome.storage.local.remove('chatDisplayMode');
 }
 
 // --- LOAD SETTINGS ---
@@ -310,7 +309,7 @@ async function loadModelsList(enabledProviders, enabledModels) {
 
         if (remainingRegularModels + remainingCustomModels <= 0) {
           e.target.checked = true;
-          alert('Keep at least one model enabled for each provider.');
+          showToast('Keep at least one model enabled for each provider.', 'error');
           return;
         }
       }
@@ -408,13 +407,13 @@ function loadApiKeyInputs(enabledProviders, savedValues) {
             if (!['http:', 'https:'].includes(host.protocol)) throw new Error('Unsupported protocol');
             originPattern = `${host.protocol}//${host.hostname}/*`;
           } catch {
-            alert('Enter a valid HTTP or HTTPS Ollama URL.');
+            showToast('Enter a valid HTTP or HTTPS Ollama URL.', 'error');
             return;
           }
 
           const granted = await chrome.permissions.request({ origins: [originPattern] });
           if (!granted) {
-            alert('Snip & Ask needs access to that Ollama host before it can connect.');
+            showToast('Snip & Ask needs access to that Ollama host before it can connect.', 'error');
             return;
           }
         }
@@ -608,7 +607,7 @@ function setupEventListeners() {
   // Model selection
   document.getElementById('modelSelect').addEventListener('change', async (e) => {
     const model = e.target.value;
-    const customModel = promptForCustomModel(model);
+    const customModel = await promptForCustomModel(model);
 
     if (customModel.cancelled) {
       await loadSettings();
@@ -616,7 +615,7 @@ function setupEventListeners() {
     }
 
     if (customModel.error) {
-      alert(customModel.error);
+      showToast(customModel.error, 'error');
       await loadSettings();
       return;
     }
@@ -625,7 +624,7 @@ function setupEventListeners() {
       try {
         await validateCustomModelBeforeSave(customModel);
       } catch (error) {
-        alert(`Unable to validate this model before saving.\n\n${error.message}`);
+        showToast(`Unable to validate this model before saving. ${error.message}`, 'error');
         await loadSettings();
         return;
       }
@@ -688,9 +687,15 @@ function setupEventListeners() {
   // Reset All Keys
   document.getElementById('resetAllKeys')?.addEventListener('click', async (e) => {
     e.preventDefault();
-    if (confirm('⚠️ Are you sure you want to reset all API keys? This will clear all stored keys (Groq, Gemini, OpenAI, OpenRouter, and Ollama host).')) {
+    const confirmed = await confirmDialog({
+      title: 'Reset all API keys',
+      message: 'This will clear all stored keys (Groq, Gemini, OpenAI, OpenRouter, and Ollama host).',
+      confirmText: 'Reset keys',
+      danger: true
+    });
+    if (confirmed) {
       await chrome.storage.local.remove(['groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost']);
-      alert('✅ All API keys have been cleared.');
+      showToast('All API keys have been cleared.');
       await loadSettings(); // Reload to clear the input fields
     }
   });
@@ -773,7 +778,7 @@ function setupEventListeners() {
       const upiId = upiIdDisplay.textContent;
       // Don't copy placeholder if user hasn't set it (though buttons are generic now)
       if (upiId.includes('INSERT')) {
-        alert('Please configure your UPI ID first.'); // Should not happen in prod ideally
+        showToast('Please configure your UPI ID first.', 'error');
         return;
       }
 
@@ -867,7 +872,7 @@ async function saveMode() {
   const validationError = validateModeInput(name, prompt);
 
   if (validationError) {
-    alert(validationError);
+    showToast(validationError, 'error');
     return;
   }
 
@@ -888,7 +893,13 @@ async function saveMode() {
 }
 
 async function deleteMode(modeId) {
-  if (!confirm('Delete this mode?')) return;
+  const confirmed = await confirmDialog({
+    title: 'Delete mode',
+    message: 'Delete this mode? This cannot be undone.',
+    confirmText: 'Delete',
+    danger: true
+  });
+  if (!confirmed) return;
 
   const result = await chrome.storage.local.get(['customModes']);
   let modes = result.customModes || DEFAULT_MODES;
@@ -906,19 +917,19 @@ async function startSnip() {
   let model = modelSelect?.value || result.selectedModel || DEFAULT_MODEL;
   const mode = modeSelect?.value || result.selectedMode || DEFAULT_MODE;
 
-  const customModel = promptForCustomModel(model);
+  const customModel = await promptForCustomModel(model);
   if (customModel.cancelled) {
     return;
   }
   if (customModel.error) {
-    alert(customModel.error);
+    showToast(customModel.error, 'error');
     return;
   }
   if (customModel.provider) {
     try {
       await validateCustomModelBeforeSave(customModel);
     } catch (error) {
-      alert(`Unable to validate this model before saving.\n\n${error.message}`);
+      showToast(`Unable to validate this model before saving. ${error.message}`, 'error');
       return;
     }
     model = customModel.modelValue;
@@ -932,7 +943,7 @@ async function startSnip() {
   if (!isGuestModeActive) {
     const missingConfigMessage = getMissingConfigMessage(model, result);
     if (missingConfigMessage) {
-      alert(missingConfigMessage);
+      showToast(missingConfigMessage, 'error');
       return;
     }
   }
@@ -942,7 +953,7 @@ async function startSnip() {
 
   const tab = tabs[0];
   if (isRestrictedPage(tab.url)) {
-    alert("Cannot run on this restricted page.");
+    showToast('Cannot run on this restricted page.', 'error');
     return;
   }
 
@@ -958,7 +969,7 @@ async function startSnip() {
       await chrome.tabs.sendMessage(tab.id, { action: "START_SNIP", model, mode });
       window.close();
     } catch (injectErr) {
-      alert("Could not start snip. Please refresh the page!");
+      showToast('Could not start snip. Please refresh the page!', 'error');
     }
   }
 }

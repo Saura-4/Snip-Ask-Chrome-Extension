@@ -551,3 +551,96 @@ export function createRuntimeMessageListener() {
         return false;
     };
 }
+
+const STREAM_PORT_NAME = 'snip-ask-stream';
+
+/**
+ * Port-based streaming listener. The client connects with port name
+ * 'snip-ask-stream' and posts a single request payload (CONTINUE_CHAT or
+ * ASK_AI_MULTI_IMAGE). Deltas are posted back as {type:'delta', text},
+ * followed by {type:'done', response} or {type:'error', error}.
+ */
+export function createRuntimePortListener() {
+    return (port) => {
+        if (port.name !== STREAM_PORT_NAME) {
+            return;
+        }
+
+        let requestId = null;
+        let controller = null;
+        let settled = false;
+
+        const finish = () => {
+            if (controller) {
+                removeTrackedController(controller, requestId);
+                controller = null;
+            }
+            try {
+                port.disconnect();
+            } catch {
+                // Already disconnected.
+            }
+        };
+
+        port.onDisconnect.addListener(() => {
+            // Client went away (window closed / Stop clicked) — abort upstream.
+            if (!settled && requestId) {
+                cancelTrackedRequest(requestId);
+            }
+            if (controller) {
+                removeTrackedController(controller, requestId);
+                controller = null;
+            }
+        });
+
+        port.onMessage.addListener((request) => {
+            if (request?.action !== 'CONTINUE_CHAT' && request?.action !== 'ASK_AI_MULTI_IMAGE') {
+                port.postMessage({ type: 'error', error: `Streaming does not support action: ${request?.action}` });
+                finish();
+                return;
+            }
+
+            requestId = request.requestId || null;
+            controller = createTrackedAbortController(requestId);
+
+            const onDelta = (text) => {
+                try {
+                    port.postMessage({ type: 'delta', text });
+                } catch {
+                    // Port closed mid-stream; the disconnect handler aborts.
+                    cancelTrackedRequest(requestId);
+                }
+            };
+
+            const handle = request.action === 'CONTINUE_CHAT'
+                ? handleContinueChat(request, (response) => {
+                    settled = true;
+                    try {
+                        port.postMessage({ type: 'done', response });
+                    } catch {
+                        // Client disconnected.
+                    }
+                    finish();
+                }, controller.signal, onDelta)
+                : handleMultiImageRequest(request.images, request.model, request.textContext, (response) => {
+                    settled = true;
+                    try {
+                        port.postMessage({ type: 'done', response });
+                    } catch {
+                        // Client disconnected.
+                    }
+                    finish();
+                }, request.mode || null, controller.signal, onDelta);
+
+            handle.catch((error) => {
+                settled = true;
+                try {
+                    port.postMessage({ type: 'error', error: error?.message || String(error) });
+                } catch {
+                    // Client disconnected.
+                }
+                finish();
+            });
+        });
+    };
+}

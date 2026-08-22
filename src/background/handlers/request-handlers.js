@@ -88,7 +88,7 @@ export async function handleCustomModelValidation(request, sendResponse, signal)
     }
 }
 
-export async function handleContinueChat(request, sendResponse, signal) {
+export async function handleContinueChat(request, sendResponse, signal, onDelta = null) {
     try {
         const storage = await getStorage([
             'interactionMode', 'customPrompt', 'selectedModel', 'selectedMode',
@@ -131,7 +131,7 @@ export async function handleContinueChat(request, sendResponse, signal) {
         const mode = request.mode || storage.selectedMode || storage.interactionMode || 'short';
         const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
         const optimizedHistory = getBudgetedMessages(request.history, modelName, mode);
-        const result = await aiService.chat(optimizedHistory, signal);
+        const result = await aiService.chat(optimizedHistory, signal, typeof onDelta === 'function' ? onDelta : null);
         sendResponse({ success: true, answer: result.text, model: modelName, responseModel: result.model, tokenUsage: result.tokenUsage, usedOCR: request.usedOCR === true });
     } catch (error) {
         sendResponse({ success: false, error: error.message });
@@ -290,7 +290,7 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
     }
 }
 
-export async function handleMultiImageRequest(images, explicitModel, textContext, sendResponse, explicitMode, signal = null) {
+export async function handleMultiImageRequest(images, explicitModel, textContext, sendResponse, explicitMode, signal = null, onDelta = null) {
     try {
         const storage = await getStorage([
             'interactionMode', 'customPrompt', 'selectedModel', 'selectedMode',
@@ -353,7 +353,7 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
 
         const messages = [{ role: 'user', content: contentArray }];
         const optimizedMessages = getBudgetedMessages(messages, modelName, mode);
-        const result = await aiService.chat(optimizedMessages, signal);
+        const result = await aiService.chat(optimizedMessages, signal, typeof onDelta === 'function' ? onDelta : null);
 
         sendResponse({
             success: true,

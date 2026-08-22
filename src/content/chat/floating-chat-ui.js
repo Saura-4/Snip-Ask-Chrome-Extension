@@ -601,7 +601,7 @@ class FloatingChatUI {
             }
             
             /* TYPING INDICATOR */
-            .typing-container { display: flex; align-items: center; gap: var(--sa-space-5); margin-bottom: var(--sa-space-5); padding: var(--sa-space-4) var(--sa-space-5); width: fit-content; max-width: 100%; background: rgba(255,255,255,0.035); border: var(--sa-border-default); border-radius: var(--sa-radius-pill); box-shadow: var(--sa-shadow-md); }
+            .typing-container { display: flex; align-items: center; gap: var(--sa-space-5); margin-bottom: var(--sa-space-5); padding: 0; width: fit-content; max-width: 100%; }
             .typing-bubble { background: transparent; padding: 0; display: flex; gap: var(--sa-space-2); width: fit-content; }
             .dot { width: 6px; height: 6px; background: #666; border-radius: 50%; animation: bounce 1.4s infinite ease-in-out both; }
             .dot:nth-child(1) { animation-delay: -0.32s; }
@@ -609,9 +609,9 @@ class FloatingChatUI {
             @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); background: #f55036; } }
             .thinking-text { font-size: var(--sa-type-meta); line-height: var(--sa-leading-tight); color: var(--sa-text-muted); font-style: normal; animation: pulse 1.5s infinite; }
             @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
-            .stop-btn { width: var(--sa-control-xs); height: var(--sa-control-xs); background: rgba(255,255,255,0.04); border: var(--sa-border-strong); color: #b8b8b8; padding: 0; border-radius: var(--sa-radius-pill); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background var(--sa-transition-normal), border-color var(--sa-transition-normal), color var(--sa-transition-normal), transform var(--sa-transition-fast); margin-left: var(--sa-space-1); }
+            .stop-btn { width: var(--sa-control-xs); height: var(--sa-control-xs); background: transparent; border: none; color: var(--sa-text-subtle); padding: 0; border-radius: var(--sa-radius-pill); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background var(--sa-transition-normal), color var(--sa-transition-normal), transform var(--sa-transition-fast); margin-left: var(--sa-space-1); }
             .stop-btn svg { width: var(--sa-icon-sm); height: var(--sa-icon-sm); display: block; }
-            .stop-btn:hover { border-color: rgba(245, 80, 54, 0.32); color: #ff8a6d; background: rgba(245, 80, 54, 0.08); }
+            .stop-btn:hover { color: #ff8a6d; background: rgba(245, 80, 54, 0.08); }
             .stop-btn:active { transform: scale(0.94); }
             
             /* MATH BLOCKS (LaTeX) */
@@ -1265,76 +1265,14 @@ class FloatingChatUI {
     }
 
     async retryWithVisionAtIndex(index) {
-        if (this.isGeneratingResponse()) return;
-        if (!this._shouldShowVisionRetry(index)) return;
-
-        const image = this._getVisionRetryImageForIndex(index);
-        if (!image) return;
-
-        const requestId = this.showTypingIndicator();
-
-        try {
-            const response = await chrome.runtime.sendMessage({
-                action: "ASK_AI",
-                model: 'groq:auto',
-                base64Image: image,
-                mode: this.currentMode,
-                requestId
-            });
-
-            this.removeTypingIndicator();
-            if (this._requestCancelled) return;
-
-            if (response && response.success) {
-                const responseModel = response.responseModel || response.model || 'qwen/qwen3.6-27b';
-                const metadata = this._createAssistantMetadata(response, {
-                    selectedModel: 'groq:auto',
-                    responseModel,
-                    usedOCR: false,
-                    visionRetry: true
-                });
-                const replacement = createChatHistoryEntry(
-                    'assistant',
-                    response.answer,
-                    responseModel,
-                    null,
-                    this.chatHistory[index]?.isRegenerated || false,
-                    metadata
-                );
-                replacement.timestamp = this.chatHistory[index]?.timestamp || replacement.timestamp;
-                this.chatHistory[index] = replacement;
-                this._rerenderChatHistory();
-                if (response.guestInfo) {
-                    updateLocalGuestCache(response.guestInfo);
-                }
-                this.onSessionChanged?.();
-            } else if (typeof showErrorToast === 'function') {
-                showErrorToast("Vision retry failed: " + (response?.error || "Unknown error"));
-            } else {
-                console.warn("Vision retry failed:", response?.error || "Unknown error");
-            }
-        } catch (error) {
-            this.removeTypingIndicator();
-            if (this._requestCancelled) return;
-            if (typeof showErrorToast === 'function') {
-                showErrorToast("Vision retry failed: " + (error?.message || String(error)));
-            } else {
-                console.warn("Vision retry failed:", error);
-            }
-        }
+        return retryAssistantWithVision(this, index);
     }
 
     /**
      * Regenerate the last assistant response (convenience wrapper)
      */
     async regenerateLastResponse() {
-        // Find last assistant message index and regenerate from there
-        for (let i = this.chatHistory.length - 1; i >= 0; i--) {
-            if (this.chatHistory[i].role === 'assistant') {
-                await this.regenerateAtIndex(i);
-                return;
-            }
-        }
+        return regenerateLastChatResponse(this);
     }
 
     /**
@@ -1342,171 +1280,7 @@ class FloatingChatUI {
      * @param {number} index - The index of the assistant message to regenerate
      */
     async regenerateAtIndex(index) {
-        if (index < 0 || index >= this.chatHistory.length) return;
-        if (this.chatHistory[index].role !== 'assistant') return;
-
-        // Find the user message that triggered this response
-        let userMsgIndex = -1;
-        for (let i = index - 1; i >= 0; i--) {
-            if (this.chatHistory[i].role === 'user') {
-                userMsgIndex = i;
-                break;
-            }
-        }
-        if (userMsgIndex === -1) return;
-
-        // Slice history to remove everything from the target index onward ("rewind")
-        const messagesToRemove = this.chatHistory.length - index;
-        this.chatHistory = this.chatHistory.slice(0, index);
-
-        // Remove corresponding DOM elements from chatBody
-        for (let i = 0; i < messagesToRemove; i++) {
-            const lastChild = this.chatBody.lastElementChild;
-            if (lastChild && !lastChild.classList?.contains('typing-container')) {
-                lastChild.remove();
-            }
-        }
-
-        const requestId = this.showTypingIndicator();
-
-        try {
-            let response;
-            let responseMetadataOverrides = { selectedModel: this.currentModel };
-
-            // Collect all images from history up to (and including) the user message
-            const imagesToSend = [];
-            for (let i = 0; i <= userMsgIndex; i++) {
-                if (this.chatHistory[i].base64Image) {
-                    imagesToSend.push(this.chatHistory[i].base64Image);
-                }
-            }
-            // Also include initialBase64Image if not already in history
-            if (this.initialBase64Image && !imagesToSend.includes(this.initialBase64Image)) {
-                imagesToSend.unshift(this.initialBase64Image);
-            }
-
-            // Check if we need to include image data for vision models
-            const isAutoGuestModel = this.currentModel === 'groq:auto';
-
-            if (!isAutoGuestModel && isVisionModel(this.currentModel)) {
-                if (imagesToSend.length > 0) {
-                    // Use multi-image if multiple, single image otherwise
-                    if (imagesToSend.length === 1) {
-                        response = await chrome.runtime.sendMessage({
-                            action: "ASK_AI",
-                            model: this.currentModel,
-                            base64Image: imagesToSend[0],
-                            mode: this.currentMode,
-                            requestId
-                        });
-                    } else {
-                        response = await chrome.runtime.sendMessage({
-                            action: "ASK_AI_MULTI_IMAGE",
-                            model: this.currentModel,
-                            images: imagesToSend,
-                            textContext: this._extractTextFromHistory(userMsgIndex),
-                            mode: this.currentMode,
-                            requestId
-                        });
-                    }
-                } else {
-                    // No images, use text chat
-                    response = await chrome.runtime.sendMessage({
-                        action: "CONTINUE_CHAT",
-                        model: this.currentModel,
-                        history: this._buildApiHistory(userMsgIndex),
-                        mode: this.currentMode,
-                        requestId
-                    });
-                }
-            } else {
-                // Non-vision model - need to use OCR text if there are images
-                if (imagesToSend.length > 0) {
-                    let ocrTextParts = [];
-
-                    if (isAutoGuestModel) {
-                        const autoOcr = await this._collectReliableAutoOcrText(imagesToSend, 'regenerate');
-                        ocrTextParts = autoOcr.reliable ? autoOcr.textParts : [];
-                    } else {
-                        // OCR all images and build context
-                        for (const img of imagesToSend) {
-                            const ocrResult = await chrome.runtime.sendMessage({
-                                action: "PERFORM_OCR",
-                                base64Image: img
-                            });
-                            if (ocrResult?.success && ocrResult.text) {
-                                ocrTextParts.push(ocrResult.text);
-                            }
-                        }
-                    }
-
-                    if (ocrTextParts.length > 0) {
-                        // Build history with OCR text as the first user message
-                        const ocrContext = ocrTextParts.join('\n---\n');
-                        const historyWithOcr = [
-                            { role: 'user', content: `[Image content extracted via OCR]:\n${ocrContext}` },
-                            ...this._buildApiHistory(userMsgIndex).slice(1) // Skip original first message, use OCR instead
-                        ];
-
-                        response = await chrome.runtime.sendMessage({
-                            action: "CONTINUE_CHAT",
-                            model: this.currentModel,
-                            history: historyWithOcr,
-                            mode: this.currentMode,
-                            usedOCR: isAutoGuestModel,
-                            requestId
-                        });
-                        responseMetadataOverrides.usedOCR = isAutoGuestModel;
-                    } else if (isAutoGuestModel) {
-                        const textContext = this._buildApiHistory(userMsgIndex)
-                            .map(m => `${m.role}: ${m.content}`)
-                            .join('\n');
-                        response = await this._sendAutoVisionFallback(imagesToSend, textContext, requestId);
-                    } else {
-                        // OCR failed, use text history as fallback
-                        response = await chrome.runtime.sendMessage({
-                            action: "CONTINUE_CHAT",
-                            model: this.currentModel,
-                            history: this._buildApiHistory(userMsgIndex),
-                            mode: this.currentMode,
-                            requestId
-                        });
-                    }
-                } else {
-                    // No images, use text history
-                    response = await chrome.runtime.sendMessage({
-                        action: "CONTINUE_CHAT",
-                        model: this.currentModel,
-                        history: this._buildApiHistory(userMsgIndex),
-                        mode: this.currentMode,
-                        requestId
-                    });
-                }
-            }
-
-            this.removeTypingIndicator();
-
-            if (this._requestCancelled) return; // User clicked Stop
-
-            if (response && response.success) {
-                // Add regenerated indicator to the response
-                this._addRegeneratedMessage(
-                    response.answer,
-                    response.responseModel || response.model || this.currentModel,
-                    response,
-                    responseMetadataOverrides
-                );
-                if (response.guestInfo) {
-                    updateLocalGuestCache(response.guestInfo);
-                }
-            } else {
-                this.addMessage('assistant', "⚠️ Regenerate failed: " + (response?.error || "Unknown error"), this.currentModel, true);
-            }
-        } catch (e) {
-            this.removeTypingIndicator();
-            if (this._requestCancelled) return;
-            this.addMessage('assistant', "⚠️ Network Error: " + e.message, this.currentModel, true);
-        }
+        return regenerateChatResponseAt(this, index);
     }
 
     /**
@@ -1547,70 +1321,19 @@ class FloatingChatUI {
     }
 
     _isReliableAutoOcrResult(ocrResult) {
-        return ocrResult?.reliable === true &&
-            typeof ocrResult.text === 'string' &&
-            ocrResult.text.trim().length > 3;
+        return isReliableAutoOcrResult(ocrResult);
     }
 
     _logAutoOcrFallback(context, ocrResult) {
-        console.debug(
-            "Auto OCR unreliable; using vision fallback:",
-            context,
-            ocrResult?.reason || ocrResult?.error || 'unreliable_ocr'
-        );
+        logAutoOcrFallback(context, ocrResult);
     }
 
     async _collectReliableAutoOcrText(images, context) {
-        const ocrTextParts = [];
-
-        for (const img of images) {
-            let ocrResult;
-            try {
-                ocrResult = await chrome.runtime.sendMessage({
-                    action: "PERFORM_OCR",
-                    base64Image: img
-                });
-            } catch (error) {
-                this._logAutoOcrFallback(context, {
-                    reason: 'ocr_request_failed',
-                    error: error?.message || String(error)
-                });
-                return { reliable: false, textParts: [] };
-            }
-
-            if (!this._isReliableAutoOcrResult(ocrResult)) {
-                this._logAutoOcrFallback(context, ocrResult);
-                return { reliable: false, textParts: [] };
-            }
-
-            ocrTextParts.push(ocrResult.text);
-        }
-
-        return {
-            reliable: ocrTextParts.length > 0,
-            textParts: ocrTextParts
-        };
+        return collectReliableAutoOcrText(this, images, context);
     }
 
     async _sendAutoVisionFallback(images, textContext, requestId) {
-        if (images.length === 1 && !textContext) {
-            return chrome.runtime.sendMessage({
-                action: "ASK_AI",
-                model: this.currentModel,
-                base64Image: images[0],
-                mode: this.currentMode,
-                requestId
-            });
-        }
-
-        return chrome.runtime.sendMessage({
-            action: "ASK_AI_MULTI_IMAGE",
-            model: this.currentModel,
-            images,
-            textContext,
-            mode: this.currentMode,
-            requestId
-        });
+        return sendAutoVisionFallback(this, images, textContext, requestId);
     }
 
     /**
@@ -1618,127 +1341,7 @@ class FloatingChatUI {
      * @param {string} imgSrc - Image source URL or data URI
      */
     _showImageModal(imgSrc) {
-        if (!imgSrc) return;
-
-        // Create modal overlay
-        const overlay = document.createElement('div');
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.9);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 2147483647;
-            cursor: zoom-out;
-            animation: fadeIn 0.2s ease;
-        `;
-
-        // Add animation keyframes
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-            @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-        `;
-        overlay.appendChild(style);
-
-        // Create image container
-        const imgContainer = document.createElement('div');
-        imgContainer.style.cssText = `
-            position: relative;
-            max-width: 90vw;
-            max-height: 90vh;
-            animation: scaleIn 0.2s ease;
-        `;
-
-        // Full-size image
-        const fullImg = document.createElement('img');
-        fullImg.src = imgSrc;
-        fullImg.style.cssText = `
-            max-width: 90vw;
-            max-height: 85vh;
-            object-fit: contain;
-            border-radius: var(--sa-radius-md);
-            box-shadow: var(--sa-shadow-overlay);
-        `;
-        fullImg.alt = "Full size screenshot";
-
-        // Close button
-        const closeBtn = document.createElement('div');
-        closeBtn.style.cssText = `
-            position: absolute;
-            top: -15px;
-            right: -15px;
-            width: var(--sa-control-lg);
-            height: var(--sa-control-lg);
-            background: var(--sa-surface-header);
-            border: var(--sa-border-strong);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            font-size: var(--sa-type-title);
-            color: var(--sa-text-primary);
-            box-shadow: var(--sa-shadow-md);
-            transition: transform var(--sa-transition-normal), border-color var(--sa-transition-normal), color var(--sa-transition-normal), background var(--sa-transition-normal);
-        `;
-        closeBtn.innerHTML = '×';
-        closeBtn.onmouseenter = () => {
-            closeBtn.style.transform = 'scale(1.06)';
-            closeBtn.style.borderColor = 'rgba(255,107,74,0.26)';
-            closeBtn.style.color = 'var(--sa-accent-soft)';
-            closeBtn.style.background = '#242424';
-        };
-        closeBtn.onmouseleave = () => {
-            closeBtn.style.transform = 'scale(1)';
-            closeBtn.style.borderColor = 'rgba(255,255,255,0.12)';
-            closeBtn.style.color = 'var(--sa-text-primary)';
-            closeBtn.style.background = 'var(--sa-surface-header)';
-        };
-
-        // Hint text
-        const hint = document.createElement('div');
-        hint.style.cssText = `
-            position: absolute;
-            bottom: -30px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: var(--sa-text-muted);
-            font-size: var(--sa-type-small);
-            white-space: nowrap;
-        `;
-        hint.textContent = 'Click anywhere or press ESC to close';
-
-        imgContainer.appendChild(fullImg);
-        imgContainer.appendChild(closeBtn);
-        imgContainer.appendChild(hint);
-        overlay.appendChild(imgContainer);
-
-        // Close handlers
-        const closeModal = () => {
-            overlay.style.animation = 'fadeIn 0.15s ease reverse';
-            setTimeout(() => overlay.remove(), 150);
-        };
-
-        overlay.onclick = closeModal;
-        closeBtn.onclick = (e) => { e.stopPropagation(); closeModal(); };
-        imgContainer.onclick = (e) => e.stopPropagation(); // Prevent close when clicking image
-
-        // ESC key handler
-        const escHandler = (e) => {
-            if (e.key === 'Escape') {
-                closeModal();
-                document.removeEventListener('keydown', escHandler);
-            }
-        };
-        document.addEventListener('keydown', escHandler);
-
-        // Add to shadow DOM
-        this.shadow.appendChild(overlay);
+        openSnipAskImageModal(this.shadow, imgSrc);
     }
 
     /**
@@ -2037,189 +1640,11 @@ class FloatingChatUI {
     }
 
     /**
-     * Spawn a comparison window with a different model
-     * Duplicates the entire chat history and regenerates the last response
+     * Spawn a comparison window with a different model.
+     * Duplicates the entire chat history and regenerates the last response.
      */
     async spawnCompareWindow() {
-        if (WindowManager.isMaxReached()) {
-            showErrorToast(`Maximum ${WindowManager.maxWindows} comparison windows allowed`);
-            return;
-        }
-
-        // Find the last assistant message index in current chat
-        let lastAssistantIndex = -1;
-        for (let i = this.chatHistory.length - 1; i >= 0; i--) {
-            if (this.chatHistory[i].role === 'assistant') {
-                lastAssistantIndex = i;
-                break;
-            }
-        }
-
-        if (lastAssistantIndex === -1) {
-            showErrorToast("No response to compare yet");
-            return;
-        }
-
-        const newUI = await FloatingChatUI.create();
-        newUI.setDisplayMode('popup');
-        WindowManager.register(newUI);
-
-        // Copy all state to compare window
-        newUI.initialUserMessage = this.initialUserMessage;
-        newUI.initialBase64Image = this.initialBase64Image;
-        newUI.allImages = [...this.allImages];
-        newUI.isGuestMode = this.isGuestMode;
-
-        // Inherit mode from parent window
-        newUI.currentMode = this.currentMode;
-        if (newUI.modeSelect) newUI.modeSelect.value = this.currentMode;
-
-        // Select a different model
-        const otherModel = this._getNextAvailableModel();
-        if (otherModel && newUI.modelSelect) {
-            newUI.currentModel = otherModel;
-            newUI.modelSelect.value = otherModel;
-        }
-
-        // Clone all messages UP TO (but not including) the last assistant message
-        // This preserves the full conversation context
-        for (let i = 0; i < lastAssistantIndex; i++) {
-            const msg = this.chatHistory[i];
-            // Recreate each message in the new window (without adding to DOM twice)
-            newUI.chatHistory.push({
-                role: msg.role,
-                content: msg.content,
-                displayText: msg.displayText,
-                model: msg.model,
-                base64Image: msg.base64Image,
-                isRegenerated: msg.isRegenerated,
-                metadata: msg.metadata ? { ...msg.metadata } : null,
-                timestamp: msg.timestamp
-            });
-
-            // Render the message in the UI
-            this._renderClonedMessage(newUI, msg);
-        }
-
-        // Now regenerate the last response with the new model
-        const requestId = newUI.showTypingIndicator();
-
-        try {
-            let response;
-            let responseMetadataOverrides = { selectedModel: newUI.currentModel };
-
-            // Collect all images from history
-            const imagesToSend = [];
-            if (newUI.initialBase64Image) {
-                imagesToSend.push(newUI.initialBase64Image);
-            }
-            for (let i = 0; i < newUI.chatHistory.length; i++) {
-                if (newUI.chatHistory[i].base64Image && !imagesToSend.includes(newUI.chatHistory[i].base64Image)) {
-                    imagesToSend.push(newUI.chatHistory[i].base64Image);
-                }
-            }
-
-            // Build full conversation history as text
-            const apiHistory = newUI._buildApiHistory(newUI.chatHistory.length - 1);
-            const fullTextContext = apiHistory.map(m => `${m.role}: ${m.content}`).join('\n');
-
-            const isAutoGuestModel = newUI.currentModel === 'groq:auto';
-
-            if (!isAutoGuestModel && isVisionModel(newUI.currentModel) && imagesToSend.length > 0) {
-                // Vision model with images: Always use MULTI_IMAGE which supports textContext
-                // ASK_AI does NOT support additionalContext, so we must use MULTI_IMAGE even for 1 image
-                response = await chrome.runtime.sendMessage({
-                    action: "ASK_AI_MULTI_IMAGE",
-                    model: newUI.currentModel,
-                    images: imagesToSend,
-                    textContext: fullTextContext,
-                    mode: newUI.currentMode,
-                    requestId
-                });
-            } else if (!isVisionModel(newUI.currentModel) && imagesToSend.length > 0) {
-                // Non-vision model with images: Extract text via OCR first
-                let ocrTextParts = [];
-
-                if (isAutoGuestModel) {
-                    const autoOcr = await newUI._collectReliableAutoOcrText(imagesToSend, 'compare');
-                    ocrTextParts = autoOcr.reliable ? autoOcr.textParts : [];
-                } else {
-                    for (const img of imagesToSend) {
-                        const ocrResult = await chrome.runtime.sendMessage({
-                            action: "PERFORM_OCR",
-                            base64Image: img
-                        });
-                        if (ocrResult?.success && ocrResult.text) {
-                            ocrTextParts.push(ocrResult.text);
-                        }
-                    }
-                }
-
-                if (ocrTextParts.length > 0) {
-                    // Inject OCR context at the start of history
-                    const ocrContext = ocrTextParts.join('\n---\n');
-                    const historyWithOcr = [
-                        { role: 'user', content: `[Image content extracted via OCR]:\n${ocrContext}` },
-                        ...apiHistory.slice(1) // Skip first message which references the image
-                    ];
-
-                    response = await chrome.runtime.sendMessage({
-                        action: "CONTINUE_CHAT",
-                        model: newUI.currentModel,
-                        history: historyWithOcr,
-                        mode: newUI.currentMode,
-                        usedOCR: isAutoGuestModel,
-                        requestId
-                    });
-                    responseMetadataOverrides.usedOCR = isAutoGuestModel;
-                } else if (isAutoGuestModel) {
-                    response = await newUI._sendAutoVisionFallback(imagesToSend, fullTextContext, requestId);
-                } else {
-                    // OCR failed, just use text history
-                    response = await chrome.runtime.sendMessage({
-                        action: "CONTINUE_CHAT",
-                        model: newUI.currentModel,
-                        history: apiHistory,
-                        mode: newUI.currentMode,
-                        requestId
-                    });
-                }
-            } else {
-                // No images: Use text-only chat
-                response = await chrome.runtime.sendMessage({
-                    action: "CONTINUE_CHAT",
-                    model: newUI.currentModel,
-                    history: apiHistory,
-                    mode: newUI.currentMode,
-                    requestId
-                });
-            }
-
-            newUI.removeTypingIndicator();
-            if (newUI._requestCancelled) return; // User clicked Stop
-            if (response && response.success) {
-                const responseModel = response.responseModel || response.model || newUI.currentModel;
-                newUI.addMessage(
-                    'assistant',
-                    response.answer,
-                    responseModel,
-                    false,
-                    null,
-                    false,
-                    response.tokenUsage,
-                    newUI._createAssistantMetadata(response, responseMetadataOverrides)
-                );
-                if (response.guestInfo) {
-                    updateLocalGuestCache(response.guestInfo);
-                }
-            } else {
-                newUI.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), newUI.currentModel, true);
-            }
-        } catch (e) {
-            newUI.removeTypingIndicator();
-            if (newUI._requestCancelled) return;
-            newUI.addMessage('assistant', "⚠️ Network Error: " + e.message, newUI.currentModel, true);
-        }
+        return spawnCompareWindowFor(this);
     }
 
     /**
@@ -2232,11 +1657,7 @@ class FloatingChatUI {
     }
 
     _getNextAvailableModel() {
-        const usedModels = WindowManager.windows.map(w => w.currentModel);
-        for (const m of this.availableModels) {
-            if (!usedModels.includes(m.value)) return m.value;
-        }
-        return this.availableModels.find(m => m.value !== this.currentModel)?.value || null;
+        return getNextAvailableChatModel(this);
     }
 
     /**
@@ -2264,13 +1685,36 @@ class FloatingChatUI {
     async sendMessageDirect(text, parallelCount = 1, mode = null) {
         this.addMessage('user', text);
 
-        const requestId = this.showTypingIndicator();
+        let requestId = this.showTypingIndicator();
 
         const modelToUse = this.currentModel;
         const modeToUse = mode || this.currentMode || 'short';
 
         // Use displayText for API calls (compatible format) while preserving model attribution
         const formattedHistory = formatChatHistoryForApi(this.chatHistory, this._getModelDisplayName.bind(this));
+
+        // BYOK requests stream token-by-token over a dedicated port.
+        // Guest mode still uses the plain request/response proxy.
+        if (!this.isGuestMode && modelToUse !== 'groq:auto') {
+            const streamed = await this._streamChatResponse({
+                requestId,
+                selectedModel: modelToUse,
+                payload: {
+                    action: "CONTINUE_CHAT",
+                    model: modelToUse,
+                    history: formattedHistory,
+                    mode: modeToUse,
+                    parallelCount: parallelCount,
+                    requestId
+                }
+            });
+            if (streamed === 'handled') {
+                return;
+            }
+            // 'unsupported' (or interrupted before any output): retry legacy
+            // path with a fresh indicator/requestId pair.
+            requestId = this.showTypingIndicator();
+        }
 
         try {
             const response = await chrome.runtime.sendMessage({
@@ -2316,6 +1760,229 @@ class FloatingChatUI {
             this.addMessage('assistant', "⚠️ Network Error: " + e.message, modelToUse, true);
         }
         this._notifyRequestFinished();
+    }
+
+    /**
+     * Stream a chat request over the snip-ask-stream port.
+     * @returns {Promise<'handled'|'unsupported'>} 'handled' when the response
+     * (or error) was fully rendered here; 'unsupported' when the caller should
+     * fall back to the legacy request/response path.
+     */
+    _streamChatResponse({ requestId, selectedModel, payload }) {
+        return new Promise((resolve) => {
+            let port;
+            try {
+                port = chrome.runtime.connect({ name: 'snip-ask-stream' });
+            } catch {
+                resolve('unsupported');
+                return;
+            }
+
+            let settled = false;
+            let sawDelta = false;
+            let bubble = null;
+            let pendingText = '';
+            let renderer = null;
+            let doneMsg = null;
+            let finalized = false;
+
+            const cleanup = () => {
+                if (renderer) {
+                    renderer.destroy();
+                    renderer = null;
+                }
+                try {
+                    port.disconnect();
+                } catch {
+                    // Already disconnected.
+                }
+                if (bubble) {
+                    bubble.remove();
+                    bubble = null;
+                }
+            };
+
+            const finishCancelled = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                this.removeTypingIndicator();
+                this._notifyRequestFinished();
+                resolve('handled');
+            };
+
+            const finishInterrupted = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                if (!sawDelta) {
+                    resolve('unsupported');
+                    return;
+                }
+                this.removeTypingIndicator();
+                this.addMessage('assistant', "⚠️ Connection interrupted. Please try again.", selectedModel, true);
+                this._notifyRequestFinished();
+                resolve('handled');
+            };
+
+            // Swap the streaming bubble for the canonical rendered message
+            // once the typewriter reveal has caught up with the final text.
+            const finalizeAfterDone = () => {
+                if (finalized || !settled || !doneMsg) return;
+                finalized = true;
+                if (renderer) {
+                    renderer.destroy();
+                    renderer = null;
+                }
+                if (bubble) {
+                    bubble.remove();
+                    bubble = null;
+                }
+                this.removeTypingIndicator();
+
+                if (this._requestCancelled) {
+                    this._notifyRequestFinished();
+                    resolve('handled');
+                    return;
+                }
+
+                const response = doneMsg.response;
+                if (response && response.success) {
+                    const responseModel = response.responseModel || response.model || selectedModel;
+                    this.addMessage(
+                        'assistant',
+                        response.answer,
+                        responseModel,
+                        false,
+                        null,
+                        false,
+                        response.tokenUsage,
+                        this._createAssistantMetadata(response, { selectedModel })
+                    );
+                    if (response.guestInfo) {
+                        updateLocalGuestCache(response.guestInfo);
+                    }
+                } else {
+                    this.addMessage('assistant', "⚠️ Error: " + (response?.error || "Unknown error"), selectedModel, true);
+                }
+                this._notifyRequestFinished();
+                resolve('handled');
+            };
+
+            const ensureRenderer = () => {
+                if (renderer || !bubble) return renderer;
+                const contentDiv = bubble.querySelector('.sa-streaming-content');
+                if (!contentDiv || typeof createSnipAskStreamRenderer !== 'function') {
+                    return null;
+                }
+                renderer = createSnipAskStreamRenderer(contentDiv, {
+                    onRender: () => {
+                        const body = this.chatBody;
+                        const distanceFromBottom = body.scrollHeight - body.scrollTop - body.clientHeight;
+                        if (distanceFromBottom < 120) {
+                            body.scrollTop = body.scrollHeight;
+                        }
+                        // Stop clicked while the reveal was still draining.
+                        if (settled && this._requestCancelled && doneMsg) {
+                            finalizeAfterDone();
+                        }
+                    },
+                    onSettled: () => finalizeAfterDone()
+                });
+                return renderer;
+            };
+
+            port.onDisconnect.addListener(() => {
+                if (this._requestCancelled) {
+                    finishCancelled();
+                    return;
+                }
+                finishInterrupted();
+            });
+
+            port.onMessage.addListener((msg) => {
+                if (settled) return;
+
+                if (msg.type === 'delta') {
+                    if (this._requestCancelled) return;
+                    if (!bubble) {
+                        this.removeTypingIndicator();
+                        bubble = this._createStreamingBubble();
+                    }
+                    sawDelta = true;
+                    pendingText += msg.text;
+                    ensureRenderer()?.update(pendingText);
+                    return;
+                }
+
+                if (msg.type === 'done') {
+                    settled = true;
+                    doneMsg = msg;
+                    try {
+                        port.disconnect();
+                    } catch {
+                        // Background already closed the port.
+                    }
+
+                    if (this._requestCancelled || !renderer) {
+                        // Nothing (or nothing worth draining) on screen.
+                        finalizeAfterDone();
+                        return;
+                    }
+                    // Let the typewriter reveal catch up, then swap renders.
+                    renderer.complete();
+                    return;
+                }
+
+                if (msg.type === 'error') {
+                    if (this._requestCancelled) {
+                        finishCancelled();
+                        return;
+                    }
+                    settled = true;
+                    cleanup();
+                    this.removeTypingIndicator();
+                    this.addMessage('assistant', "⚠️ Error: " + (msg.error || "Unknown error"), selectedModel, true);
+                    this._notifyRequestFinished();
+                    resolve('handled');
+                }
+            });
+
+            port.postMessage(payload);
+        });
+    }
+
+    /**
+     * Create a live-updating assistant bubble for streamed output.
+     */
+    _createStreamingBubble() {
+        // One-time caret animation styles for this shadow root.
+        if (this.shadow && !this.shadow.getElementById('sa-stream-caret-style')) {
+            const style = document.createElement('style');
+            style.id = 'sa-stream-caret-style';
+            style.textContent = `
+                @keyframes saCaretBlink { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0; } }
+                .sa-stream-caret {
+                    display: inline-block;
+                    margin-left: 1px;
+                    color: var(--sa-accent-soft, #ff8a6d);
+                    animation: saCaretBlink 0.9s steps(1) infinite;
+                }
+            `;
+            this.shadow.appendChild(style);
+        }
+
+        const msgDiv = document.createElement('div');
+        // Matches the flat assistant-message style so the final render swap
+        // doesn't shift the layout.
+        msgDiv.className = 'assistant-message';
+        msgDiv.style.cssText = "max-width: 100%; padding: 0; border-radius: 0; line-height: var(--sa-leading-reading); word-wrap: break-word; font-size: var(--sa-type-body-large); align-self: flex-start; background: transparent; color: var(--sa-text-primary); border: none; box-shadow: none;";
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'sa-streaming-content';
+        msgDiv.appendChild(contentDiv);
+        this.chatBody.appendChild(msgDiv);
+        this.chatBody.scrollTop = this.chatBody.scrollHeight;
+        return msgDiv;
     }
 
     /**

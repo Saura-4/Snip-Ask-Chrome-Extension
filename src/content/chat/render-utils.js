@@ -71,7 +71,7 @@ function getOcrToggleText(content, displayText, metadata) {
     return '';
 }
 
-function renderUserMessageContent(targetUI, msgDiv, content, base64Image, displayText, showImageModal, messageIndex, metadata) {
+function renderUserMessageContent(targetUI, msgDiv, content, base64Image, displayText, showImageModal, metadata) {
     const hasImage = Boolean(base64Image) || (Array.isArray(content) && content.some((item) => item.type === 'image_url'));
     const ocrText = getOcrToggleText(content, displayText, metadata);
     const canToggleOcr = hasImage && metadata?.usedOCR === true && Boolean(ocrText);
@@ -250,7 +250,7 @@ function renderAssistantMessageContent(targetUI, msgDiv, options) {
     msgDiv.appendChild(labelDiv);
 
     const contentDiv = document.createElement("div");
-    contentDiv.style.cssText = "max-height: 360px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #404040 transparent; color: var(--sa-text-primary); font-size: var(--sa-type-body-large); line-height: var(--sa-leading-reading); padding: 0 var(--sa-space-1) var(--sa-space-1) 0;";
+    contentDiv.style.cssText = "color: var(--sa-text-primary); font-size: var(--sa-type-body-large); line-height: var(--sa-leading-reading); padding: 0 var(--sa-space-1) var(--sa-space-1) 0;";
     const cleanText = sanitizeModelText(content);
     if (typeof parseMarkdown === 'function') {
         contentDiv.innerHTML = parseMarkdown(cleanText);
@@ -383,16 +383,21 @@ function renderChatMessage(targetUI, options) {
         msgDiv.style.border = "var(--sa-border-default)";
         msgDiv.style.borderRadius = "var(--sa-radius-lg) var(--sa-radius-lg) var(--sa-space-1) var(--sa-radius-lg)";
         msgDiv.style.boxShadow = "var(--sa-shadow-sm)";
-        renderUserMessageContent(targetUI, msgDiv, content, base64Image, displayText, (imageSrc) => targetUI._showImageModal(imageSrc), messageIndex, metadata);
+        renderUserMessageContent(targetUI, msgDiv, content, base64Image, displayText, (imageSrc) => targetUI._showImageModal(imageSrc), metadata);
     } else {
+        // Assistant responses render flat (no card), like modern LLM chats.
         msgDiv.classList.add('assistant-message');
         msgDiv.style.alignSelf = "flex-start";
-        msgDiv.style.background = "var(--sa-surface-panel)";
-        msgDiv.style.color = "var(--sa-text-primary)";
-        msgDiv.style.border = "var(--sa-border-default)";
-        msgDiv.style.borderRadius = "var(--sa-radius-lg) var(--sa-radius-lg) var(--sa-radius-lg) var(--sa-space-1)";
-        msgDiv.style.padding = "var(--sa-space-8) var(--sa-space-8) var(--sa-space-7)";
-        msgDiv.style.boxShadow = "var(--sa-shadow-sm)";
+        msgDiv.style.maxWidth = "100%";
+        msgDiv.style.background = "transparent";
+        msgDiv.style.border = "none";
+        msgDiv.style.borderRadius = "0";
+        msgDiv.style.boxShadow = "none";
+        msgDiv.style.padding = "0";
+        if (isError) {
+            msgDiv.style.borderLeft = "2px solid rgba(255,107,74,0.55)";
+            msgDiv.style.paddingLeft = "var(--sa-space-5)";
+        }
         renderAssistantMessageContent(targetUI, msgDiv, {
             content,
             includeActions,
