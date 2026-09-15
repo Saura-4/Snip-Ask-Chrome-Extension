@@ -8,6 +8,13 @@
  * @param {FloatingChatUI} ui
  */
 async function spawnCompareWindowFor(ui) {
+    if (ui.isGuestMode) {
+        if (typeof showErrorToast === 'function') {
+            showErrorToast('Compare mode requires your own API key (BYOK). Add an API key in settings to unlock.');
+        }
+        return;
+    }
+
     if (WindowManager.isMaxReached()) {
         showErrorToast(`Maximum ${WindowManager.maxWindows} comparison windows allowed`);
         return;

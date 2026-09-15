@@ -117,6 +117,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             let ui;
             let reservedCompareSlot = false;
             try {
+                if (request.compare && request.session?.isGuestMode) {
+                    sendResponse({
+                        success: false,
+                        error: 'Compare mode requires your own API key (BYOK).'
+                    });
+                    return;
+                }
+
                 if (request.compare && WindowManager.windows.length + pendingCompareOpenCount >= WindowManager.maxWindows) {
                     sendResponse({
                         success: false,

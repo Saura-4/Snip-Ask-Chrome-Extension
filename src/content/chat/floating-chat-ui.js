@@ -86,6 +86,8 @@ class FloatingChatUI {
         if (!isCurrentModelValid && this.availableModels.length > 0) {
             this.currentModel = this.availableModels[0].value;
         }
+
+        this.updateCompareButton();
     }
 
     /**
@@ -473,7 +475,7 @@ class FloatingChatUI {
                 flex: 0 0 auto;
                 transition: background var(--sa-transition-normal), border-color var(--sa-transition-normal), color var(--sa-transition-normal), transform var(--sa-transition-fast);
             }
-            .chat-header-action:hover {
+            .chat-header-action:hover:not(:disabled) {
                 background: var(--sa-surface-hover);
                 border-color: rgba(255,255,255,0.08);
                 color: var(--sa-accent-soft);
@@ -482,7 +484,20 @@ class FloatingChatUI {
                 outline: none;
                 border-color: rgba(255,107,74,0.24);
             }
-            .chat-header-action:active { transform: scale(0.96); }
+            .chat-header-action:active:not(:disabled) { transform: scale(0.96); }
+            .chat-header-action:disabled,
+            .chat-header-action.disabled {
+                opacity: 0.35;
+                cursor: not-allowed;
+                pointer-events: auto;
+            }
+            .chat-header-action:disabled:hover,
+            .chat-header-action.disabled:hover {
+                background: transparent;
+                border-color: transparent;
+                color: #b8b8b8;
+                transform: none;
+            }
             .chat-header-action svg {
                 width: var(--sa-icon-md);
                 height: var(--sa-icon-md);
@@ -774,8 +789,24 @@ class FloatingChatUI {
         compareBtn.className = "chat-header-action";
         compareBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`;
         compareBtn.title = "Compare with another model";
-        compareBtn.onclick = () => this.spawnCompareWindow();
+        compareBtn.onclick = () => {
+            if (this.isGuestMode) {
+                if (typeof showErrorToast === 'function') {
+                    showErrorToast('Compare mode requires your own API key (BYOK). Add an API key in settings to unlock.');
+                }
+                return;
+            }
+            this.spawnCompareWindow();
+        };
         actionGroup.appendChild(compareBtn);
+
+        actionGroup.addEventListener("click", (e) => {
+            if (this.isGuestMode && this.compareBtn && (e.target === this.compareBtn || this.compareBtn.contains(e.target))) {
+                if (typeof showErrorToast === 'function') {
+                    showErrorToast('Compare mode requires your own API key (BYOK). Add an API key in settings to unlock.');
+                }
+            }
+        });
 
         const displayModeBtn = document.createElement("button");
         displayModeBtn.type = "button";
@@ -828,6 +859,8 @@ class FloatingChatUI {
         closeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
         actionGroup.appendChild(closeBtn);
         header.appendChild(actionGroup);
+
+        this.updateCompareButton();
 
         this.container.appendChild(header);
 
@@ -1042,6 +1075,22 @@ class FloatingChatUI {
         }
     }
 
+    updateCompareButton() {
+        if (!this.compareBtn) return;
+
+        if (this.isGuestMode) {
+            this.compareBtn.disabled = true;
+            this.compareBtn.classList.add('disabled');
+            this.compareBtn.title = 'Compare mode requires your own API key (BYOK). Add an API key in settings to unlock.';
+            this.compareBtn.setAttribute('aria-disabled', 'true');
+        } else {
+            this.compareBtn.disabled = false;
+            this.compareBtn.classList.remove('disabled');
+            this.compareBtn.title = 'Compare with another model';
+            this.compareBtn.removeAttribute('aria-disabled');
+        }
+    }
+
     serializeSession() {
         return SnipAskSession.serializeFloatingChat(this);
     }
@@ -1208,6 +1257,10 @@ class FloatingChatUI {
         const tokenUsage = response.tokenUsage || overrides.tokenUsage || null;
         const usedOCR = response.usedOCR === true || overrides.usedOCR === true;
         const isGuestResponse = Boolean(response.guestInfo) || overrides.isGuestResponse === true;
+        if (isGuestResponse && !this.isGuestMode) {
+            this.isGuestMode = true;
+            this.updateCompareButton();
+        }
         const visionRetryEligible = overrides.visionRetryEligible === true ||
             overrides.scoutRetryEligible === true ||
             (selectedModel === 'groq:auto' && usedOCR && isGuestResponse && !this._isVisionFallbackModel(responseModel));
@@ -1665,6 +1718,12 @@ class FloatingChatUI {
      * Duplicates the entire chat history and regenerates the last response.
      */
     async spawnCompareWindow() {
+        if (this.isGuestMode) {
+            if (typeof showErrorToast === 'function') {
+                showErrorToast('Compare mode requires your own API key (BYOK). Add an API key in settings to unlock.');
+            }
+            return;
+        }
         return spawnCompareWindowFor(this);
     }
 

@@ -472,6 +472,10 @@ export function createRuntimeMessageListener() {
         }
 
         if (request.action === 'OPEN_COMPARE_FROM_SIDEPANEL') {
+            if (request.session?.isGuestMode) {
+                sendResponse({ success: false, error: 'Compare mode requires your own API key (BYOK).' });
+                return true;
+            }
             openFloatingPopupSession(request.session, true, null, request.sourceModel || null)
                 .then(() => sendResponse({ success: true }))
                 .catch((error) => sendResponse({ success: false, error: error.message }));

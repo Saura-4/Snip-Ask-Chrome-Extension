@@ -199,6 +199,7 @@
         }
 
         ui.updateDisplayModeButton();
+        ui.updateCompareButton?.();
     }
 
     function isSameRenderedSession(session, ui) {

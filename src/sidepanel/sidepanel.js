@@ -79,6 +79,12 @@ async function renderSession(session) {
 
         if (sidePanelUi.compareBtn) {
             sidePanelUi.compareBtn.onclick = async () => {
+                if (sidePanelUi.isGuestMode) {
+                    if (typeof showErrorToast === 'function') {
+                        showErrorToast('Compare mode requires your own API key (BYOK). Add an API key in settings to unlock.');
+                    }
+                    return;
+                }
                 try {
                     const result = await chrome.runtime.sendMessage({
                         action: 'OPEN_COMPARE_FROM_SIDEPANEL',
