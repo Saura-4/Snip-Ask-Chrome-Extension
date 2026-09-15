@@ -288,11 +288,22 @@ function hideLoadingCursor(options = {}) {
 function isVisionModel(modelName) {
     if (!modelName) return false;
     const lower = modelName.toLowerCase();
+
+    // Text-only providers: never send an image, even when the model name looks
+    // multimodal (e.g. cerebras:llama-4-scout). Keep in sync with the textOnly
+    // flag in src/background/models/provider-registry.js.
+    if (lower.startsWith("cerebras:")) return false;
+
     return lower.includes("llama-4") ||
+        lower.includes("llama4") ||
         lower.includes("qwen3.6") ||
+        lower.includes("qwen3.8") ||
+        lower.includes("qwen3-vl") ||
         lower.includes("vision") ||
         lower.includes("gemini") ||
         lower.includes("gemma-3") ||
+        lower.includes("gemma-4") ||
+        lower.includes("gpt-6") ||
         lower.includes("gpt-5") ||
         lower.includes("gpt-4o") ||
         lower.includes("gpt-4.1") ||
@@ -300,7 +311,13 @@ function isVisionModel(modelName) {
         lower.includes("moondream") ||
         lower.includes("minicpm") ||
         lower.includes("qwen-vl") ||
-        lower.includes("omni");
+        lower.includes("omni") ||
+        lower.includes("glm-4.5v") ||
+        lower.includes("glm-4.6v") ||
+        lower.includes("glm-5.3-flash") ||
+        lower.includes("kimi-k") ||
+        lower.includes("muse-spark") ||
+        lower.includes("deepseek-flash");
 }
 
 /**

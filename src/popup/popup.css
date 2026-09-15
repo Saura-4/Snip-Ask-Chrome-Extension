@@ -851,6 +851,18 @@ body.settings-open {
     opacity: 0.9;
 }
 
+/* Text badge stands in for providers that ship no bundled logo asset. */
+.provider-logo-text {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    text-transform: uppercase;
+    border-radius: 4px;
+    border: 1px solid var(--sa-border, rgba(255, 255, 255, 0.18));
+    color: var(--sa-text-secondary);
+}
+
 .provider-details {
     display: flex;
     flex-direction: column;
@@ -1349,6 +1361,85 @@ body.settings-open {
     outline: none;
     border-color: rgba(255, 107, 74, 0.36);
     box-shadow: var(--sa-focus-ring);
+}
+
+.opacity-option {
+    gap: var(--sa-space-4);
+}
+
+.opacity-slider-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    max-width: 170px;
+}
+
+.opacity-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: var(--sa-radius-pill);
+    outline: none;
+    cursor: pointer;
+    transition: background var(--sa-transition-normal);
+}
+
+.opacity-slider:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.opacity-slider:focus {
+    box-shadow: 0 0 0 2px rgba(255, 107, 74, 0.25);
+}
+
+.opacity-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--sa-accent);
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    transition: transform var(--sa-transition-fast), background var(--sa-transition-fast);
+}
+
+.opacity-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+    background: var(--sa-accent-hover);
+}
+
+.opacity-slider::-webkit-slider-thumb:active {
+    transform: scale(0.95);
+}
+
+.opacity-slider::-moz-range-thumb {
+    width: 15px;
+    height: 15px;
+    border: none;
+    border-radius: 50%;
+    background: var(--sa-accent);
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    transition: transform var(--sa-transition-fast), background var(--sa-transition-fast);
+}
+
+.opacity-slider::-moz-range-thumb:hover {
+    transform: scale(1.15);
+    background: var(--sa-accent-hover);
+}
+
+.opacity-value {
+    font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+    font-size: var(--sa-type-small);
+    font-weight: 600;
+    color: var(--sa-text-primary);
+    min-width: 38px;
+    text-align: right;
+    user-select: none;
 }
 
 .settings-hint {

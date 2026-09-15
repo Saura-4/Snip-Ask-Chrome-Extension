@@ -22,6 +22,7 @@ class FloatingChatUI {
         this.allImages = [];  // Store all snipped images for compare window
         this.activeTabId = null;
         this.windowId = null;
+        this.windowOpacity = 100;
     }
 
     /**
@@ -71,13 +72,14 @@ class FloatingChatUI {
 
         // Get the current selected model, mode, and custom modes from storage
         const storage = await new Promise(resolve => {
-            chrome.storage.local.get(['selectedModel', 'selectedMode', 'customModes', 'customPrompt'], resolve);
+            chrome.storage.local.get(['selectedModel', 'selectedMode', 'customModes', 'customPrompt', 'windowOpacity'], resolve);
         });
         this.currentModel = storage.selectedModel || 'groq:auto';
         this.currentMode = storage.selectedMode || 'short';
         this.displayMode = 'popup';
         this.customModes = storage.customModes || [];
         this.customPrompt = storage.customPrompt || '';
+        this.windowOpacity = storage.windowOpacity !== undefined ? Number(storage.windowOpacity) : 100;
 
         // If current model is not in available models, auto-select first available
         const isCurrentModelValid = this.availableModels.some(m => m.value === this.currentModel);
@@ -299,7 +301,24 @@ class FloatingChatUI {
             this.container.style.resize = 'both';
         }
 
+        this.applyOpacity(this.windowOpacity);
         this._savedState = null;
+    }
+
+    /**
+     * Apply window opacity setting
+     * @param {number} opacity - 0 to 100
+     */
+    applyOpacity(opacity) {
+        if (this.isSidePanelHost) return;
+        const val = opacity !== undefined && opacity !== null ? Number(opacity) : 100;
+        const bounded = Math.max(0, Math.min(100, isNaN(val) ? 100 : val));
+        this.windowOpacity = bounded;
+        const normalized = (bounded / 100).toString();
+        if (this.container) {
+            this.container.style.setProperty('--sa-window-opacity', normalized);
+            this.container.style.opacity = normalized;
+        }
     }
 
     /**
@@ -365,8 +384,10 @@ class FloatingChatUI {
             min-width: 320px; min-height: 280px;
             max-width: 90vw; max-height: 90vh;
             backdrop-filter: blur(6px);
+            opacity: var(--sa-window-opacity, 1);
             animation: slideIn var(--sa-transition-entrance) both;
         `;
+        this.applyOpacity(this.windowOpacity);
 
         // Inject UX Polish Styles (Tables, Code Blocks, Typing Indicator)
         const style = document.createElement('style');
@@ -377,10 +398,10 @@ class FloatingChatUI {
             /* WINDOW TRANSITIONS */
             @keyframes slideIn {
                 from { opacity: 0; transform: translateY(20px) scale(0.95); }
-                to { opacity: 1; transform: translateY(0) scale(1); }
+                to { opacity: var(--sa-window-opacity, 1); transform: translateY(0) scale(1); }
             }
             @keyframes slideOut {
-                from { opacity: 1; transform: translateY(0) scale(1); }
+                from { opacity: var(--sa-window-opacity, 1); transform: translateY(0) scale(1); }
                 to { opacity: 0; transform: translateY(10px) scale(0.95); }
             }
 
@@ -1178,7 +1199,7 @@ class FloatingChatUI {
 
     _isVisionFallbackModel(modelValue) {
         return typeof modelValue === 'string' &&
-            modelValue.toLowerCase().includes('qwen3.6-27b');
+            /qwen3\.[68]-27b/.test(modelValue.toLowerCase());
     }
 
     _createAssistantMetadata(response = {}, overrides = {}) {

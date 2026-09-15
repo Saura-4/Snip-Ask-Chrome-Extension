@@ -19,12 +19,16 @@ const WindowManager = {
     /** @type {string|null} Window id currently docked as sidebar */
     sidebarWindowId: null,
 
+    /** @type {number} Current window opacity (0-100) */
+    windowOpacity: 100,
+
     /**
      * Initialize window manager settings from storage
      */
     init() {
-        chrome.storage.local.get(['maxCompareWindows'], (res) => {
+        chrome.storage.local.get(['maxCompareWindows', 'windowOpacity'], (res) => {
             if (res.maxCompareWindows) this.maxWindows = res.maxCompareWindows;
+            if (res.windowOpacity !== undefined) this.windowOpacity = Number(res.windowOpacity);
         });
 
         chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -34,6 +38,15 @@ const WindowManager = {
                 this.maxWindows = changes.maxCompareWindows.newValue || 4;
             }
 
+            if (changes.windowOpacity) {
+                const newOpacity = changes.windowOpacity.newValue !== undefined ? Number(changes.windowOpacity.newValue) : 100;
+                this.windowOpacity = newOpacity;
+                this.windows.forEach((w) => {
+                    if (typeof w.applyOpacity === 'function') {
+                        w.applyOpacity(newOpacity);
+                    }
+                });
+            }
         });
 
         // Global Escape Key Handler
@@ -61,6 +74,9 @@ const WindowManager = {
      */
     register(ui) {
         this.windows.push(ui);
+        if (this.windowOpacity !== undefined && typeof ui.applyOpacity === 'function') {
+            ui.applyOpacity(this.windowOpacity);
+        }
         if (ui.displayMode === 'sidebar') {
             this.setSidebarWindow(ui, false);
             return;

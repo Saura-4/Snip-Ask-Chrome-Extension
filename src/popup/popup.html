@@ -327,6 +327,9 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
+
+      <!-- OpenAI-compatible providers, rendered from models/provider-registry.js -->
+      <div id="providerList"></div>
     </div>
 
     <!-- Models Tab -->
@@ -400,6 +403,25 @@
             <option value="4" selected>4</option>
           </select>
         </div>
+      </div>
+
+      <!-- Window Opacity -->
+      <div class="settings-section">
+        <div class="settings-section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 2a10 10 0 0 1 0 20z" fill="currentColor" />
+          </svg>
+          Window Opacity
+        </div>
+        <div class="settings-option opacity-option">
+          <span>Chat window opacity:</span>
+          <div class="opacity-slider-container">
+            <input type="range" id="windowOpacityInput" min="0" max="100" value="100" class="opacity-slider" aria-label="Chat window opacity">
+            <span id="windowOpacityValue" class="opacity-value">100%</span>
+          </div>
+        </div>
+        <div class="settings-hint">Adjust transparency of the floating chat window (0-100%)</div>
       </div>
 
       <!-- Context Menu -->

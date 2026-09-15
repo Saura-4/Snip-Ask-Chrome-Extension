@@ -1,6 +1,12 @@
 import { isGoogleModel, isOllamaModel, isOpenAIModel, isOpenRouterModel } from '../../background/models/model-routing.js';
+import { getProviderConfigForModel } from '../../background/models/provider-registry.js';
 
 function getMissingConfigMessage(model, storage) {
+    const registryProvider = getProviderConfigForModel(model);
+    if (registryProvider) {
+        return storage[registryProvider.storageKey] ? null : `Please set ${registryProvider.label} API Key`;
+    }
+
     if (isOllamaModel(model) && !storage.ollamaHost) {
         return 'Please set Ollama URL in API Keys';
     }

@@ -3,26 +3,66 @@ import { optimizeMessageHistory } from '../ai/token-budget.js';
 import { isGuestMode, isGuestConfigured, makeGuestRequest, GUEST_DEFAULT_MODEL } from '../guest-config.js';
 import { getChatWindowModels, checkGuestModeStatus } from '../models/models-config.js';
 import { isAutoGuestModel, isGoogleModel, isGroqModel, isOllamaModel, isOpenAIModel, isOpenRouterModel } from '../models/model-routing.js';
+import { getProviderConfigForModel, getProviderStorageKeys } from '../models/provider-registry.js';
 import { buildGuestRequestPayload, buildGuestSystemPrompt } from '../guest/request.js';
 import { parseGuestResponse } from '../guest/response.js';
 import { getStorage } from '../core/storage.js';
 
 const GUEST_TEXT_LIMIT = 4000;
 
-function getProviderCredential(modelName, storage) {
+// Storage keys every handler must load to resolve a credential for any model.
+const PROVIDER_STORAGE_KEYS = ['groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost', ...getProviderStorageKeys()];
+
+/**
+ * Which credential a model needs, and whether Guest Mode can serve it at all.
+ * Only the built-in Groq models run through the guest worker.
+ */
+function getProviderRequirement(modelName) {
+    const registryProvider = getProviderConfigForModel(modelName);
+    if (registryProvider) {
+        return { label: registryProvider.label, storageKey: registryProvider.storageKey, guestCapable: false };
+    }
     if (isOllamaModel(modelName)) {
-        return storage.ollamaHost || "http://localhost:11434";
+        return { label: 'Ollama', storageKey: 'ollamaHost', guestCapable: false, isHost: true };
     }
     if (isOpenRouterModel(modelName)) {
-        return storage.openrouterKey;
+        return { label: 'OpenRouter', storageKey: 'openrouterKey', guestCapable: false };
     }
     if (isGoogleModel(modelName)) {
-        return storage.geminiKey;
+        return { label: 'Gemini', storageKey: 'geminiKey', guestCapable: false };
     }
     if (isOpenAIModel(modelName)) {
-        return storage.openaiKey;
+        return { label: 'OpenAI', storageKey: 'openaiKey', guestCapable: false };
     }
-    return storage.groqKey;
+    return { label: 'Groq', storageKey: 'groqKey', guestCapable: true };
+}
+
+function getProviderCredential(modelName, storage) {
+    const requirement = getProviderRequirement(modelName);
+    if (requirement.isHost) {
+        return storage.ollamaHost || "http://localhost:11434";
+    }
+    return storage[requirement.storageKey];
+}
+
+/** Error for a model whose credential is missing, naming the provider. */
+function missingCredentialError(modelName) {
+    const requirement = getProviderRequirement(modelName);
+    if (requirement.isHost) {
+        return new Error('Ollama host is not set. Add your Ollama URL in Settings -> API Keys.');
+    }
+    return new Error(`Missing ${requirement.label} API key. Add it in Settings -> API Keys to use ${modelName}.`);
+}
+
+/**
+ * Guest Mode can only answer with the built-in Groq models. Routing a BYOK
+ * model through it either fails on the worker allowlist or silently answers
+ * with a different model than the user picked — both confusing. Fail clearly.
+ */
+function assertGuestCanServe(modelName) {
+    const requirement = getProviderRequirement(modelName);
+    if (requirement.guestCapable) return;
+    throw new Error(`${requirement.label} models need your own API key. Add your ${requirement.label} key in Settings -> API Keys, or pick a Guest Mode model.`);
 }
 
 function truncateGuestText(text, maxLength = GUEST_TEXT_LIMIT) {
@@ -60,16 +100,13 @@ export async function handleCustomModelValidation(request, sendResponse, signal)
             'customPrompt',
             'selectedMode',
             'interactionMode',
-            'groqKey',
-            'geminiKey',
-            'openaiKey',
-            'openrouterKey',
+            ...PROVIDER_STORAGE_KEYS,
             'ollamaHost'
         ]);
 
         const activeKeyOrHost = getProviderCredential(modelName, storage);
         if (!activeKeyOrHost) {
-            throw new Error('Missing provider configuration. Add the API key or host first.');
+            throw missingCredentialError(modelName);
         }
 
         const mode = storage.selectedMode || storage.interactionMode || 'short';
@@ -92,7 +129,7 @@ export async function handleContinueChat(request, sendResponse, signal, onDelta 
     try {
         const storage = await getStorage([
             'interactionMode', 'customPrompt', 'selectedModel', 'selectedMode',
-            'customModes', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost'
+            'customModes', ...PROVIDER_STORAGE_KEYS
         ]);
 
         const modelName = request.model || storage.selectedModel;
@@ -125,7 +162,7 @@ export async function handleContinueChat(request, sendResponse, signal, onDelta 
 
         const activeKeyOrHost = getProviderCredential(modelName, storage);
         if (!activeKeyOrHost) {
-            throw new Error('Missing API key. Please configure your API keys in the extension popup.');
+            throw missingCredentialError(modelName);
         }
 
         const mode = request.mode || storage.selectedMode || storage.interactionMode || 'short';
@@ -140,29 +177,16 @@ export async function handleContinueChat(request, sendResponse, signal, onDelta 
 
 export async function handleProviderConfigCheck(request, sendResponse) {
     try {
-        const storage = await getStorage(['groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost', 'selectedModel', 'selectedMode', 'interactionMode']);
+        const storage = await getStorage([...PROVIDER_STORAGE_KEYS, 'selectedModel', 'selectedMode', 'interactionMode']);
         const requestedModel = request.model || storage.selectedModel || GUEST_DEFAULT_MODEL;
         const modelName = requestedModel;
         const currentMode = storage.selectedMode || storage.interactionMode || 'short';
 
-        let isConfigured = false;
-        let providerName = 'Groq Key';
-
-        if (isOllamaModel(modelName)) {
-            isConfigured = !!storage.ollamaHost;
-            providerName = 'Ollama Host';
-        } else if (isOpenRouterModel(modelName)) {
-            isConfigured = !!storage.openrouterKey;
-            providerName = 'OpenRouter Key';
-        } else if (isGoogleModel(modelName)) {
-            isConfigured = !!storage.geminiKey;
-            providerName = 'Google Key';
-        } else if (isOpenAIModel(modelName)) {
-            isConfigured = !!storage.openaiKey;
-            providerName = 'OpenAI Key';
-        } else {
-            isConfigured = !!storage.groqKey || isGuestConfigured();
-        }
+        const requirement = getProviderRequirement(modelName);
+        const providerName = requirement.isHost ? 'Ollama Host' : `${requirement.label} Key`;
+        const isConfigured = requirement.guestCapable
+            ? (!!storage[requirement.storageKey] || isGuestConfigured())
+            : !!storage[requirement.storageKey];
 
         sendResponse({
             success: true,
@@ -211,7 +235,7 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
     try {
         const storage = await getStorage([
             'interactionMode', 'customPrompt', 'selectedModel', 'selectedMode',
-            'customModes', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost'
+            'customModes', ...PROVIDER_STORAGE_KEYS
         ]);
         const mode = explicitMode || storage.selectedMode || storage.interactionMode || 'short';
         const requestedModelName = explicitModel || storage.selectedModel || GUEST_DEFAULT_MODEL;
@@ -237,6 +261,7 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
                 messages.push({ role: 'user', content: truncateGuestText(inputContent) });
             }
 
+            assertGuestCanServe(requestedModelName);
             const guestRequest = buildGuestRequestPayload({
                 modelName: requestedModelName,
                 mode,
@@ -266,7 +291,7 @@ export async function handleAIRequest(inputContent, type, explicitModel, sendRes
 
         const activeKeyOrHost = getProviderCredential(modelName, storage);
         if (!activeKeyOrHost) {
-            throw new Error('Missing Configuration. Please configure your API keys in the extension popup.');
+            throw missingCredentialError(modelName);
         }
 
         const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);
@@ -294,7 +319,7 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
     try {
         const storage = await getStorage([
             'interactionMode', 'customPrompt', 'selectedModel', 'selectedMode',
-            'customModes', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost'
+            'customModes', ...PROVIDER_STORAGE_KEYS
         ]);
         const mode = explicitMode || storage.selectedMode || storage.interactionMode || 'short';
         const requestedModelName = explicitModel || storage.selectedModel || GUEST_DEFAULT_MODEL;
@@ -314,6 +339,7 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
             }
             messages.push({ role: 'user', content: contentArray });
 
+            assertGuestCanServe(requestedModelName);
             const guestRequest = buildGuestRequestPayload({
                 modelName: requestedModelName,
                 mode,
@@ -341,7 +367,7 @@ export async function handleMultiImageRequest(images, explicitModel, textContext
 
         const activeKeyOrHost = getProviderCredential(modelName, storage);
         if (!activeKeyOrHost) {
-            throw new Error('Missing Configuration. Please configure your API keys in the extension popup.');
+            throw missingCredentialError(modelName);
         }
 
         const aiService = getAIService(activeKeyOrHost, modelName, mode, storage.customPrompt, storage.customModes);

@@ -6,8 +6,8 @@ import { CLOUD_TIMEOUT_MS, fetchWithTimeout } from '../transport.js';
 import { streamChatCompletions } from '../streaming.js';
 import { createTextSnipMessage, stripThinkingTags } from '../text-utils.js';
 
-function isQwen36Model(modelName) {
-    return typeof modelName === 'string' && modelName.toLowerCase().includes('qwen3.6-27b');
+function isQwenReasoningModel(modelName) {
+    return typeof modelName === 'string' && /qwen3\.[68]-27b/.test(modelName.toLowerCase());
 }
 
 function isGptOssModel(modelName) {
@@ -18,12 +18,19 @@ function isGptOssModel(modelName) {
 // visible text. Without a floor, small modes (short = 150) are consumed
 // entirely by reasoning and the model returns an empty answer.
 const REASONING_MODEL_MIN_COMPLETION_TOKENS = 1024;
+// Groq on_demand enforces OTPM 1000 on qwen: any larger max fails
+// deterministically ("Request too large ... OTPM: Limit 1000").
+const QWEN_MAX_OUTPUT_TOKENS = 1000;
 
 function applyReasoningModelGuards(requestBody, modelName) {
-    if (isQwen36Model(modelName)) {
+    if (isQwenReasoningModel(modelName)) {
         requestBody.temperature = 0.7;
         requestBody.reasoning_effort = 'none';
         requestBody.reasoning_format = 'hidden';
+        if (requestBody.max_completion_tokens > QWEN_MAX_OUTPUT_TOKENS) {
+            requestBody.max_completion_tokens = QWEN_MAX_OUTPUT_TOKENS;
+        }
+        return;
     } else if (isGptOssModel(modelName)) {
         // gpt-oss does not support reasoning_effort 'none' — use the lowest
         // effort and hide whatever reasoning remains.
@@ -42,7 +49,7 @@ function buildGroqRequestBody({ messages, model, mode }) {
     const requestBody = {
         messages,
         model,
-        temperature: isQwen36Model(model) ? 0.7 : 0.3,
+        temperature: isQwenReasoningModel(model) ? 0.7 : 0.3,
         max_completion_tokens: getMaxTokensForMode(mode, model)
     };
 
@@ -54,7 +61,7 @@ function buildGroqRequestBody({ messages, model, mode }) {
 class GroqService extends AbstractAIService {
     constructor(apiKey, modelName, interactionMode, customPrompt, customModes) {
         super(apiKey, modelName, interactionMode, customPrompt, customModes);
-        this.actualModel = normalizeProviderScopedModelName(modelName) || "qwen/qwen3.6-27b";
+        this.actualModel = normalizeProviderScopedModelName(modelName) || "qwen/qwen3.8-27b";
         this.API_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
     }
 
@@ -143,4 +150,4 @@ class GroqService extends AbstractAIService {
     }
 }
 
-export { GroqService, buildGroqRequestBody, isQwen36Model };
+export { GroqService, buildGroqRequestBody, isQwenReasoningModel };

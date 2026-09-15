@@ -14,6 +14,7 @@ import {
   toggleCustomModel,
   getMergedModelsWithCustom
 } from '../background/models/models-config.js';
+import { OPENAI_COMPATIBLE_PROVIDERS } from '../background/models/provider-registry.js';
 import { CONTENT_SCRIPT_FILES, isRestrictedPage } from '../background/core/content-script-files.js';
 import { getMissingConfigMessage } from './modules/model-validation.js';
 import {
@@ -42,8 +43,15 @@ const API_KEY_CONFIG = {
   google: { id: 'geminiKey', placeholder: 'Gemini Key (AIza...)', type: 'password', storageKey: 'geminiKey' },
   openai: { id: 'openaiKey', placeholder: 'OpenAI Key (sk-...)', type: 'password', storageKey: 'openaiKey' },
   openrouter: { id: 'openrouterKey', placeholder: 'OpenRouter Key (sk-or-...)', type: 'password', storageKey: 'openrouterKey' },
-  ollama: { id: 'ollamaHost', placeholder: 'Ollama URL (http://localhost:11434)', type: 'text', storageKey: 'ollamaHost' }
+  ollama: { id: 'ollamaHost', placeholder: 'Ollama URL (http://localhost:11434)', type: 'text', storageKey: 'ollamaHost' },
+  ...Object.fromEntries(Object.values(OPENAI_COMPATIBLE_PROVIDERS).map(config => [
+    config.id,
+    { id: config.storageKey, placeholder: config.keyPlaceholder, type: 'password', storageKey: config.storageKey }
+  ]))
 };
+
+// Every storage key that can hold a provider credential.
+const PROVIDER_STORAGE_KEYS = Object.values(API_KEY_CONFIG).map(config => config.storageKey);
 const DEFAULT_MODEL = 'groq:auto';
 const DEFAULT_MODE = 'default';
 
@@ -162,7 +170,7 @@ async function initializeDefaults() {
 async function loadSettings() {
   const result = await chrome.storage.local.get([
     'customModes', 'enabledProviders', 'enabledModels', 'selectedModel', 'selectedMode',
-    'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost', 'customPrompt',
+    ...PROVIDER_STORAGE_KEYS, 'customPrompt',
     'providerHiddenSince', 'hideContextMenu', 'hiddenModels'
   ]);
 
@@ -218,7 +226,78 @@ async function loadSettings() {
   }
 }
 
+// Registry providers get their settings row rendered from the registry so adding
+// a provider needs no extra popup.html markup.
+function renderRegistryProviderRows() {
+  const list = document.getElementById('providerList');
+  if (!list || list.dataset.registryRendered === 'true') return;
+
+  for (const config of Object.values(OPENAI_COMPATIBLE_PROVIDERS)) {
+    const item = document.createElement('div');
+    item.className = 'provider-item';
+
+    const info = document.createElement('div');
+    info.className = 'provider-info';
+
+    const logo = document.createElement('span');
+    logo.className = 'provider-logo provider-logo-text';
+    logo.setAttribute('aria-hidden', 'true');
+    logo.textContent = config.badge;
+    info.appendChild(logo);
+
+    const details = document.createElement('div');
+    details.className = 'provider-details';
+    const name = document.createElement('span');
+    name.className = 'provider-name';
+    name.textContent = config.label;
+    const desc = document.createElement('span');
+    desc.className = 'provider-desc';
+    desc.textContent = config.description;
+    details.append(name, desc);
+    info.appendChild(details);
+
+    if (config.dashboardUrl) {
+      const link = document.createElement('a');
+      link.href = '#';
+      link.className = 'provider-dashboard-link';
+      link.dataset.url = config.dashboardUrl;
+      link.title = 'View API keys';
+      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      icon.setAttribute('width', '14');
+      icon.setAttribute('height', '14');
+      icon.setAttribute('viewBox', '0 0 24 24');
+      icon.setAttribute('fill', 'none');
+      icon.setAttribute('stroke', 'currentColor');
+      icon.setAttribute('stroke-width', '2');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3');
+      icon.appendChild(path);
+      link.appendChild(icon);
+      info.appendChild(link);
+    }
+
+    const toggle = document.createElement('label');
+    toggle.className = 'toggle';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = config.toggleId;
+    const slider = document.createElement('span');
+    slider.className = 'toggle-slider';
+    toggle.append(checkbox, slider);
+
+    item.append(info, toggle);
+    list.appendChild(item);
+  }
+
+  list.dataset.registryRendered = 'true';
+}
+
 function loadProviderToggles(enabledProviders) {
+  renderRegistryProviderRows();
+  for (const config of Object.values(OPENAI_COMPATIBLE_PROVIDERS)) {
+    const checkbox = document.getElementById(config.toggleId);
+    if (checkbox) checkbox.checked = enabledProviders[config.id] === true;
+  }
   document.getElementById('providerGroq').checked = enabledProviders.groq !== false;
   document.getElementById('providerGoogle').checked = enabledProviders.google === true;
   document.getElementById('providerOpenAI').checked = enabledProviders.openai === true;
@@ -244,9 +323,9 @@ async function loadModels(enabledProviders, enabledModels, hiddenModels, selecte
   const customSavedModels = await getCustomSavedModels();
   const mergedModels = getMergedModelsWithCustom(ALL_MODELS, customSavedModels);
 
-  // Edge case: if leaving guest mode with Auto selected, fallback to Qwen 3.6 Vision
+  // Edge case: if leaving guest mode with Auto selected, fallback to Qwen 3.8 Vision
   if (!isGuestModeActive && selectedModel === 'groq:auto') {
-    selectedModel = 'qwen/qwen3.6-27b';
+    selectedModel = 'qwen/qwen3.8-27b';
     await chrome.storage.local.set({ selectedModel });
   }
 
@@ -589,17 +668,27 @@ function setupEventListeners() {
     });
   });
 
-  // Provider toggles
-  ['Groq', 'Google', 'OpenAI', 'OpenRouter', 'Ollama'].forEach(provider => {
-    const checkbox = document.getElementById('provider' + provider);
+  // Provider toggles (built-in rows plus the registry-rendered ones)
+  const providerToggles = [
+    ...['Groq', 'Google', 'OpenAI', 'OpenRouter', 'Ollama'].map(name => ({
+      toggleId: 'provider' + name,
+      providerKey: name.toLowerCase()
+    })),
+    ...Object.values(OPENAI_COMPATIBLE_PROVIDERS).map(config => ({
+      toggleId: config.toggleId,
+      providerKey: config.id
+    }))
+  ];
+
+  providerToggles.forEach(({ toggleId, providerKey }) => {
+    const checkbox = document.getElementById(toggleId);
     checkbox?.addEventListener('change', async () => {
       const result = await chrome.storage.local.get(['enabledProviders']);
       const enabledProviders = result.enabledProviders || DEFAULT_PROVIDERS;
-      const key = provider.toLowerCase();
-      enabledProviders[key] = checkbox.checked;
+      enabledProviders[providerKey] = checkbox.checked;
 
       await chrome.storage.local.set({ enabledProviders });
-      await trackProviderHidden(key, checkbox.checked);
+      await trackProviderHidden(providerKey, checkbox.checked);
       await loadSettings();
     });
   });
@@ -689,12 +778,12 @@ function setupEventListeners() {
     e.preventDefault();
     const confirmed = await confirmDialog({
       title: 'Reset all API keys',
-      message: 'This will clear all stored keys (Groq, Gemini, OpenAI, OpenRouter, and Ollama host).',
+      message: 'This will clear all stored provider keys and the Ollama host.',
       confirmText: 'Reset keys',
       danger: true
     });
     if (confirmed) {
-      await chrome.storage.local.remove(['groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost']);
+      await chrome.storage.local.remove(PROVIDER_STORAGE_KEYS);
       showToast('All API keys have been cleared.');
       await loadSettings(); // Reload to clear the input fields
     }
@@ -807,6 +896,23 @@ function setupEventListeners() {
     });
   }
 
+  // Window opacity setting
+  const windowOpacityInput = document.getElementById('windowOpacityInput');
+  const windowOpacityValue = document.getElementById('windowOpacityValue');
+  if (windowOpacityInput && windowOpacityValue) {
+    chrome.storage.local.get(['windowOpacity'], (res) => {
+      const val = res.windowOpacity !== undefined ? Number(res.windowOpacity) : 100;
+      windowOpacityInput.value = val;
+      windowOpacityValue.textContent = `${val}%`;
+    });
+
+    windowOpacityInput.addEventListener('input', () => {
+      const val = Math.max(0, Math.min(100, parseInt(windowOpacityInput.value, 10) || 0));
+      windowOpacityValue.textContent = `${val}%`;
+      chrome.storage.local.set({ windowOpacity: val });
+    });
+  }
+
   // Hide context menu toggle
   const hideContextMenuToggle = document.getElementById('hideContextMenu');
   if (hideContextMenuToggle) {
@@ -911,7 +1017,7 @@ async function deleteMode(modeId) {
 
 // --- SNIP FUNCTIONALITY ---
 async function startSnip() {
-  const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'selectedMode', 'groqKey', 'geminiKey', 'openaiKey', 'openrouterKey', 'ollamaHost']);
+  const result = await chrome.storage.local.get(['enabledProviders', 'selectedModel', 'selectedMode', ...PROVIDER_STORAGE_KEYS]);
   const modelSelect = document.getElementById('modelSelect');
   const modeSelect = document.getElementById('modeSelect');
   let model = modelSelect?.value || result.selectedModel || DEFAULT_MODEL;

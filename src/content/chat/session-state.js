@@ -59,7 +59,7 @@
         const usedOCR = apiResponse.usedOCR === true;
         const isGuestResponse = Boolean(apiResponse.guestInfo);
         const isVisionFallbackResponse = typeof responseModel === 'string' &&
-            responseModel.toLowerCase().includes('qwen3.6-27b');
+            /qwen3\.[68]-27b/.test(responseModel.toLowerCase());
         const assistantMetadata = {
             selectedModel,
             responseModel,

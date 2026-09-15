@@ -3,7 +3,7 @@
   "name": "Snip & Ask - AI Screen Assistant",
   "short_name": "Snip & Ask",
   "version": "2.0.1",
-  "description": "Snip any part of your screen and ask AI to explain, solve, or debug it. Supports Groq, Gemini, OpenAI, OpenRouter, and Ollama.",
+  "description": "Snip any part of your screen and ask AI to explain, solve, or debug it. Supports Groq, Gemini, OpenAI, DeepSeek, Kimi, GLM, Cerebras, and more.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -16,7 +16,12 @@
     "https://api.groq.com/*",
     "https://api.openai.com/*",
     "https://generativelanguage.googleapis.com/*",
-    "https://openrouter.ai/*"
+    "https://openrouter.ai/*",
+    "https://api.deepseek.com/*",
+    "https://api.cerebras.ai/*",
+    "https://api.z.ai/*",
+    "https://api.moonshot.ai/*",
+    "https://api.meta.ai/*"
   ],
   "optional_host_permissions": [
     "http://*/*",

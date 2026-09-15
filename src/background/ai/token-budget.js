@@ -8,7 +8,12 @@ const IMAGE_REMOVED_PLACEHOLDER = '[Image removed to fit context]';
 
 const MODEL_CONTEXT_BUDGETS = [
     { pattern: 'ollama:', contextWindow: 4096, maxOutputTokens: 2048 },
+    // Cerebras' free tier is 65k; match it before the generic gpt-oss entry.
+    { pattern: 'cerebras:', contextWindow: 65536, maxOutputTokens: 8192 },
 
+    { pattern: 'o3-mini', contextWindow: 200000, maxOutputTokens: 65536 },
+    { pattern: 'gpt-6', contextWindow: 1048576, maxOutputTokens: 128000 },
+    { pattern: 'gpt-5.6', contextWindow: 400000, maxOutputTokens: 128000 },
     { pattern: 'gpt-4.1', contextWindow: 1047576, maxOutputTokens: 32768 },
     { pattern: 'gpt-4o', contextWindow: 128000, maxOutputTokens: 16384 },
     { pattern: 'gpt-5', contextWindow: 400000, maxOutputTokens: 128000 },
@@ -21,10 +26,25 @@ const MODEL_CONTEXT_BUDGETS = [
 
     { pattern: 'groq:auto', contextWindow: 131072, maxOutputTokens: 8192 },
     { pattern: 'gpt-oss', contextWindow: 131072, maxOutputTokens: 32768 },
+    { pattern: 'qwen-3.8-27b', contextWindow: 65536, maxOutputTokens: 8192 },
     { pattern: 'qwen', contextWindow: 131072, maxOutputTokens: 32768 },
     { pattern: 'compound', contextWindow: 131072, maxOutputTokens: 8192 },
     { pattern: 'groq:', contextWindow: 131072, maxOutputTokens: 8192 },
-    { pattern: 'openrouter', contextWindow: 64000, maxOutputTokens: 8192 }
+    { pattern: 'openrouter', contextWindow: 64000, maxOutputTokens: 8192 },
+
+    // OpenAI-compatible BYOK providers (see models/provider-registry.js).
+    // Matched last so provider-scoped names above keep their own budgets.
+    // Both the scoped name ('zai:glm-5.3') and the bare id ('glm-5.3') resolve
+    // here, because providers strip their prefix before budgeting.
+    { pattern: 'deepseek-flash', contextWindow: 1000000, maxOutputTokens: 65536 },
+    { pattern: 'deepseek', contextWindow: 128000, maxOutputTokens: 8192 },
+    { pattern: 'glm-', contextWindow: 200000, maxOutputTokens: 16384 },
+    { pattern: 'kimi-k3', contextWindow: 1000000, maxOutputTokens: 32768 },
+    { pattern: 'kimi', contextWindow: 262144, maxOutputTokens: 32768 },
+    { pattern: 'muse-spark', contextWindow: 1048576, maxOutputTokens: 32768 },
+    { pattern: 'moonshot:', contextWindow: 262144, maxOutputTokens: 32768 },
+    { pattern: 'meta:', contextWindow: 1048576, maxOutputTokens: 32768 },
+    { pattern: 'zai:', contextWindow: 200000, maxOutputTokens: 16384 }
 ];
 
 function getBaseMaxTokensForMode(mode) {

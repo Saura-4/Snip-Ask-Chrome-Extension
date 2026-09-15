@@ -29,7 +29,7 @@ async function retryAssistantWithVision(ui, index) {
         if (ui._requestCancelled) return;
 
         if (response && response.success) {
-            const responseModel = response.responseModel || response.model || 'qwen/qwen3.6-27b';
+            const responseModel = response.responseModel || response.model || 'qwen/qwen3.8-27b';
             const metadata = ui._createAssistantMetadata(response, {
                 selectedModel: 'groq:auto',
                 responseModel,

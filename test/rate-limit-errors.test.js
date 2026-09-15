@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatRateLimitMessage } from '../src/background/ai/errors.js';
+import { formatRateLimitMessage, isContextLimitErrorMessage } from '../src/background/ai/errors.js';
 
 function fakeResponse(headers = {}, status = 429) {
     return {
@@ -52,6 +52,14 @@ test('handles retry-after-ms and compound durations', () => {
         'Groq'
     );
     assert.match(textOnly, /Resets in ~3 min/);
+});
+
+test('worker too-large responses map to the friendly shrink-your-snip message', () => {
+    // Mirrors guest-config.js: worker 413 bodies carry "request too large"
+    // wording, which routes to REQUEST_TOO_LARGE_MESSAGE.
+    assert.equal(isContextLimitErrorMessage('Request too large for the selected model.'), true);
+    assert.equal(isContextLimitErrorMessage('Request too large for model `openai/gpt-oss-120b`: please reduce your message size and try again.'), true);
+    assert.equal(isContextLimitErrorMessage('All Auto guest models are currently unavailable. Please try again later.'), false);
 });
 
 test('falls back to a generic nudge when no timing details exist', () => {

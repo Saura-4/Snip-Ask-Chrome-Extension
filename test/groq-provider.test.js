@@ -2,18 +2,30 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildGroqRequestBody } from '../src/background/ai/providers/groq.js';
 
-test('Qwen 3.6 direct requests use non-thinking final-answer mode', () => {
+test('Qwen 3.8 direct requests use non-thinking final-answer mode', () => {
     const request = buildGroqRequestBody({
         messages: [{ role: 'user', content: 'Summarize this.' }],
-        model: 'qwen/qwen3.6-27b',
+        model: 'qwen/qwen3.8-27b',
         mode: 'short'
     });
 
-    // Short mode requests 150 tokens, but the Qwen hidden-reasoning budget
-    // enforces a 1024 minimum so the model has room for a final answer.
-    assert.equal(request.max_completion_tokens, 1024);
+    // Short mode requests 150 tokens. Qwen must NOT be floored up: Groq
+    // on_demand enforces OTPM 1000, so any max above 1000 fails outright.
+    assert.equal(request.max_completion_tokens, 150);
     assert.equal(request.reasoning_effort, 'none');
     assert.equal(request.reasoning_format, 'hidden');
+});
+
+test('Qwen 3.8 large budgets are capped at the OTPM limit', () => {
+    const request = buildGroqRequestBody({
+        messages: [{ role: 'user', content: 'Write code.' }],
+        model: 'qwen/qwen3.8-27b',
+        mode: 'code'
+    });
+
+    // Code mode requests 1536 tokens; OTPM 1000 caps it.
+    assert.equal(request.max_completion_tokens, 1000);
+    assert.equal(request.reasoning_effort, 'none');
 });
 
 test('GPT OSS requests minimize hidden reasoning and enforce a completion floor', () => {

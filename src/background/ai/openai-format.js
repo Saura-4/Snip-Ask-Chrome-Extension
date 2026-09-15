@@ -1,8 +1,15 @@
 import { getMaxTokensForMode, getModelBudget } from './token-budget.js';
 
-function isGPT5Model(modelID) {
+function isGPT5OrNewerModel(modelID) {
     if (typeof modelID !== 'string') return false;
-    return modelID.toLowerCase().startsWith('gpt-5');
+    const lower = modelID.toLowerCase();
+    return lower.startsWith('gpt-5') || lower.startsWith('gpt-6');
+}
+
+function isReasoningOrAdvancedModel(modelID) {
+    if (typeof modelID !== 'string') return false;
+    const lower = modelID.toLowerCase();
+    return lower.startsWith('gpt-5') || lower.startsWith('gpt-6') || lower.startsWith('o1') || lower.startsWith('o3') || lower.startsWith('o4');
 }
 
 function buildOpenAICompatibleRequestBody(messages, model, mode) {
@@ -11,12 +18,12 @@ function buildOpenAICompatibleRequestBody(messages, model, mode) {
         model
     };
 
-    if (!isGPT5Model(model)) {
+    if (!isReasoningOrAdvancedModel(model)) {
         requestBody.temperature = 0.3;
     }
 
     const maxTokens = getMaxTokensForMode(mode, model);
-    if (isGPT5Model(model)) {
+    if (isReasoningOrAdvancedModel(model)) {
         requestBody.max_completion_tokens = maxTokens;
     } else {
         requestBody.max_tokens = maxTokens;
@@ -28,7 +35,7 @@ function buildOpenAICompatibleRequestBody(messages, model, mode) {
 function getOpenAIMaxOutputTokens(modelID, mode) {
     const baseTokens = getMaxTokensForMode(mode);
 
-    if (!isGPT5Model(modelID)) {
+    if (!isReasoningOrAdvancedModel(modelID)) {
         return baseTokens;
     }
 
@@ -105,7 +112,7 @@ function buildOpenAIResponsesRequestBody(messages, model, mode) {
         requestBody.instructions = systemMessages.join('\n\n');
     }
 
-    if (isGPT5Model(model)) {
+    if (isGPT5OrNewerModel(model)) {
         requestBody.reasoning = { effort: 'minimal' };
         requestBody.text = { verbosity: 'low' };
     }

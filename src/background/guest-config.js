@@ -8,6 +8,7 @@ import {
     extractErrorMessage,
     isContextLimitErrorMessage
 } from './ai/errors.js';
+import { OPENAI_COMPATIBLE_PROVIDERS, getProviderStorageKeys } from './models/provider-registry.js';
 
 // --- CONFIGURATION ---
 
@@ -21,7 +22,9 @@ const DEFAULT_PROVIDER_VISIBILITY = {
     google: false,
     openai: false,
     openrouter: false,
-    ollama: false
+    ollama: false,
+    // Registry providers are all opt-in.
+    ...Object.fromEntries(Object.keys(OPENAI_COMPATIBLE_PROVIDERS).map(id => [id, false]))
 };
 const GUEST_SAFE_PAYLOAD_LIMIT_BYTES = 700 * 1024;
 const GUEST_REQUEST_TIMEOUT_MS = 60000;
@@ -56,7 +59,8 @@ async function isGuestMode() {
         'geminiKey',
         'openaiKey',
         'openrouterKey',
-        'ollamaHost'
+        'ollamaHost',
+        ...getProviderStorageKeys()
     ]);
 
     const enabledProviders = {
@@ -71,8 +75,13 @@ async function isGuestMode() {
     const hasOpenRouterKey = enabledProviders.openrouter && storage.openrouterKey && storage.openrouterKey.trim().length > 0;
     const hasOllamaHost = enabledProviders.ollama && storage.ollamaHost && storage.ollamaHost.trim().length > 0;
 
+    const hasRegistryKey = Object.values(OPENAI_COMPATIBLE_PROVIDERS).some(config => {
+        const key = storage[config.storageKey];
+        return enabledProviders[config.id] && typeof key === 'string' && key.trim().length > 0;
+    });
+
     // Guest mode = NO keys entered at all
-    return !hasGroqKey && !hasGeminiKey && !hasOpenAIKey && !hasOpenRouterKey && !hasOllamaHost;
+    return !hasGroqKey && !hasGeminiKey && !hasOpenAIKey && !hasOpenRouterKey && !hasOllamaHost && !hasRegistryKey;
 }
 
 /**
@@ -196,6 +205,10 @@ async function makeGuestRequest(requestBody, externalSignal = null) {
 
     if (data.code === 'API_EXHAUSTED') {
         throw new Error(data.message || 'Service temporarily unavailable. Please try again in a few minutes.');
+    }
+
+    if (data.code === 'UNSUPPORTED_MODEL') {
+        throw new Error('This model needs your own API key — Guest Mode only covers the built-in Groq models. Add the provider key in Settings, or switch back to a Guest Mode model.');
     }
 
     if (data.code === 'MISSING_ID') {

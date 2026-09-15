@@ -1,4 +1,5 @@
 import { promptDialog } from './popup-dialogs.js';
+import { OPENAI_COMPATIBLE_PROVIDERS } from '../../background/models/provider-registry.js';
 
 export function getProvidersToShow(enabledProviders, isGuestModeActive, guestModeProviders) {
   return isGuestModeActive === true ? guestModeProviders : enabledProviders;
@@ -309,7 +310,7 @@ export async function promptForCustomModel(model) {
         if (!isLikelyValidGroqModelId(name)) {
             return {
                 cancelled: false,
-                error: 'Invalid Groq model ID. Use a full model ID like moonshotai/kimi-k2-instruct or qwen/qwen3.6-27b.'
+                error: 'Invalid Groq model ID. Use a full model ID like moonshotai/kimi-k2-instruct or qwen/qwen3.8-27b.'
             };
         }
         return {
@@ -409,6 +410,30 @@ export async function promptForCustomModel(model) {
       provider: 'openrouter',
       modelValue: `openrouter:${slug}`,
       displayName: formatOpenRouterDisplayName(slug)
+    };
+  }
+
+  // Registry providers (DeepSeek, Cerebras, Z.AI, Moonshot, Meta) all share the
+  // same "<provider>:custom" flow, described in models/provider-registry.js.
+  for (const config of Object.values(OPENAI_COMPATIBLE_PROVIDERS)) {
+    if (model !== `${config.id}:custom`) continue;
+
+    const name = await promptDialog({
+      title: config.customModel.title,
+      label: config.customModel.label,
+      placeholder: config.customModel.placeholder
+    });
+    if (!name) {
+      return { cancelled: true };
+    }
+    if (!config.customModel.pattern.test(name)) {
+      return { cancelled: false, error: config.customModel.error };
+    }
+    return {
+      cancelled: false,
+      provider: config.id,
+      modelValue: `${config.prefix}${name}`,
+      displayName: name
     };
   }
 

@@ -1,4 +1,5 @@
 # Cloudflare & Wrangler
+cloudflare-worker/
 .wrangler/
 .dev.vars
 wrangler.toml

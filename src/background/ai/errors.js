@@ -46,6 +46,29 @@ function isContextLimitErrorMessage(errorLike) {
         (lower.includes('exceed') || lower.includes('too large') || lower.includes('maximum') || lower.includes('limit'));
 }
 
+/**
+ * Detect "your account has no money" responses. Providers disagree wildly on
+ * the status code (DeepSeek 402, OpenAI 429 insufficient_quota, others 403),
+ * so the message text is the reliable signal.
+ */
+function isInsufficientBalanceMessage(errorLike) {
+    const message = extractErrorMessage(errorLike, '');
+    if (!message) return false;
+
+    const lower = message.toLowerCase();
+    return lower.includes('insufficient balance') ||
+        lower.includes('insufficient_quota') ||
+        lower.includes('insufficient quota') ||
+        lower.includes('insufficient credit') ||
+        lower.includes('exceeded your current quota') ||
+        lower.includes('balance is insufficient') ||
+        lower.includes('not enough balance') ||
+        lower.includes('no credit') ||
+        lower.includes('out of credit') ||
+        lower.includes('payment required') ||
+        lower.includes('billing') && lower.includes('activate');
+}
+
 function getProviderApiMessage(data) {
     return [
         typeof data?.error === 'string' ? data.error : null,
@@ -177,6 +200,9 @@ function normalizeProviderErrorMessage(response, data, provider) {
     const status = response.status;
     const apiMessage = getProviderApiMessage(data);
 
+    if (status === 402 || isInsufficientBalanceMessage(apiMessage)) {
+        return `Your ${provider} account is out of credit. Top up or add billing in the ${provider} console, then try again.`;
+    }
     if (status === 401) {
         return `Invalid ${provider} API key. Please check your key in extension settings.`;
     }
@@ -205,5 +231,6 @@ export {
     formatRateLimitMessage,
     getProviderApiMessage,
     isContextLimitErrorMessage,
+    isInsufficientBalanceMessage,
     normalizeProviderErrorMessage
 };

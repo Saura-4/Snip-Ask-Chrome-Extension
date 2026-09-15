@@ -4,6 +4,6 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/**/*.test.js",
-    "check": "node --check cloudflare-worker/worker.js && node --check src/background/models/model-routing.js && node --check src/background/ai/token-budget.js"
+    "check": "node --check src/background/models/model-routing.js && node --check src/background/ai/token-budget.js"
   }
 }

@@ -2,6 +2,24 @@
 // Centralized model definitions and provider configuration
 
 import { isGuestConfigured } from '../guest-config.js';
+import {
+    OPENAI_COMPATIBLE_PROVIDERS,
+    OPENAI_COMPATIBLE_PROVIDER_IDS,
+    buildModelOptions,
+    getProviderStorageKeys
+} from './provider-registry.js';
+
+/** Model lists for every registry provider, keyed by provider id. */
+function buildRegistryModelLists(chatOnly) {
+    return Object.fromEntries(
+        Object.values(OPENAI_COMPATIBLE_PROVIDERS).map(config => [config.id, buildModelOptions(config, chatOnly)])
+    );
+}
+
+/** Same flag for every registry provider (used to seed provider config objects). */
+function registryProviderFlags(value) {
+    return Object.fromEntries(OPENAI_COMPATIBLE_PROVIDER_IDS.map(id => [id, value]));
+}
 
 /**
  * All available models organized by provider
@@ -11,12 +29,14 @@ export const ALL_MODELS = {
         { value: 'groq:auto', name: 'Auto' },
         { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B (Fast)' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
-        { value: 'qwen/qwen3.6-27b', name: 'Qwen 3.6 27B (Vision)' },
+        { value: 'qwen/qwen3.8-27b', name: 'Qwen 3.8 27B (Vision)' },
         { value: 'groq/compound-mini', name: 'Compound Mini (Tools, Slower)' },
         { value: 'groq/compound', name: 'Compound (Tools, Slower)' },
         { value: 'groq:custom', name: 'Custom Model' }
     ],
     google: [
+        { value: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
+        { value: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Vision)' },
         { value: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite' },
         { value: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
         { value: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
@@ -25,11 +45,18 @@ export const ALL_MODELS = {
         { value: 'google:custom', name: 'Custom Model' }
     ],
     openai: [
+        { value: 'openai:gpt-6-astra', name: 'GPT-6 Astra (Vision)' },
+        { value: 'openai:gpt-5.6-sol', name: 'GPT-5.6 Sol (Vision)' },
+        { value: 'openai:gpt-5.6-terra', name: 'GPT-5.6 Terra (Vision)' },
+        { value: 'openai:gpt-5.6-luna', name: 'GPT-5.6 Luna (Vision)' },
+        { value: 'openai:gpt-5.4', name: 'GPT-5.4 (Vision)' },
+        { value: 'openai:gpt-5.4-mini', name: 'GPT-5.4 Mini (Vision)' },
         { value: 'openai:gpt-5.2', name: 'GPT-5.2 (Vision)' },
         { value: 'openai:gpt-5.1', name: 'GPT-5.1 (Vision)' },
         { value: 'openai:gpt-5', name: 'GPT-5 (Vision)' },
         { value: 'openai:gpt-5-mini', name: 'GPT-5 Mini (Vision)' },
         { value: 'openai:gpt-5-nano', name: 'GPT-5 Nano (Vision)' },
+        { value: 'openai:o3-mini', name: 'o3-mini' },
         { value: 'openai:gpt-4.1', name: 'GPT-4.1 (Vision)' },
         { value: 'openai:gpt-4.1-mini', name: 'GPT-4.1 Mini (Vision)' },
         { value: 'openai:gpt-4.1-nano', name: 'GPT-4.1 Nano (Vision)' },
@@ -39,6 +66,7 @@ export const ALL_MODELS = {
     ],
     openrouter: [
         { value: 'openrouter:openrouter/free', name: 'Free Router (Auto)' },
+        { value: 'openrouter:nvidia/nemotron-3.5-lightning:free', name: 'Nemotron 3.5 Lightning (Free)' },
         { value: 'openrouter:nvidia/nemotron-nano-9b-v2:free', name: 'Nemotron Nano 9B V2 (Free, Fast)' },
         { value: 'openrouter:openai/gpt-oss-20b:free', name: 'GPT OSS 20B (Free, Fast)' },
         { value: 'openrouter:nvidia/nemotron-3-nano-30b-a3b:free', name: 'Nemotron 3 Nano 30B (Free)' },
@@ -49,13 +77,19 @@ export const ALL_MODELS = {
         { value: 'openrouter:custom', name: 'Custom Model' }
     ],
     ollama: [
+        { value: 'ollama:llama4', name: 'Llama 4 (Vision)' },
+        { value: 'ollama:qwen3-vl', name: 'Qwen 3 VL (Vision)' },
+        { value: 'ollama:qwen3-coder', name: 'Qwen 3 Coder' },
+        { value: 'ollama:qwen3', name: 'Qwen 3' },
+        { value: 'ollama:deepseek-r1', name: 'DeepSeek R1' },
         { value: 'ollama:gemma3:4b', name: 'Gemma 3 4B' },
         { value: 'ollama:llama3', name: 'Llama 3' },
         { value: 'ollama:mistral', name: 'Mistral' },
         { value: 'ollama:llava', name: 'LLaVA (Vision)' },
         { value: 'ollama:moondream', name: 'Moondream (Vision)' },
         { value: 'ollama:custom', name: 'Custom Model' }
-    ]
+    ],
+    ...buildRegistryModelLists(false)
 };
 
 /**
@@ -66,11 +100,13 @@ export const CHAT_WINDOW_MODELS = {
         { value: 'groq:auto', name: 'Auto' },
         { value: 'openai/gpt-oss-20b', name: 'GPT OSS 20B' },
         { value: 'openai/gpt-oss-120b', name: 'GPT OSS 120B' },
-        { value: 'qwen/qwen3.6-27b', name: 'Qwen 3.6 27B' },
+        { value: 'qwen/qwen3.8-27b', name: 'Qwen 3.8 27B' },
         { value: 'groq/compound-mini', name: 'Compound Mini' },
         { value: 'groq/compound', name: 'Compound' }
     ],
     google: [
+        { value: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
+        { value: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro' },
         { value: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite' },
         { value: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
         { value: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
@@ -78,11 +114,18 @@ export const CHAT_WINDOW_MODELS = {
         { value: 'gemma-3-27b-it', name: 'Gemma 3 27B' }
     ],
     openai: [
+        { value: 'openai:gpt-6-astra', name: 'GPT-6 Astra' },
+        { value: 'openai:gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+        { value: 'openai:gpt-5.6-terra', name: 'GPT-5.6 Terra' },
+        { value: 'openai:gpt-5.6-luna', name: 'GPT-5.6 Luna' },
+        { value: 'openai:gpt-5.4', name: 'GPT-5.4' },
+        { value: 'openai:gpt-5.4-mini', name: 'GPT-5.4 Mini' },
         { value: 'openai:gpt-5.2', name: 'GPT-5.2' },
         { value: 'openai:gpt-5.1', name: 'GPT-5.1' },
         { value: 'openai:gpt-5', name: 'GPT-5' },
         { value: 'openai:gpt-5-mini', name: 'GPT-5 Mini' },
         { value: 'openai:gpt-5-nano', name: 'GPT-5 Nano' },
+        { value: 'openai:o3-mini', name: 'o3-mini' },
         { value: 'openai:gpt-4.1', name: 'GPT-4.1' },
         { value: 'openai:gpt-4.1-mini', name: 'GPT-4.1 Mini' },
         { value: 'openai:gpt-4.1-nano', name: 'GPT-4.1 Nano' },
@@ -91,6 +134,7 @@ export const CHAT_WINDOW_MODELS = {
     ],
     openrouter: [
         { value: 'openrouter:openrouter/free', name: 'Free Router' },
+        { value: 'openrouter:nvidia/nemotron-3.5-lightning:free', name: 'Nemotron 3.5 Lightning' },
         { value: 'openrouter:nvidia/nemotron-nano-9b-v2:free', name: 'Nemotron Nano 9B' },
         { value: 'openrouter:openai/gpt-oss-20b:free', name: 'GPT OSS 20B' },
         { value: 'openrouter:nvidia/nemotron-3-nano-30b-a3b:free', name: 'Nemotron 3 Nano 30B' },
@@ -100,9 +144,14 @@ export const CHAT_WINDOW_MODELS = {
         { value: 'openrouter:deepseek/deepseek-r1-0528:free', name: 'DeepSeek R1' }
     ],
     ollama: [
-        { value: 'ollama:llama3', name: 'Ollama Llama 3' },
+        { value: 'ollama:llama4', name: 'Ollama Llama 4' },
+        { value: 'ollama:qwen3-vl', name: 'Ollama Qwen 3 VL' },
+        { value: 'ollama:qwen3-coder', name: 'Ollama Qwen 3 Coder' },
+        { value: 'ollama:qwen3', name: 'Ollama Qwen 3' },
+        { value: 'ollama:deepseek-r1', name: 'Ollama DeepSeek R1' },
         { value: 'ollama:gemma3:4b', name: 'Ollama Gemma 3' }
-    ]
+    ],
+    ...buildRegistryModelLists(true)
 };
 
 /**
@@ -113,7 +162,8 @@ export const PROVIDER_LABELS = {
     google: 'Gemini',
     openai: 'OpenAI',
     openrouter: 'OpenRouter',
-    ollama: 'Ollama (Local)'
+    ollama: 'Ollama (Local)',
+    ...Object.fromEntries(Object.values(OPENAI_COMPATIBLE_PROVIDERS).map(config => [config.id, config.label]))
 };
 
 /**
@@ -124,7 +174,8 @@ export const DEFAULT_PROVIDERS = {
     google: false,
     openai: false,
     openrouter: false,
-    ollama: false
+    ollama: false,
+    ...registryProviderFlags(false)
 };
 
 /**
@@ -135,7 +186,8 @@ export const GUEST_MODE_PROVIDERS = {
     google: false,
     openai: false,
     openrouter: false,
-    ollama: false
+    ollama: false,
+    ...registryProviderFlags(false)
 };
 
 /**
@@ -157,10 +209,17 @@ export function getDefaultEnabledModels() {
  * Get saved custom models from storage
  * @returns {Promise<Object>} Object with arrays of custom models per provider
  */
+function emptyCustomModelBuckets() {
+    return {
+        groq: [], google: [], openai: [], ollama: [], openrouter: [],
+        ...Object.fromEntries(OPENAI_COMPATIBLE_PROVIDER_IDS.map(id => [id, []]))
+    };
+}
+
 export async function getCustomSavedModels() {
     try {
         const result = await chrome.storage.local.get(['customSavedModels']);
-        const customSavedModels = result.customSavedModels || { groq: [], google: [], openai: [], ollama: [], openrouter: [] };
+        const customSavedModels = result.customSavedModels || emptyCustomModelBuckets();
         let changed = false;
 
         for (const models of Object.values(customSavedModels)) {
@@ -183,7 +242,7 @@ export async function getCustomSavedModels() {
         return customSavedModels;
     } catch (e) {
         console.error('Failed to get custom saved models:', e);
-        return { groq: [], google: [], openai: [], ollama: [], openrouter: [] };
+        return emptyCustomModelBuckets();
     }
 }
 
@@ -370,7 +429,8 @@ export async function checkGuestModeStatus() {
             'geminiKey',
             'openaiKey',
             'openrouterKey',
-            'ollamaHost'
+            'ollamaHost',
+            ...getProviderStorageKeys()
         ]);
 
         const enabledProviders = {
@@ -385,8 +445,13 @@ export async function checkGuestModeStatus() {
         const hasOpenRouterKey = enabledProviders.openrouter && storage.openrouterKey && storage.openrouterKey.trim().length > 0;
         const hasOllamaHost = enabledProviders.ollama && storage.ollamaHost && storage.ollamaHost.trim().length > 0;
 
+        const hasRegistryKey = Object.values(OPENAI_COMPATIBLE_PROVIDERS).some(config => {
+            const key = storage[config.storageKey];
+            return enabledProviders[config.id] && typeof key === 'string' && key.trim().length > 0;
+        });
+
         // Guest mode = NO keys entered at all
-        const isGuestMode = !hasGroqKey && !hasGeminiKey && !hasOpenAIKey && !hasOpenRouterKey && !hasOllamaHost;
+        const isGuestMode = !hasGroqKey && !hasGeminiKey && !hasOpenAIKey && !hasOpenRouterKey && !hasOllamaHost && !hasRegistryKey;
 
         return {
             isGuestMode,

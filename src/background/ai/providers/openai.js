@@ -21,6 +21,17 @@ class OpenAICompatibleService extends AbstractAIService {
         this.headers = options.headers || {};
         this.timeoutMs = options.timeoutMs || CLOUD_TIMEOUT_MS;
         this.extraBody = options.extraBody || null;
+        // Providers that cannot take image input (or models that can't) must get
+        // a text-only payload; otherwise the request fails on the provider side.
+        this.supportsVision = options.supportsVision !== false;
+    }
+
+    _stripImageParts(messages) {
+        return messages.map(msg => {
+            if (!Array.isArray(msg.content)) return msg;
+            const textParts = msg.content.filter(p => p.type === 'text').map(p => p.text);
+            return { ...msg, content: textParts.join('\n') || 'Analyze this content.' };
+        });
     }
 
     async chat(messages, signal = null, onDelta = null) {
@@ -28,7 +39,8 @@ class OpenAICompatibleService extends AbstractAIService {
         if (finalMessages.length === 0 || finalMessages[0].role !== 'system') {
             finalMessages.unshift({ role: "system", content: this._getSystemInstruction() });
         }
-        const requestMessages = getBudgetedMessages(finalMessages, this.actualModel, this.mode);
+        const visionSafeMessages = this.supportsVision ? finalMessages : this._stripImageParts(finalMessages);
+        const requestMessages = getBudgetedMessages(visionSafeMessages, this.actualModel, this.mode);
 
         const requestBody = buildOpenAICompatibleRequestBody(requestMessages, this.actualModel, this.mode);
         if (this.extraBody) {
@@ -83,6 +95,21 @@ class OpenAICompatibleService extends AbstractAIService {
 
     async askImage(base64Image, signal = null) {
         const promptText = this._createImagePrompt();
+
+        if (!this.supportsVision) {
+            const textOnlyMsg = {
+                role: "user",
+                content: promptText + "\n\n[Image provided but model doesn't support vision]"
+            };
+            const textOnlyResult = await this.chat([textOnlyMsg], signal);
+            return {
+                answer: textOnlyResult.text,
+                model: textOnlyResult.model,
+                tokenUsage: textOnlyResult.tokenUsage,
+                initialUserMessage: textOnlyMsg
+            };
+        }
+
         const userMsg = {
             role: "user",
             content: [
