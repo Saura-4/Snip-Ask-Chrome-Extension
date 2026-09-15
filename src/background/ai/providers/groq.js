@@ -18,9 +18,9 @@ function isGptOssModel(modelName) {
 // visible text. Without a floor, small modes (short = 150) are consumed
 // entirely by reasoning and the model returns an empty answer.
 const REASONING_MODEL_MIN_COMPLETION_TOKENS = 1024;
-// Groq on_demand enforces OTPM 1000 on qwen: any larger max fails
-// deterministically ("Request too large ... OTPM: Limit 1000").
-const QWEN_MAX_OUTPUT_TOKENS = 1000;
+// Groq on_demand enforces OTPM 1000 on qwen. Cap at 450 so that users can
+// make 2-3 requests per minute without exhausting the 1000 OTPM rate-limit bucket.
+const QWEN_MAX_OUTPUT_TOKENS = 450;
 
 function applyReasoningModelGuards(requestBody, modelName) {
     if (isQwenReasoningModel(modelName)) {

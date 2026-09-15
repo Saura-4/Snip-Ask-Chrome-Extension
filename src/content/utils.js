@@ -378,8 +378,8 @@ function attachCodeBlockCopyHandlers(container) {
 
 // --- Image Processing ---
 
-// Max dimension to prevent huge payloads on 4K monitors (APIs may reject or timeout)
-const MAX_IMAGE_DIMENSION = 1536;
+// Max dimension to prevent huge token payloads and OTPM/ITPM rate limits
+const MAX_IMAGE_DIMENSION = 850;
 
 function cropImage(base64Full, rect, callback, onError = () => {}) {
   const img = new Image();

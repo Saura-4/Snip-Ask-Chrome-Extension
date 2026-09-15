@@ -16,15 +16,15 @@ test('Qwen 3.8 direct requests use non-thinking final-answer mode', () => {
     assert.equal(request.reasoning_format, 'hidden');
 });
 
-test('Qwen 3.8 large budgets are capped at the OTPM limit', () => {
+test('Qwen 3.8 large budgets are capped at the OTPM rate limit safe cap', () => {
     const request = buildGroqRequestBody({
         messages: [{ role: 'user', content: 'Write code.' }],
         model: 'qwen/qwen3.8-27b',
         mode: 'code'
     });
 
-    // Code mode requests 1536 tokens; OTPM 1000 caps it.
-    assert.equal(request.max_completion_tokens, 1000);
+    // Code mode requests 1536 tokens; capped at 450 to protect 1000 OTPM rate limit.
+    assert.equal(request.max_completion_tokens, 450);
     assert.equal(request.reasoning_effort, 'none');
 });
 

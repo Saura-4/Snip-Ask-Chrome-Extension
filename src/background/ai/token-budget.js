@@ -26,6 +26,10 @@ const MODEL_CONTEXT_BUDGETS = [
 
     { pattern: 'groq:auto', contextWindow: 131072, maxOutputTokens: 8192 },
     { pattern: 'gpt-oss', contextWindow: 131072, maxOutputTokens: 32768 },
+    // Groq Qwen on_demand enforces 7000 ITPM and 1000 OTPM. Bound budget so history
+    // pruning triggers before exceeding Groq's tight per-minute rate limit.
+    { pattern: 'qwen3.8-27b', contextWindow: 4000, maxOutputTokens: 450 },
+    { pattern: 'qwen3.6-27b', contextWindow: 4000, maxOutputTokens: 450 },
     { pattern: 'qwen-3.8-27b', contextWindow: 65536, maxOutputTokens: 8192 },
     { pattern: 'qwen', contextWindow: 131072, maxOutputTokens: 32768 },
     { pattern: 'compound', contextWindow: 131072, maxOutputTokens: 8192 },
